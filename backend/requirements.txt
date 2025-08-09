@@ -1,0 +1,11 @@
+huggingface_hub
+fastapi
+uvicorn
+torch>=2.0
+transformers
+audiocraft
+huggingface_hub
+pydub
+scipy
+numpy
+python-multipart

@@ -1,0 +1,15 @@
+Rát quan trọng: có thể băm nhỏ các hàm của code tổng ra để debug dễ dàng
+torchao (torch advanced optimization) yêu cầu PyTorch >= 2.3 kèm theo Triton và sparse ops.
+
+Nhưng môi trường hiện tại của bạn (Kaggle hoặc Colab) có thể đang dùng PyTorch thấp hơn 2.3 hoặc không build với support Triton/sparse.
+Hiện tại đã sửa được lỗi không tương thích giữa các phiên bản, bằng cách bỏ qua lỗi đó, dùng code=( bark_model = BarkModel.from_pretrained("suno/bark-small", use_safetensors=True).to(device))
+
+***Kết quả đạt dược(test1): melody tốt(12s), lyric tệ, mix all tệ.
+Đổi model, không sinh lyrics từ gpt2 mà đổi thành 1file py tự tạo dùng lstm.
+Kết quả đạt được với 10epoch: có sinh được lyric nhưng từ ngữ vô nghĩa.
+Cải tiến bằng cách tăng cường epoch=100 để mô hình đủ dữ liệu. Kết quả cho ra vẫn như cũ
+cải tiến bằng cách tăng thêm layer cho lstm. Epoch=10: có cấu trúc khá ổn, ngữ nghĩa vẫn không ổn.
+Dã thử nghiệm feed lyrics 1 bài hát hoàn chỉnh nhưng k có model sing ổn(diffsinger+ vi-svs). Tạm dừng ở bark. Tiếp tục đợi hoàn chỉnh model sinh lyrics rồi ghép vào code tổng.
+
+model sinh lyric = gpt2 đang gặp vấn đề về độ dài + tính hợp lý. Chủ yếu nằm ở việc thay đổi top_p, max_length và prompt. Số lượng bài hát 20 bài feed vào model hiện đang là ít nên có thể model chưa học được quá nhiều.
+Tôi đã tìm dược 1 model finetuned trên hugging face, nhưng vấn đề là phải đăng nhập huggingface cli + tokenizer phải dùng chuẩn là "gpt2" thay vì như trong repo giới thiệu cách sử dụng.
