@@ -1,11 +1,9 @@
 huggingface_hub
 fastapi
 uvicorn
-torch>=2.0
 transformers
-audiocraft
-huggingface_hub
+audiocraft  # will pick latest v1.3.0
 pydub
 scipy
-numpy
+numpy<2
 python-multipart
