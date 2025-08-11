@@ -1,19 +1,50 @@
-name: CI/CD Build and Deploy
-
+name: Deploy chatbot to Cloud Run
+#ver1
 on:
   push:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
-  build:
+  deploy:
+    name: Build and Deploy Chatbot
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
+    - name: Checkout repository
       uses: actions/checkout@v3
+      
+    - name: Decode service account key
+      run: echo "${{ secrets.GCP_SA_KEY }}" | base64 --decode > key.json
+      
+    - name: Set up gcloud CLI
+      uses: google-github-actions/setup-gcloud@v1
+      with:
+        project_id: total-market-468001-e1
+        service_account_key: $${{ secrets.GCP_SA_KEY }}
+        export_default_credentials: true
+    - name: Authenticate with service account
+      run: |
+        gcloud auth activate-service-account genmusic@total-market-468001-e1.iam.gserviceaccount.com --key-file=key.json
+        gcloud config set account genmusic@total-market-468001-e1.iam.gserviceaccount.com
+        gcloud config set project total-market-468001-e1
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
+    - name: Enable required APIs
+      run: |
+        gcloud services enable run.googleapis.com
+        gcloud services enable cloudbuild.googleapis.com
 
-    - name: Build Docker images
-      run: docker-compose build
+    - name: Build and push Docker image
+      run: |
+        gcloud builds submit --tag gcr.io/total-market-468001-e1/genmusic .
+
+    - name: Deploy to Cloud Run
+      run: |
+        gcloud run deploy chatbot \
+          --image gcr.io/total-market-468001-e1/genmusic \
+          --region asia-southeast1 \
+          --platform managed \
+          --allow-unauthenticated \
+          --timeout=600s \
+          --memory=1Gi
+    
