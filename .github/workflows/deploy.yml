@@ -7,7 +7,7 @@ on:
 
 jobs:
   deploy:
-    name: Build and Deploy Chatbot
+    name: Build and Deploy Genmusic
     runs-on: ubuntu-latest
 
     steps:
@@ -40,11 +40,11 @@ jobs:
 
     - name: Deploy to Cloud Run
       run: |
-        gcloud run deploy chatbot \
+        gcloud run deploy genmusic \
           --image gcr.io/total-market-468001-e1/genmusic \
           --region asia-southeast1 \
           --platform managed \
           --allow-unauthenticated \
           --timeout=600s \
-          --memory=1Gi
+          --memory=3Gi
     
