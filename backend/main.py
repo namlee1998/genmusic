@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # ==============================
 app = FastAPI()
 
-# Enable CORS
+# Enable CORS (nếu frontend và backend chung domain thì có thể bỏ)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -37,13 +37,11 @@ BASE_DIR = "generated_songs"
 # Serve static frontend files
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
 
-
 # ==============================
 # Request model
 # ==============================
 class PromptRequest(BaseModel):
     prompt: str
-
 
 # ==============================
 # Music generator init
@@ -55,7 +53,6 @@ try:
 except Exception as e:
     logger.error(f"❌ Error initializing MusicGenerator: {e}")
     generator = None
-
 
 # ==============================
 # API endpoints
