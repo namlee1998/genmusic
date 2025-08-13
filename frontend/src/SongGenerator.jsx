@@ -8,29 +8,40 @@ export default function SongGenerator() {
 
   const generateSong = async (prompt) => {
     setLoading(true);
-    const res = await fetch("https://genmusic-486965435366.asia-southeast1.run.app/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
-    });
+    try {
+      // ✅ Gọi API tương đối → tránh lỗi HTTPS/CORS
+      const res = await fetch("/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
 
-    const data = await res.json();
-    setLyrics(data.lyrics);
-    setAudioUrl("/download"); // endpoint tải bài hát từ backend
+      if (!res.ok) {
+        throw new Error("Failed to generate song");
+      }
+
+      const data = await res.json();
+      setLyrics(data.lyrics || "");
+      setAudioUrl("/download"); // ✅ File tải từ cùng domain
+    } catch (err) {
+      console.error(err);
+      alert("Error generating song!");
+    }
     setLoading(false);
   };
-  
-	const downloadSong = () => {
-  window.open("/download", "music");
-};
+
+  const downloadSong = () => {
+    window.open("/download", "music"); // ✅ Cùng domain
+  };
+
   return (
     <div className="min-h-screen bg-transparent flex flex-col items-center justify-center text-center p-6 space-y-6">
       <h1 className="text-4xl font-bold text-teal-500">Ai Music Generation</h1>
-	  <img
-		  src="/image/note.jpeg"
-		  alt="Song illustration"
-		  className="w-72 h-72 object-cover rounded shadow"
-	  />
+      <img
+        src="/image/note.jpeg"
+        alt="Song illustration"
+        className="w-72 h-72 object-cover rounded shadow"
+      />
       <p className="text-black font-semibold text-lg">Type in your mind</p>
 
       <input
