@@ -10,7 +10,7 @@ export default function SongGenerator() {
     setLoading(true);
     try {
       // ✅ Gọi API tương đối → tránh lỗi HTTPS/CORS
-      const res = await fetch("/generate", {
+      const res = await fetch("/api/generate"
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt }),
@@ -22,7 +22,7 @@ export default function SongGenerator() {
 
       const data = await res.json();
       setLyrics(data.lyrics || "");
-      setAudioUrl("/download"); // ✅ File tải từ cùng domain
+      setAudioUrl("/api/download"); // ✅ File tải từ cùng domain
     } catch (err) {
       console.error(err);
       alert("Error generating song!");
