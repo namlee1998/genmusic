@@ -56,7 +56,7 @@ except Exception as e:
 # ==============================
 # API endpoints
 # ==============================
-@app.post("/generate")
+@app.post("/api/generate")
 async def generate_song(request: PromptRequest):
     if generator is None:
         return JSONResponse({"error": "Music generator not initialized"}, status_code=500)
@@ -71,7 +71,7 @@ async def generate_song(request: PromptRequest):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@app.get("/download")
+@app.get("/api/download")
 async def download_song():
     song_path = os.path.join(BASE_DIR, "final_song.wav")
     logger.info(f"📥 Download request received. Checking: {song_path}")
