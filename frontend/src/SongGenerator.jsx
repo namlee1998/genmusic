@@ -8,7 +8,7 @@ export default function SongGenerator() {
 
   const generateSong = async (prompt) => {
     setLoading(true);
-    const res = await fetch("https://genmusic-486965435366.asia-southeast1.run.app", {
+    const res = await fetch("https://genmusic-486965435366.asia-southeast1.run.app/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt }),
