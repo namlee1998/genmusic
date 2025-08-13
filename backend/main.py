@@ -34,8 +34,7 @@ app.add_middleware(
 STATIC_DIR = "static"
 BASE_DIR = "generated_songs"
 
-# Serve static frontend files
-app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+
 
 # ==============================
 # Request model
@@ -83,3 +82,5 @@ async def download_song():
 
     logger.warning("⚠️ Song file not found.")
     return JSONResponse({"error": "Song not found"}, status_code=404)
+# Serve static frontend files
+app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
