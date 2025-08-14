@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # ==============================
 app = FastAPI()
 
-# Enable CORS (nếu frontend và backend chung domain thì có thể bỏ)
+# Enable CORS (nếu frontend và backend chung domain thì có thể giới hạn lại)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -31,10 +31,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Static + generated dirs
 STATIC_DIR = "static"
-BASE_DIR = "generated_songs"
+# đặt thư mục generated vào /tmp để chắc có quyền ghi trên Cloud Run
+BASE_DIR = os.environ.get("GENERATED_DIR", "/tmp/generated_songs")
 
-
+# đảm bảo thư mục tồn tại
+os.makedirs(BASE_DIR, exist_ok=True)
 
 # ==============================
 # Request model
@@ -63,11 +66,13 @@ async def generate_song(request: PromptRequest):
 
     logger.info(f"🎤 Received prompt: {request.prompt}")
     try:
+        # IMPORTANT: giữ nguyên logic sync: generator.generate_all(...) trả về dict kết quả
         result = generator.generate_all(request.prompt)
+        # Nếu generator lưu file, hãy đảm bảo path là BASE_DIR/final_song.wav
         logger.info("🎶 Song generation completed.")
         return JSONResponse(result)
     except Exception as e:
-        logger.error(f"❌ Error during song generation: {e}")
+        logger.exception("❌ Error during song generation")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
@@ -82,5 +87,13 @@ async def download_song():
 
     logger.warning("⚠️ Song file not found.")
     return JSONResponse({"error": "Song not found"}, status_code=404)
-# Serve static frontend files
+
+# Serve static frontend files (mount last so /api/* không bị ghi đè)
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+
+
+# Run with `python main.py` for local development
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, log_level="info")
