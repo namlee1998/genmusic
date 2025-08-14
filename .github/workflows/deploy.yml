@@ -46,5 +46,6 @@ jobs:
           --platform managed \
           --allow-unauthenticated \
           --timeout=600s \
-          --memory=3Gi
+          --cpu=4 \
+          --memory=16Gi
     
