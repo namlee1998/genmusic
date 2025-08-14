@@ -16,21 +16,25 @@ export default function SongGenerator() {
       });
 
       if (!res.ok) {
-        throw new Error("Failed to generate song");
+        // đọc message chi tiết từ backend
+        const text = await res.text();
+        throw new Error(text || "Failed to generate song");
       }
 
       const data = await res.json();
       setLyrics(data.lyrics || "");
-      setAudioUrl("/api/download"); // ✅ File tải từ cùng domain
+      // set audioUrl tới đúng endpoint backend
+      setAudioUrl("/api/download");
     } catch (err) {
       console.error(err);
-      alert("Error generating song!");
+      alert("Error generating song: " + (err.message || ""));
     }
     setLoading(false);
   };
 
   const downloadSong = () => {
-    window.open("/download", "music"); // ✅ Cùng domain
+    // open đúng đường dẫn của backend
+    window.open("/api/download", "_blank");
   };
 
   return (
@@ -70,6 +74,10 @@ export default function SongGenerator() {
       {audioUrl && (
         <a
           href={audioUrl}
+          onClick={(e) => {
+            // nếu muốn vẫn dùng target blank
+            // e.preventDefault(); downloadSong();
+          }}
           download
           className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded inline-flex items-center gap-2"
         >
