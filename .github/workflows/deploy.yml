@@ -21,7 +21,7 @@ jobs:
       uses: google-github-actions/setup-gcloud@v1
       with:
         project_id: total-market-468001-e1
-        service_account_key: $${{ secrets.GCP_SA_KEY }}
+        service_account_key: ${{ secrets.GCP_SA_KEY }}
         export_default_credentials: true
     - name: Authenticate with service account
       run: |
