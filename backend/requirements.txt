@@ -7,4 +7,4 @@ pydub
 scipy
 numpy<2
 python-multipart
-torch>=2.1.1
+torch>=2.1.1+cpu -f https://download.pytorch.org/whl/torch_stable.html
