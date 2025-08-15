@@ -80,7 +80,6 @@ class MusicGenerator:
             "facebook/musicgen-small",
             device=self.device
         )
-        musicgen.to(torch.float16) 
         musicgen.set_generation_params(duration=duration, top_k=250, temperature=1.0)
         with torch.no_grad():
             wav = musicgen.generate([prompt])[0].cpu().numpy()
