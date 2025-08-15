@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --upgrade pip setuptools wheel
+RUN pip install --no-cache-dir torch>=2.1.1
 
 WORKDIR /app
 
