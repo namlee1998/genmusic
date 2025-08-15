@@ -47,5 +47,6 @@ jobs:
           --allow-unauthenticated \
           --timeout=600s \
           --cpu=4 \
+          --max-instances 1 \
           --memory=16Gi
     
