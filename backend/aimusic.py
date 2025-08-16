@@ -1,8 +1,10 @@
 import os, torch, numpy as np, traceback, gc
 import scipy.io.wavfile as wavfile
-from transformers import AutoProcessor, BarkModel, GPT2Tokenizer, GPT2LMHeadModel
+from transformers import GPT2Tokenizer, GPT2LMHeadModel
 from audiocraft.models import MusicGen
 from pydub import AudioSegment
+from bark import generate_audio, SAMPLE_RATE
+
 
 class MusicGenerator:
     def __init__(self, base_dir="generated_songs", segment_dir="segments", mixed_dir="mixed_segments"):
@@ -17,12 +19,13 @@ class MusicGenerator:
         os.makedirs(self.SEGMENT_DIR, exist_ok=True)
         os.makedirs(self.MIXED_DIR, exist_ok=True)
 
-        # Lazy load models (None until used)
+        # Lazy load models
         self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
         self.lyric_model = None
-        self.bark_processor = None
-        self.bark_model = None
 
+    # ================================
+    # Lyrics generation
+    # ================================
     def _load_lyric_model(self):
         if self.lyric_model is None:
             self.lyric_model = GPT2LMHeadModel.from_pretrained(
@@ -35,24 +38,6 @@ class MusicGenerator:
             del self.lyric_model
             self.lyric_model = None
             gc.collect()
-
-    def _load_bark(self):
-        if self.bark_processor is None or self.bark_model is None:
-            self.bark_processor = AutoProcessor.from_pretrained("suno/bark-small")
-            self.bark_model = BarkModel.from_pretrained(
-                "suno/bark-small",
-                use_safetensors=True,
-                torch_dtype=self.torch_dtype
-            ).to(self.device)
-
-    def _unload_bark(self):
-        if self.bark_model:
-            del self.bark_model
-            self.bark_model = None
-        if self.bark_processor:
-            del self.bark_processor
-            self.bark_processor = None
-        gc.collect()
 
     def generate_lyrics(self, prompt, max_length=100):
         self._load_lyric_model()
@@ -75,6 +60,9 @@ class MusicGenerator:
         words = lyrics.strip().split()
         return [' '.join(words[i:i+max_words]) for i in range(0, len(words), max_words)]
 
+    # ================================
+    # Melody generation with MusicGen
+    # ================================
     def generate_melody(self, prompt, duration=30):
         musicgen = MusicGen.get_pretrained(
             "facebook/musicgen-small",
@@ -95,28 +83,34 @@ class MusicGenerator:
         wavfile.write(out_path, 32000, (wav * 32767).astype(np.int16))
         return out_path
 
+    # ================================
+    # Singing voice synthesis with Bark
+    # ================================
     def synth_segment(self, text, index, voice_preset="v2/en_speaker_9"):
-        self._load_bark()
         out_path = os.path.join(self.SEGMENT_DIR, f"segment_{index:03d}.wav")
         try:
-            inputs = self.bark_processor(text=f"♪ {text} ♪", voice_preset=voice_preset, return_tensors="pt")
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
-            with torch.no_grad():
-                audio = self.bark_model.generate(**inputs)
-            audio = audio.cpu().numpy().squeeze()
-            wavfile.write(out_path, self.bark_model.generation_config.sample_rate, audio)
+            # Trick Bark to sing by wrapping lyrics with musical notes
+            input_text = f"♪ {text} ♪"
+
+            audio_array = generate_audio(
+                input_text,
+                history_prompt=voice_preset
+            )
+            wavfile.write(out_path, SAMPLE_RATE, audio_array)
         except Exception as e:
             print(f"Error at segment {index}: {e}")
             traceback.print_exc()
             return None
-        finally:
-            self._unload_bark()
         return out_path
 
+    # ================================
+    # Mixing and concatenation
+    # ================================
     def mix_segment(self, melody_path, voice_path, out_path):
         melody = AudioSegment.from_wav(melody_path)
         voice = AudioSegment.from_wav(voice_path)
         voice = voice + AudioSegment.silent(duration=max(0, len(melody) - len(voice)))
+
         mixed = melody - 5
         voice = voice + 5
         final = mixed.overlay(voice).fade_in(300).fade_out(300)
@@ -133,6 +127,9 @@ class MusicGenerator:
         combined.export(final_path, format="wav")
         return final_path
 
+    # ================================
+    # Full pipeline
+    # ================================
     def generate_all(self, prompt):
         lyrics = self.generate_lyrics(prompt)
         segments = self.split_lyrics(lyrics)
