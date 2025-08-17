@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3-dev \
     ffmpeg \
+    git \                 # 👈 thêm git tại đây
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --upgrade pip setuptools wheel
@@ -39,11 +40,12 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    git \                 # 👈 vẫn giữ git ở đây nếu backend cần gọi git runtime
     && rm -rf /var/lib/apt/lists/*
-RUN apt-get update && apt-get install -y git build-essential && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
+
 # Copy site-packages and bin from builder to final (keep image smaller than copying whole /usr/local)
 COPY --from=backend-builder /usr/local/lib/python3.10 /usr/local/lib/python3.10
 COPY --from=backend-builder /usr/local/bin /usr/local/bin
@@ -53,9 +55,9 @@ COPY backend/ .
 
 # Copy built React into static folder that FastAPI serves
 COPY --from=frontend-builder /frontend/build ./static
+
 ENV PYTORCH_ENABLE_SDPA=0
 ENV PORT=8080
 EXPOSE 8080
 
-# Start uvicorn using PORT env (Cloud Run sets PORT)
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT}"]
