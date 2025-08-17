@@ -54,7 +54,7 @@ COPY --from=backend-builder /usr/local/bin /usr/local/bin
 COPY backend ./backend
 
 # Copy built React into static folder that FastAPI serves
-COPY --from=frontend-builder /frontend/build ./static
+COPY --from=frontend-builder /app/frontend/build ./static
 
 ENV PYTORCH_ENABLE_SDPA=0
 ENV PORT=8080
