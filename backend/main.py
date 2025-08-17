@@ -88,12 +88,13 @@ async def download_song():
     logger.warning("⚠️ Song file not found.")
     return JSONResponse({"error": "Song not found"}, status_code=404)
 
-# Serve static frontend files (mount last so /api/* không bị ghi đè)
-app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+app.mount("/static", StaticFiles(directory="static", html=True), name="static")
 
+# Catch-all route: trả về index.html cho React Router
+@app.get("/{full_path:path}")
+async def catch_all(full_path: str):
+    index_path = os.path.join("static", "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return {"error": "index.html not found"}
 
-# Run with `python main.py` for local development
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 8080))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, log_level="info")
