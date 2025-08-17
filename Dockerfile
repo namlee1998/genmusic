@@ -40,7 +40,10 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y git build-essential && rm -rf /var/lib/apt/lists/*
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 # Copy site-packages and bin from builder to final (keep image smaller than copying whole /usr/local)
 COPY --from=backend-builder /usr/local/lib/python3.10 /usr/local/lib/python3.10
 COPY --from=backend-builder /usr/local/bin /usr/local/bin
