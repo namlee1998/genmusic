@@ -40,8 +40,8 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
-    git \                 # 👈 vẫn giữ git ở đây nếu backend cần gọi git runtime
-    && rm -rf /var/lib/apt/lists/*
+    git                 # 👈 vẫn giữ git ở đây nếu backend cần gọi git runtime
+RUN rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
