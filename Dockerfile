@@ -51,7 +51,7 @@ COPY --from=backend-builder /usr/local/lib/python3.10 /usr/local/lib/python3.10
 COPY --from=backend-builder /usr/local/bin /usr/local/bin
 
 # Copy backend code
-COPY backend/ .
+COPY backend ./backend
 
 # Copy built React into static folder that FastAPI serves
 COPY --from=frontend-builder /frontend/build ./static
@@ -60,4 +60,4 @@ ENV PYTORCH_ENABLE_SDPA=0
 ENV PORT=8080
 EXPOSE 8080
 
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT}"]
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT}"]
