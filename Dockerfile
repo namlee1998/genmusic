@@ -18,8 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3-dev \
     ffmpeg \
-    git \                 # 👈 thêm git tại đây
-    && rm -rf /var/lib/apt/lists/*
+    git                 # 👈 thêm git tại đây
+RUN rm -rf /var/lib/apt/lists/*
 
 RUN pip install --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir torch>=2.1.1
