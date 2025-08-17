@@ -13,7 +13,9 @@ RUN npm run build
 # Stage 2: Build backend deps
 # ==============================
 FROM python:3.10-slim AS backend-builder
-
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3-dev \
