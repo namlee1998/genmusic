@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from .aimusic import MusicGenerator
+from .aimusic import MusicGenerator  # import class sinh nhạc
 
 # ==============================
 # Logger setup
@@ -31,12 +31,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Static + generated dirs
-STATIC_DIR = "static"
-# đặt thư mục generated vào /tmp để chắc có quyền ghi trên Cloud Run
-BASE_DIR = os.environ.get("GENERATED_DIR", "/tmp/generated_songs")
+# ==============================
+# Directories setup
+# ==============================
+# frontend build directory
+frontend_dir = os.path.join(os.path.dirname(__file__), "build")
 
-# đảm bảo thư mục tồn tại
+# generated music directory (mặc định: /tmp/generated_songs trên Cloud Run)
+BASE_DIR = os.environ.get("GENERATED_DIR", os.path.join(os.path.dirname(__file__), "generated"))
 os.makedirs(BASE_DIR, exist_ok=True)
 
 # ==============================
@@ -66,9 +68,8 @@ async def generate_song(request: PromptRequest):
 
     logger.info(f"🎤 Received prompt: {request.prompt}")
     try:
-        # IMPORTANT: giữ nguyên logic sync: generator.generate_all(...) trả về dict kết quả
+        # generator.generate_all(...) trả về dict (chứa path + metadata)
         result = generator.generate_all(request.prompt)
-        # Nếu generator lưu file, hãy đảm bảo path là BASE_DIR/final_song.wav
         logger.info("🎶 Song generation completed.")
         return JSONResponse(result)
     except Exception as e:
@@ -88,13 +89,29 @@ async def download_song():
     logger.warning("⚠️ Song file not found.")
     return JSONResponse({"error": "Song not found"}, status_code=404)
 
-app.mount("/static", StaticFiles(directory="static", html=True), name="static")
+# ==============================
+# Static file serving
+# ==============================
+# Serve React static (css, js)
+app.mount(
+    "/static",
+    StaticFiles(directory=os.path.join(frontend_dir, "static")),
+    name="static",
+)
 
-# Catch-all route: trả về index.html cho React Router
+# Serve generated songs/images
+app.mount(
+    "/generated",
+    StaticFiles(directory=BASE_DIR),
+    name="generated",
+)
+
+# ==============================
+# Catch-all route (React SPA fallback)
+# ==============================
 @app.get("/{full_path:path}")
 async def catch_all(full_path: str):
-    index_path = os.path.join("static", "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
+    index_file = os.path.join(frontend_dir, "index.html")
+    if os.path.exists(index_file):
+        return FileResponse(index_file)
     return {"error": "index.html not found"}
-
