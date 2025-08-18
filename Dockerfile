@@ -44,18 +44,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
  && rm -rf /var/lib/apt/lists/*
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
-# Copy site-packages and bin from builder
-COPY --from=backend-builder /usr/local/lib/python3.10 /usr/local/lib/python3.10
-COPY --from=backend-builder /usr/local/bin /usr/local/bin
 
 # Copy backend code
 COPY backend ./backend
 
 # Copy built React into static folder for FastAPI
-COPY --from=frontend-builder /app/frontend/build ./static
+COPY --from=frontend-builder /app/frontend/build ./backend/build
+RUN mkdir -p /app/backend/generated
 
 ENV PYTORCH_ENABLE_SDPA=0
 ENV PORT=8080
