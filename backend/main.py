@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from aimusic import MusicGenerator  # 👈 Class đã đóng gói xử lý
+from backend.aimusic import MusicGenerator
 
 # ==============================
 # Logger setup
