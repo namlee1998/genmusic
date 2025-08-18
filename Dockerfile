@@ -44,8 +44,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
  && rm -rf /var/lib/apt/lists/*
 
+RUN pip install --upgrade pip setuptools wheel
+RUN pip install --no-cache-dir "torch>=2.1.1" "numpy<2"
 
-# Copy backend code
+# Copy backend code + requirements
+COPY backend/requirements.txt ./backend/requirements.txt
+RUN pip install --no-cache-dir -r backend/requirements.txt
+
 COPY backend ./backend
 
 # Copy built React into static folder for FastAPI
@@ -55,5 +60,6 @@ RUN mkdir -p /app/backend/generated
 ENV PYTORCH_ENABLE_SDPA=0
 ENV PORT=8080
 EXPOSE 8080
+
 
 CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT}"]
