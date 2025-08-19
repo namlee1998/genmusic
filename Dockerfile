@@ -19,6 +19,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 ENV PYTORCH_SDP_DISABLE=1
 ENV PYTORCH_SDP_KERNEL=0
 
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3-dev \
@@ -33,7 +34,7 @@ WORKDIR /app
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir "numpy<2"
 RUN pip install --no-cache-dir -r requirements.txt
-
+ENV TORCH_DTYPE=float32
 # ==============================
 # Stage 3: Final lightweight image
 # ==============================
