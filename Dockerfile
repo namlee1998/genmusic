@@ -16,6 +16,8 @@ FROM python:3.10-slim AS backend-builder
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
+ENV PYTORCH_SDP_DISABLE=1
+ENV PYTORCH_SDP_KERNEL=0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
