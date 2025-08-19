@@ -30,10 +30,7 @@ jobs:
       
     - name: Decode service account key
       run: echo "${{ secrets.GCP_SA_KEY }}" | base64 --decode > key.json
-    - name: Authenticate with gcloud
-      run: |
-        gcloud auth activate-service-account --key-file=key.json
-        gcloud config set project total-market-468001-e1
+  
       
      # Set up gcloud
     - name: Set up gcloud CLI
@@ -42,6 +39,10 @@ jobs:
         project_id: total-market-468001-e1
         service_account_key: ${{ secrets.GCP_SA_KEY }}
         export_default_credentials: true
+    - name: Authenticate with gcloud
+      run: |
+        gcloud auth activate-service-account --key-file=key.json
+        gcloud config set project total-market-468001-e1
 
     # Deploy to Cloud Run using Docker Hub image
     - name: Deploy to Cloud Run
