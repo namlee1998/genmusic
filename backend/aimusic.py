@@ -10,7 +10,7 @@ class MusicGenerator:
     def __init__(self, base_dir="generated_songs", segment_dir="segments", mixed_dir="mixed_segments"):
         # CPU-only mode
         self.device = "cpu"
-        self.torch_dtype = torch.float16
+        self.torch_dtype = torch.float32
 
         self.BASE_DIR = base_dir
         self.SEGMENT_DIR = segment_dir
