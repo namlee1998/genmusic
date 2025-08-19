@@ -30,6 +30,10 @@ jobs:
       
     - name: Decode service account key
       run: echo "${{ secrets.GCP_SA_KEY }}" | base64 --decode > key.json
+    - name: Authenticate with gcloud
+      run: |
+        gcloud auth activate-service-account --key-file=key.json
+        gcloud config set project total-market-468001-e1
       
      # Set up gcloud
     - name: Set up gcloud CLI
