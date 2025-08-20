@@ -18,11 +18,6 @@ numpy<2
 # --- Uploads ---
 python-multipart
 
-# --- PyTorch CPU (khớp Audiocraft 1.3.0) ---
-
-torchvision==0.16.0+cpu
-torchaudio==2.1.0+cpu
-
 # --- Official PyTorch wheels index (CPU) ---
 -f https://download.pytorch.org/whl/torch_stable.html
 
