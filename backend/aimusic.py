@@ -1,7 +1,7 @@
 import os, torch, numpy as np, traceback, gc
 import scipy.io.wavfile as wavfile
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
-from audiocraft.models import MusicGen
+from audiocraft.models import MusicGentỏy
 from pydub import AudioSegment
 from bark import generate_audio, SAMPLE_RATE
 
@@ -95,7 +95,7 @@ class MusicGenerator:
 
             audio_array = generate_audio(
                 input_text,
-                history_prompt=voice_preset
+                history_prompt=voice_preset,
                 dtype=torch.float32
             )
             wavfile.write(out_path, SAMPLE_RATE, audio_array)
