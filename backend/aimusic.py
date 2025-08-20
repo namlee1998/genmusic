@@ -1,4 +1,9 @@
-import os, torch, numpy as np, traceback, gc
+import os
+import gc
+import traceback
+
+import torch
+import numpy as np
 import scipy.io.wavfile as wavfile
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
 from audiocraft.models import MusicGen
@@ -12,6 +17,7 @@ class MusicGenerator:
         self.device = "cpu"
         self.torch_dtype = torch.float32
 
+        # Directories
         self.BASE_DIR = base_dir
         self.SEGMENT_DIR = segment_dir
         self.MIXED_DIR = mixed_dir
@@ -58,23 +64,23 @@ class MusicGenerator:
 
     def split_lyrics(self, lyrics, max_words=25):
         words = lyrics.strip().split()
-        return [' '.join(words[i:i+max_words]) for i in range(0, len(words), max_words)]
+        return [" ".join(words[i:i + max_words]) for i in range(0, len(words), max_words)]
 
     # ================================
     # Melody generation with MusicGen
     # ================================
     def generate_melody(self, prompt, duration=30):
-        musicgen = MusicGen.get_pretrained(
-            "facebook/musicgen-small",
-            device=self.device
-        )
+        musicgen = MusicGen.get_pretrained("facebook/musicgen-small", device=self.device)
         musicgen = musicgen.to(dtype=torch.float32)
         musicgen.set_generation_params(duration=duration, top_k=250, temperature=1.0)
+
         with torch.no_grad():
             wav = musicgen.generate([prompt])[0].cpu().numpy()
+
         del musicgen
         gc.collect()
 
+        # Mono + Normalize
         if wav.ndim == 2:
             wav = np.mean(wav, axis=0)
         if np.max(np.abs(wav)) > 1:
@@ -92,7 +98,6 @@ class MusicGenerator:
         try:
             # Trick Bark to sing by wrapping lyrics with musical notes
             input_text = f"♪ {text} ♪"
-
             audio_array = generate_audio(
                 input_text,
                 history_prompt=voice_preset,
@@ -122,9 +127,11 @@ class MusicGenerator:
     def concat_segments(self, output_path=None):
         files = sorted([f for f in os.listdir(self.MIXED_DIR) if f.endswith(".wav")])
         combined = AudioSegment.empty()
+
         for file in files:
             segment = AudioSegment.from_wav(os.path.join(self.MIXED_DIR, file))
             combined += segment + AudioSegment.silent(duration=300)
+
         final_path = output_path or os.path.join(self.BASE_DIR, "final_song.wav")
         combined.export(final_path, format="wav")
         return final_path
@@ -150,5 +157,5 @@ class MusicGenerator:
             "lyrics": lyrics,
             "segments": segments,
             "mixed_files": mixed_files,
-            "final_song_path": final_path
+            "final_song_path": final_path,
         }
