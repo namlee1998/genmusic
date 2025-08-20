@@ -36,6 +36,8 @@ RUN pip install --no-cache-dir "torch>=2.1.1" "numpy<2"
 # Copy backend requirements và cài
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# Sau khi cài requirements
+RUN pip uninstall -y xformers || true
 
 # Copy backend code
 COPY backend ./backend
