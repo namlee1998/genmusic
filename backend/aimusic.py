@@ -1,7 +1,7 @@
 import os, torch, numpy as np, traceback, gc
 import scipy.io.wavfile as wavfile
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
-from audiocraft.models import MusicGentỏy
+from audiocraft.models import MusicGen
 from pydub import AudioSegment
 from bark import generate_audio, SAMPLE_RATE
 
