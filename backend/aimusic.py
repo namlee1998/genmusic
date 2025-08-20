@@ -68,6 +68,7 @@ class MusicGenerator:
             "facebook/musicgen-small",
             device=self.device
         )
+        musicgen = musicgen.to(dtype=torch.float32)
         musicgen.set_generation_params(duration=duration, top_k=250, temperature=1.0)
         with torch.no_grad():
             wav = musicgen.generate([prompt])[0].cpu().numpy()
@@ -95,6 +96,7 @@ class MusicGenerator:
             audio_array = generate_audio(
                 input_text,
                 history_prompt=voice_preset
+                dtype=torch.float32
             )
             wavfile.write(out_path, SAMPLE_RATE, audio_array)
         except Exception as e:
