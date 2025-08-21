@@ -1,4 +1,19 @@
 # ==============================
+# Stage 1: Build React frontend
+# ==============================
+FROM node:18 AS frontend-builder
+
+WORKDIR /app/frontend
+
+# Copy package.json và cài deps frontend
+COPY frontend/package*.json ./
+RUN npm ci --no-audit --progress=false || npm install
+
+# Copy toàn bộ code frontend và build
+COPY frontend/ ./
+RUN npm run build
+
+# ==============================
 # Stage 2: Final backend + frontend
 # ==============================
 FROM python:3.10-slim
@@ -21,17 +36,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Cài pip + wheel
 RUN pip install --upgrade pip setuptools wheel
 
-# Cài bản PyTorch CPU-only (không GPU/ROCm)
+# Cài PyTorch CPU-only (không GPU/ROCm)
 RUN pip install --no-cache-dir \
     torch==2.1.1+cpu \
     torchvision==0.16.1+cpu \
     torchaudio==2.1.1+cpu \
     -f https://download.pytorch.org/whl/cpu/torch_stable.html
 
-# Giữ numpy < 2 để tránh conflict
+# Cài numpy < 2 để tránh conflict
 RUN pip install --no-cache-dir "numpy<2"
 
-# Copy backend requirements và cài
+# Copy backend requirements và cài đặt
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip uninstall -y xformers || true
@@ -39,10 +54,11 @@ RUN pip uninstall -y xformers || true
 # Copy backend code
 COPY backend ./backend
 
-# Copy frontend build vào backend
+# Copy frontend build sang backend
 COPY --from=frontend-builder /app/frontend/build ./backend/build
 RUN mkdir -p /app/backend/generated
 
+# Expose cổng và chạy server
 ENV PORT=8080
 EXPOSE 8080
 
