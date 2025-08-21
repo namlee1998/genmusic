@@ -14,8 +14,8 @@ from bark import generate_audio, SAMPLE_RATE
 class MusicGenerator:
     def __init__(self, base_dir="generated_songs", segment_dir="segments", mixed_dir="mixed_segments"):
         # CPU-only mode
-        self.device = "cpu"
-        self.torch_dtype = torch.float32
+        self.device = torch.device("cpu")
+        self.torch_dtype = torch.float32   # tránh lỗi không hỗ trợ
 
         # Directories
         self.BASE_DIR = base_dir
@@ -36,7 +36,8 @@ class MusicGenerator:
         if self.lyric_model is None:
             self.lyric_model = GPT2LMHeadModel.from_pretrained(
                 "SpartanCinder/GPT2-finetuned-lyric-generation",
-                torch_dtype=self.torch_dtype
+                torch_dtype=self.torch_dtype,
+                low_cpu_mem_usage=True
             ).to(self.device)
 
     def _unload_lyric_model(self):
@@ -71,7 +72,7 @@ class MusicGenerator:
     # ================================
     def generate_melody(self, prompt, duration=30):
         musicgen = MusicGen.get_pretrained("facebook/musicgen-small", device=self.device)
-        musicgen = musicgen.to(dtype=torch.float32)
+        musicgen = musicgen.to(dtype=self.torch_dtype)
         musicgen.set_generation_params(duration=duration, top_k=250, temperature=1.0)
 
         with torch.no_grad():
@@ -101,7 +102,8 @@ class MusicGenerator:
             audio_array = generate_audio(
                 input_text,
                 history_prompt=voice_preset,
-                dtype=torch.float32
+                # ép float32 vì Bark đôi khi default khác
+                dtype=self.torch_dtype
             )
             wavfile.write(out_path, SAMPLE_RATE, audio_array)
         except Exception as e:
