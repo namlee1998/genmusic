@@ -3,6 +3,7 @@ huggingface_hub
 fastapi
 uvicorn[standard]>=0.27.0,<1.0.0
 
+
 # --- HF stack (pinned) ---
 transformers==4.37.2
 accelerate>=0.21.0,<1.0.0   # tránh yêu cầu device_mesh (cần torch>=2.2)
