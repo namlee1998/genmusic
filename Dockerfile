@@ -36,20 +36,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Cài pip + wheel
 RUN pip install --upgrade pip setuptools wheel
 
-# Cài PyTorch CPU-only (không GPU/ROCm)
+# ⚡ Cài PyTorch CPU-only TRƯỚC
 RUN pip install --no-cache-dir \
     torch==2.1.1+cpu \
     torchvision==0.16.1+cpu \
     torchaudio==2.1.1+cpu \
     -f https://download.pytorch.org/whl/cpu/torch_stable.html
 
+# ⚡ Khoá torch lại (pip không gỡ để cài lại bản khác)
+RUN pip install --no-deps --no-cache-dir "torch==2.1.1+cpu" "torchvision==0.16.1+cpu" "torchaudio==2.1.1+cpu"
+
 # Cài numpy < 2 để tránh conflict
 RUN pip install --no-cache-dir "numpy<2"
 
-# Copy backend requirements và cài đặt
+# Copy backend requirements và cài đặt (KHÔNG cho override torch)
 COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-RUN pip uninstall -y xformers || true
+RUN pip install --no-cache-dir --no-deps -r requirements.txt
 
 # Copy backend code
 COPY backend ./backend
@@ -58,7 +60,6 @@ COPY backend ./backend
 COPY --from=frontend-builder /app/frontend/build ./backend/build
 RUN mkdir -p /app/backend/generated
 
-# Expose cổng và chạy server
 ENV PORT=8080
 EXPOSE 8080
 
