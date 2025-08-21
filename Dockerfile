@@ -51,7 +51,7 @@ RUN pip install --no-deps --no-cache-dir \
 
 # Cài numpy < 2 để tránh conflict
 RUN pip install --no-cache-dir "numpy<2"
-RUN pip install --no-cache-dir uvicorn[standard] fastapi
+
 
 # Copy backend requirements và cài đặt (KHÔNG cho override torch)
 COPY backend/requirements.txt .
