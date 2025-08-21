@@ -55,7 +55,7 @@ RUN pip install --no-cache-dir "numpy<2"
 
 # Copy backend requirements và cài đặt (KHÔNG cho override torch)
 COPY backend/requirements.txt .
-RUN pip install --no-cache-dir --no-deps -r requirements.txt
+RUN pip install --no-cache-dir  -r requirements.txt
 
 # Copy backend code
 COPY backend ./backend
