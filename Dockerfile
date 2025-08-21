@@ -20,8 +20,8 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Copy requirements trước
-COPY requirements.txt .
+COPY backend/requirements.txt .
+
 
 # Cài đặt torch riêng (CPU build), không để trong requirements.txt
 RUN pip install --no-cache-dir \
