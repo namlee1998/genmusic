@@ -40,11 +40,6 @@ export default function SongGenerator() {
   return (
     <div className="min-h-screen bg-transparent flex flex-col items-center justify-center text-center p-6 space-y-6">
       <h1 className="text-4xl font-bold text-teal-500">Ai Music Generation</h1>
-      <img
-        src="/image/note.jpeg"
-        alt="Song illustration"
-        className="w-72 h-72 object-cover rounded shadow"
-      />
       <p className="text-black font-semibold text-lg">Type in your mind</p>
 
       <input
