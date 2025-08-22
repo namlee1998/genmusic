@@ -17,7 +17,7 @@ RUN npm run build
 # ==============================
 # Stage 2: Final backend + frontend
 # ==============================
-FROM python:3.10-slim
+FROM python:3.10
 
 WORKDIR /app
 # Copy backend requirements và cài đặt (KHÔNG override torch)
