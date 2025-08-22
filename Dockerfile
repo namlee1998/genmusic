@@ -56,7 +56,7 @@ RUN pip install --no-deps --no-cache-dir \
 # Cài numpy < 2 để tránh conflict
 RUN pip install --no-cache-dir "numpy<2"
 
-RUN pip install --no-cache-dir --no-deps -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy backend code
 COPY backend ./backend
