@@ -28,7 +28,7 @@ class MusicGenerator:
         # Lazy load models
         self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
         self.lyric_model = None
-
+    #thêm 1 dòng để test branch compare
     # ================================
     # Lyrics generation
     # ================================
