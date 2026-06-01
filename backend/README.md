@@ -1,6 +1,6 @@
 # Backend Gateway
 
-Backend server cho hệ thống **AIDLC Auto Testcase Generator**. Đóng vai trò là Gateway/Orchestrator giữa Frontend và AI Agents, sử dụng **Supabase** làm Database và Storage.
+Backend server cho hệ thống **AIDLC Control Platform**. Đóng vai trò là Gateway/Orchestrator giữa Frontend và AI Agents, sử dụng **Supabase** làm Database và Storage.
 
 ## Kiến trúc
 

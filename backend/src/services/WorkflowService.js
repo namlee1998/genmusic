@@ -324,7 +324,7 @@ class WorkflowService {
   async generateAutomation(
     {
       taskId,
-      framework = "AIDLC Platform Auto Testcase Generator",
+      framework = "AIDLC Control Platform",
       feedbackPrompt = "",
       selectedScenarioIds = [],
       previousTaskId = "",

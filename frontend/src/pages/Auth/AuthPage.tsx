@@ -2,10 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthActions } from '@/hooks/useAuthActions';
 import { PASSWORD_RECOVERY_FLOW_KEY, useAuthStore } from '@/store/useAuthStore';
-import { Input } from '@/components/ui/Input';
-import { Button } from '@/components/ui/Button';
-import { CheckCircle2, Eye, EyeOff, Github } from 'lucide-react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { CheckCircle2, Eye, EyeOff } from 'lucide-react';
+import { motion } from 'framer-motion';
 
 type AuthMode =
   | 'signin'
@@ -15,8 +13,19 @@ type AuthMode =
   | 'reset-sent'
   | 'update-password';
 
-const getFriendlyAuthError = (err: any, fallback: string) => {
-  const raw = err?.response?.data?.message || err?.message || fallback;
+const getFriendlyAuthError = (err: unknown, fallback: string) => {
+  let raw = fallback;
+  if (err instanceof Error) {
+    raw = err.message;
+  }
+  try {
+    const axiosError = err as { response?: { data?: { message?: string } } };
+    if (axiosError?.response?.data?.message) {
+      raw = axiosError.response.data.message;
+    }
+  } catch {
+    // Ignore
+  }
   const normalized = String(raw).toLowerCase();
 
   if (normalized.includes('invalid login credentials')) {
@@ -52,34 +61,33 @@ export function AuthPage() {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [passwordStrength, setPasswordStrength] = useState(0);
-  const [companyName, setCompanyName] = useState('');
-  const [companyEmail, setCompanyEmail] = useState('');
-  const [jobTitle, setJobTitle] = useState('');
+  const [companyName] = useState('');
+  const [companyEmail] = useState('');
+  const [jobTitle] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
-  useEffect(() => {
-    const isRecoveryFlow = sessionStorage.getItem(PASSWORD_RECOVERY_FLOW_KEY) === '1';
-    if (!session) return;
 
+
+  // Handle recovery mode checks during rendering to avoid useEffect state updates
+  const [prevSession, setPrevSession] = useState(session);
+  if (session && session !== prevSession) {
+    setPrevSession(session);
+    const isRecoveryFlow = sessionStorage.getItem(PASSWORD_RECOVERY_FLOW_KEY) === '1';
     if (isRecoveryFlow) {
       setMode('update-password');
       setNotice('Bạn đang ở chế độ khôi phục mật khẩu. Hãy đặt mật khẩu mới để tiếp tục.');
-      return;
     }
+  }
 
-    navigate('/sdlc');
-  }, [session, navigate]);
-
+  // Handle redirect navigation in effect
   useEffect(() => {
-    let strength = 0;
-    if (password.length >= 8) strength += 25;
-    if (/[A-Z]/.test(password)) strength += 25;
-    if (/[0-9]/.test(password)) strength += 25;
-    if (/[^A-Za-z0-9]/.test(password)) strength += 25;
-    setPasswordStrength(strength);
-  }, [password]);
+    if (!session) return;
+    const isRecoveryFlow = sessionStorage.getItem(PASSWORD_RECOVERY_FLOW_KEY) === '1';
+    if (!isRecoveryFlow) {
+      navigate('/sdlc');
+    }
+  }, [session, navigate]);
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -109,28 +117,14 @@ export function AuthPage() {
         setSession(result.session);
         navigate('/sdlc');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       setError(getFriendlyAuthError(err, 'Authentication failed'));
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSocialAuth = async (provider: 'google' | 'github') => {
-    try {
-      setLoading(true);
-      setError(null);
-      const { url } = await authActions.getOAuthUrl({
-        provider,
-        redirect_to: `${window.location.origin}/auth`,
-      });
-      if (!url) throw new Error('OAuth URL is not available');
-      window.location.href = url;
-    } catch (err: any) {
-      setError(getFriendlyAuthError(err, `Failed to authenticate with ${provider}`));
-      setLoading(false);
-    }
-  };
+
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -144,7 +138,7 @@ export function AuthPage() {
         redirect_to: `${window.location.origin}/auth`,
       });
       setMode('reset-sent');
-    } catch (err: any) {
+    } catch (err: unknown) {
       setError(getFriendlyAuthError(err, 'Không thể gửi email khôi phục mật khẩu'));
     } finally {
       setLoading(false);
@@ -177,7 +171,7 @@ export function AuthPage() {
       setNewPassword('');
       setConfirmPassword('');
       setPassword('');
-    } catch (err: any) {
+    } catch (err: unknown) {
       setError(getFriendlyAuthError(err, 'Không thể cập nhật mật khẩu'));
     } finally {
       setLoading(false);

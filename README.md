@@ -296,6 +296,24 @@ When a human submits `REQUEST_CHANGES`, the system **routes feedback to the righ
 
 ---
 
+## Documentation
+
+To help you understand the architecture, vision, and detailed design of the system, the project documentation has been consolidated into the `/docs` directory:
+
+*   **Core Systems:**
+    *   [Architecture Overview](docs/core/ARCHITECTURE.md) - High-level system structure and data flow.
+    *   [AI Agents](docs/core/AGENTS.md) - Role description and specifications of PO, UX, DEV, and QA Agents.
+    *   [Project Blueprint](docs/core/blueprint.md) - Detailed vision and scope of the autonomous software factory.
+    *   [Sequence Flow](docs/core/sequence.md) - BMAD Human-in-the-Loop flow sequence diagram.
+*   **Processes & Quality:**
+    *   [QA Testing Guide](docs/process/QA_Testing.md) - Testing workflows, manual verification, and test status.
+    *   [Code Review Report v0.1](docs/process/review_0.1.md) - Structural audit of codebase v0.1.
+    *   [Contributing Guide](docs/process/CONTRIBUTING.md) - Guidelines for contributing code.
+*   **Planning & References:**
+    *   [6-Week Roadmap](docs/planning/6-week-roadmap.md) - Phase targets and delivery timeline.
+    *   [User Feedback](docs/planning/USER_FEEDBACK.md) - Human review and system improvement notes.
+    *   [OMO & HITL Reference](docs/reference/omo.md) - Detailed guide to OMO runtime loop & hooks.
+
 ## License
 
 MIT License — see [LICENSE](LICENSE)

@@ -277,7 +277,7 @@ export async function saveSessionState(
   data: {
     selectedDocIds: string[];
     taskId?: string;
-    metadata?: Record<string, any>;
+    metadata?: Record<string, unknown>;
   },
 ): Promise<SessionState> {
   const { data: response } = await api.post<{ status: string; data: SessionState }>(

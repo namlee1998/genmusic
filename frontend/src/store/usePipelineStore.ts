@@ -29,7 +29,7 @@ interface PipelineState {
   reset: () => void;
 }
 
-export const usePipelineStore = create<PipelineState>((set, get) => ({
+export const usePipelineStore = create<PipelineState>((set) => ({
   taskVersions: {},
   staleness: null,
   stalenessProjectId: null,

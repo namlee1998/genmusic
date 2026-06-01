@@ -54,7 +54,7 @@
       "tag": "Live Example",
       "title": "See the transformation",
       "subtitle": "From human-readable spec ↔ executable YAML — automatically.",
-      "terminal": "mobile-testgen / pipeline demo",
+      "terminal": "aidlc-platform / pipeline demo",
       "inputTag": "INPUT",
       "outputTag": "OUTPUT",
       "aiGenerated": "AI Generated"
@@ -86,14 +86,14 @@
       "startBtn": "Start for Free"
     },
     "footer": {
-      "copyright": "© 2026 AIDLC Platform Auto Testcase Generator. Built for QA Engineers.",
+      "copyright": "© 2026 AIDLC Control Platform. Developed by Team 6.",
       "docs": "Docs",
       "architecture": "Architecture",
       "signIn": "Sign In"
     }
   },
   "nav": {
-    "title": "Mobile TestGen",
+    "title": "AIDLC Platform",
     "badge": "AI-Powered",
     "signIn": "Sign In",
     "goToApp": "Go to App",

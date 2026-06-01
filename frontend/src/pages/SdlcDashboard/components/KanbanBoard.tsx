@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { useSdlcStore } from '@/store/useSdlcStore';
 import { useAppStore } from '@/store';
-import { getBacklogs, moveBacklog, FeatureRequest, runIntentAgent } from '@/services/api/sdlcApi';
+import { getBacklogs, moveBacklog, FeatureRequest } from '@/services/api/sdlcApi';
 import { motion } from 'framer-motion';
 
 interface BacklogItem {
@@ -19,7 +18,7 @@ export default function KanbanBoard({ onRunIntent }: { onRunIntent: (feature: Fe
   const [backlogs, setBacklogs] = useState<BacklogItem[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const fetchBacklogs = async () => {
+  const fetchBacklogs = React.useCallback(async () => {
     if (!currentProjectId) return;
     setLoading(true);
     try {
@@ -30,15 +29,20 @@ export default function KanbanBoard({ onRunIntent }: { onRunIntent: (feature: Fe
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentProjectId]);
 
   useEffect(() => {
-    void fetchBacklogs();
+    const timer = setTimeout(() => {
+      void fetchBacklogs();
+    }, 0);
     
     // Auto-refresh slightly
     const interval = setInterval(fetchBacklogs, 10000);
-    return () => clearInterval(interval);
-  }, [currentProjectId]);
+    return () => {
+      clearTimeout(timer);
+      clearInterval(interval);
+    };
+  }, [fetchBacklogs]);
 
   const handleRun = async (item: BacklogItem) => {
     // Optimistic UI update
@@ -48,7 +52,7 @@ export default function KanbanBoard({ onRunIntent }: { onRunIntent: (feature: Fe
       // Mark as in progress in DB
       await moveBacklog(item.id, 'IN_PROGRESS');
       // Trigger the intent agent with this feature
-      onRunIntent({ title: item.title, description: item.description, priority: item.priority as any });
+      onRunIntent({ title: item.title, description: item.description, priority: item.priority as 'High' | 'Medium' | 'Low' });
       await fetchBacklogs();
     } catch (e) {
       console.error('Failed to run backlog item:', e);

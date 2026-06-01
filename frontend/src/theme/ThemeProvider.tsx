@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 type ResolvedTheme = 'light' | 'dark';
@@ -46,14 +46,14 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     root.style.colorScheme = resolvedMode;
   }, [resolvedMode]);
 
-  const setMode = (nextMode: ThemeMode) => {
+  const setMode = useCallback((nextMode: ThemeMode) => {
     setModeState(nextMode);
     window.localStorage.setItem(STORAGE_KEY, nextMode);
-  };
+  }, []);
 
-  const toggleMode = () => {
+  const toggleMode = useCallback(() => {
     setMode(resolvedMode === 'dark' ? 'light' : 'dark');
-  };
+  }, [resolvedMode, setMode]);
 
   const value = useMemo<ThemeContextValue>(
     () => ({
@@ -62,7 +62,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setMode,
       toggleMode,
     }),
-    [mode, resolvedMode],
+    [mode, resolvedMode, setMode, toggleMode],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

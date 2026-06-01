@@ -104,10 +104,28 @@ export const ProjectSettings: React.FC = () => {
     return ['editor', 'viewer'];
   };
 
-  const refresh = async () => {
-    if (!projectId) return;
+  // Reset loading and state variables during rendering to satisfy ESLint rule
+  const [prevProjectName, setPrevProjectName] = useState(project?.name);
+  if (project?.name !== prevProjectName) {
+    setPrevProjectName(project?.name);
+    setName(project?.name ?? '');
+  }
+
+  const [prevParams, setPrevParams] = useState({ projectId, canAdmin });
+  if (projectId !== prevParams.projectId || canAdmin !== prevParams.canAdmin) {
+    setPrevParams({ projectId, canAdmin });
     setLoading(true);
     setError(null);
+  }
+
+  const [prevSessionProj, setPrevSessionProj] = useState(projectId);
+  if (project && currentProjectId !== projectId && projectId !== prevSessionProj) {
+    setPrevSessionProj(projectId);
+    setCurrentProject(projectId);
+  }
+
+  const refresh = async () => {
+    if (!projectId) return;
     try {
       const [memberRows, inviteRows] = await Promise.all([
         api.listProjectMembers(projectId),
@@ -115,18 +133,20 @@ export const ProjectSettings: React.FC = () => {
       ]);
       setMembers(memberRows);
       setInvitations(inviteRows);
-    } catch (err: any) {
-      setError(err?.response?.data?.message ?? err?.message ?? 'Lỗi tải dữ liệu');
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { message?: string } } };
+      setError(axiosErr?.response?.data?.message ?? (err instanceof Error ? err.message : 'Lỗi tải dữ liệu'));
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { setName(project?.name ?? ''); }, [project?.name]);
   useEffect(() => {
-    if (project && currentProjectId !== projectId) setCurrentProject(projectId);
-  }, [currentProjectId, project, projectId, setCurrentProject]);
-  useEffect(() => { void refresh(); }, [projectId, canAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+    const timer = setTimeout(() => {
+      void refresh();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [projectId, canAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveName = async () => {
     if (!projectId || !name.trim() || saving) return;
@@ -135,8 +155,9 @@ export const ProjectSettings: React.FC = () => {
     try {
       const res = await api.renameProject(projectId, name.trim());
       upsertProject(res.data);
-    } catch (err: any) {
-      setError(err?.response?.data?.message ?? err?.message ?? 'Lỗi đổi tên');
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { message?: string } } };
+      setError(axiosErr?.response?.data?.message ?? (err instanceof Error ? err.message : 'Lỗi đổi tên'));
     } finally {
       setSaving(false);
     }
@@ -150,8 +171,9 @@ export const ProjectSettings: React.FC = () => {
       removeProject(projectId);
       setCurrentProject(null);
       navigate('/app');
-    } catch (err: any) {
-      setError(err?.response?.data?.message ?? err?.message ?? 'Lỗi xóa project');
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { message?: string } } };
+      setError(axiosErr?.response?.data?.message ?? (err instanceof Error ? err.message : 'Lỗi xóa project'));
     }
   };
 
@@ -162,8 +184,9 @@ export const ProjectSettings: React.FC = () => {
       await api.inviteProjectMember(projectId, { email: email.trim(), role: inviteRole });
       setEmail('');
       await refresh();
-    } catch (err: any) {
-      setError(err?.response?.data?.message ?? err?.message ?? 'Lỗi gửi lời mời');
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { message?: string } } };
+      setError(axiosErr?.response?.data?.message ?? (err instanceof Error ? err.message : 'Lỗi gửi lời mời'));
     }
   };
 
@@ -172,8 +195,9 @@ export const ProjectSettings: React.FC = () => {
     try {
       await api.updateProjectMemberRole(projectId, member.user_id, role);
       await refresh();
-    } catch (err: any) {
-      setError(err?.response?.data?.message ?? err?.message ?? 'Lỗi cập nhật vai trò');
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { message?: string } } };
+      setError(axiosErr?.response?.data?.message ?? (err instanceof Error ? err.message : 'Lỗi cập nhật vai trò'));
     }
   };
 
@@ -182,8 +206,9 @@ export const ProjectSettings: React.FC = () => {
     try {
       await api.removeProjectMember(projectId, member.user_id);
       await refresh();
-    } catch (err: any) {
-      setError(err?.response?.data?.message ?? err?.message ?? 'Lỗi xóa thành viên');
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { message?: string } } };
+      setError(axiosErr?.response?.data?.message ?? (err instanceof Error ? err.message : 'Lỗi xóa thành viên'));
     }
   };
 
@@ -215,8 +240,9 @@ export const ProjectSettings: React.FC = () => {
     try {
       await api.revokeProjectInvitation(projectId, inv.invitation_id);
       await refresh();
-    } catch (err: any) {
-      setError(err?.response?.data?.message ?? err?.message ?? 'Lỗi thu hồi lời mời');
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { message?: string } } };
+      setError(axiosErr?.response?.data?.message ?? (err instanceof Error ? err.message : 'Lỗi thu hồi lời mời'));
     }
   };
 
