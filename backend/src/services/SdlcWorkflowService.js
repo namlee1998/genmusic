@@ -4,6 +4,7 @@ const { Task, AgentArtifact, HitlDecision } = require('../models');
 const AgentService = require('./AgentService');
 const MembershipService = require('./MembershipService');
 const QuotaService = require('./QuotaService');
+const QualityGateService = require('./QualityGateService');
 const fs = require('fs/promises');
 const path = require('path');
 const { ApiError } = require('../middleware/errorHandler');
@@ -512,6 +513,22 @@ class SdlcWorkflowService {
     task.gate = AGENT_GATES[task.type] || null;
     task.nextAgent = NEXT_AGENT[task.type];
 
+    // Attach Quality Gate evaluation for QA tasks
+    if (task.type === 'qa-agent') {
+      const gateArtifact = artifacts.find((a) => a.artifactType === 'gate_evaluation');
+      if (gateArtifact) {
+        const resolved = await resolveArtifactContent(gateArtifact);
+        task.gateEvaluation = resolved.contentJson || null;
+      }
+      // Surface gate metadata from result
+      if (task.result) {
+        task.gateScore = task.result.gateScore;
+        task.gateRecommendation = task.result.gateRecommendation;
+        task.gateComplexity = task.result.gateComplexity;
+        task.minApproversRequired = task.result.minApproversRequired;
+      }
+    }
+
     return task;
   }
 
@@ -753,13 +770,86 @@ class SdlcWorkflowService {
       'architecture_ledger_update', 'implementation_plan', 'mock_code_diff', 'changed_files',
       'risk_assessment', 'risk_level', 'sandbox_report', 'patch_branch', 'patch_commit',
       'test_cases', 'qa_report', 'ac_coverage_matrix', 'pass_count', 'fail_count',
-      'blocker_count', 'release_recommendation'];
+      'blocker_count', 'release_recommendation',
+      // Quality Gate result (populated below for qa-agent tasks)
+      'gate_evaluation'];
+
+    // -------------------------------------------------------------------------
+    // Quality Gate evaluation — runs after QA Agent completes
+    // -------------------------------------------------------------------------
+    if (task.type === 'qa-agent' && !completedData.gate_evaluation) {
+      try {
+        // Fetch DEV artifacts for code diff context
+        const devTask = await Task.findLatestByProject(task.projectId, 'dev-agent', 'completed', 'committed').catch(() => null);
+        let mockCodeDiff = '';
+        let implementationPlan = '';
+
+        if (devTask) {
+          const devArtifacts = await AgentArtifact.findByTaskId(devTask.id);
+          for (const art of devArtifacts) {
+            if (art.artifactType === 'mock_code_diff') {
+              const resolved = await resolveArtifactContent(art);
+              mockCodeDiff = resolved.contentText || '';
+            }
+            if (art.artifactType === 'implementation_plan') {
+              const resolved = await resolveArtifactContent(art);
+              implementationPlan = resolved.contentText || '';
+            }
+          }
+        }
+
+        // Fetch PO artifacts for feature title & AC
+        const poTask = await Task.findLatestByProject(task.projectId, 'po-agent', 'completed', 'committed').catch(() => null);
+        let featureTitle = '';
+        let featureDescription = '';
+        let acceptanceCriteria = completedData.acceptance_criteria || [];
+
+        if (poTask) {
+          const poArtifacts = await AgentArtifact.findByTaskId(poTask.id);
+          for (const art of poArtifacts) {
+            if (art.artifactType === 'prd') {
+              const resolved = await resolveArtifactContent(art);
+              featureDescription = (resolved.contentText || '').slice(0, 500);
+            }
+            if (art.artifactType === 'acceptance_criteria') {
+              const resolved = await resolveArtifactContent(art);
+              if (Array.isArray(resolved.contentJson)) {
+                acceptanceCriteria = resolved.contentJson;
+              }
+            }
+          }
+        }
+
+        const gateResult = await QualityGateService.evaluate({
+          featureTitle,
+          featureDescription,
+          acceptanceCriteria: Array.isArray(acceptanceCriteria) ? acceptanceCriteria : [],
+          testCases: completedData.test_cases || [],
+          acCoverageMatrix: completedData.ac_coverage_matrix || [],
+          blockerCount: completedData.blocker_count || 0,
+          riskLevel: completedData.risk_level || 'LOW',
+          mockCodeDiff,
+          implementationPlan,
+        });
+
+        completedData.gate_evaluation = gateResult;
+
+        console.log(
+          `[QualityGate] Task ${task.id}: ${gateResult.complexity.toUpperCase()} | ` +
+          `Score: ${gateResult.score}/100 | Recommendation: ${gateResult.recommendation} | ` +
+          `Approvers required: ${gateResult.minApproversRequired}`
+        );
+      } catch (gateErr) {
+        console.error(`[QualityGate] Evaluation failed for task ${task.id}:`, gateErr.message);
+        // Non-fatal — continue saving without gate result
+      }
+    }
 
     for (const artType of artifactTypes) {
-      if (completedData[artType]) {
+      if (completedData[artType] !== undefined && completedData[artType] !== null) {
         const content = completedData[artType];
         let fileRef = null;
-        
+
         if (typeof content === 'string') {
           fileRef = await this._writeArtifactToFile(task.projectId, task.id, `${artType}.md`, content);
         } else {
@@ -786,15 +876,24 @@ class SdlcWorkflowService {
       await AgentArtifact.bulkUpsert(artifactRows);
     }
 
+    // Build enriched result — include gate info for QA tasks
+    const taskResult = {
+      artifactCount: artifactRows.length,
+      agentType: task.type,
+      ...(completedData.summary ? { summary: completedData.summary } : {}),
+    };
+    if (task.type === 'qa-agent' && completedData.gate_evaluation) {
+      taskResult.gateScore = completedData.gate_evaluation.score;
+      taskResult.gateRecommendation = completedData.gate_evaluation.recommendation;
+      taskResult.gateComplexity = completedData.gate_evaluation.complexity;
+      taskResult.minApproversRequired = completedData.gate_evaluation.minApproversRequired;
+    }
+
     const outputHash = contentHash(artifactRows.map((a) => a.contentHash));
     await Task.update(task.id, {
       status: 'completed',
       output_content_hash: outputHash,
-      result: {
-        artifactCount: artifactRows.length,
-        agentType: task.type,
-        ...(completedData.summary ? { summary: completedData.summary } : {}),
-      },
+      result: taskResult,
       observability: completedData.observability || {},
     });
 

@@ -1,13 +1,20 @@
 """
 LangGraph workflow — Main Pipeline
 Original: Agent 1 → Agent 2 → Agent 3  (testcase generation)
-AIDLC:    PO Agent → UX Agent → DEV Agent → QA Agent  (SDLC automation)
+AIDLC:    PO Agent → UX Agent → DEV Agent → QA Agent → Quality Gate  (SDLC automation)
 Both pipelines share the same graph; node_target selects which to run.
+
+Quality Gate:
+  - Runs after QA Agent
+  - Classifies task complexity (small/medium/large)
+  - Evaluates test coverage against hard rules
+  - Attaches gate_evaluation to qa_result
 """
 
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -23,6 +30,9 @@ from src.schemas.aidlc import (
     POAgentInput, FeatureRequest, ProjectContext,
     UXAgentInput, DEVAgentInput, QAAgentInput,
 )
+from src.quality_gate.evaluator import evaluate_quality_gate
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -54,6 +64,9 @@ class PipelineState(TypedDict, total=False):
     sandbox_report: str | None
     qa_result: dict | None
     qa_error: str | None
+    # Quality Gate
+    gate_evaluation: dict | None   # QualityGateResult.to_dict()
+    gate_error: str | None
     # Shared
     final_output: dict | None
     error: str | None
@@ -234,6 +247,7 @@ async def node_qa_agent(state: PipelineState) -> dict:
             ux_spec=ctx.get("ux_spec", ""),
             implementation_plan=ctx.get("implementation_plan", ""),
             mock_code_diff=ctx.get("mock_code_diff", ""),
+            sandbox_report=ctx.get("sandbox_report", ""),
             risk_assessment=ctx.get("risk_assessment", ""),
             risk_level=ctx.get("risk_level", "LOW"),
             feedback_prompt=ctx.get("feedback_prompt", ""),
@@ -242,6 +256,51 @@ async def node_qa_agent(state: PipelineState) -> dict:
         return {"qa_result": result.model_dump(), "qa_error": None}
     except Exception as e:
         return {"qa_result": None, "qa_error": str(e)}
+
+
+async def node_quality_gate(state: PipelineState) -> dict:
+    """
+    Quality Gate Node — evaluates QA output against hard rules.
+
+    Classifies task complexity (small/medium/large), runs async gate checks
+    (security scan + static analysis for medium/large), and computes a score.
+    The gate_evaluation is attached to the state for the backend to surface.
+    """
+    try:
+        ctx = state.get("context", {})
+        qa_result = state.get("qa_result") or {}
+        dev_result = state.get("dev_result") or {}
+
+        feature_title = ctx.get("title", ctx.get("feature_title", ""))
+        feature_description = ctx.get("feature_description", ctx.get("prd", "")[:500])
+
+        gate_result = await evaluate_quality_gate(
+            feature_title=feature_title,
+            feature_description=feature_description,
+            acceptance_criteria=ctx.get("acceptance_criteria", []),
+            test_cases=qa_result.get("test_cases", []),
+            ac_coverage_matrix=qa_result.get("ac_coverage_matrix", []),
+            blocker_count=qa_result.get("blocker_count", 0),
+            risk_level=ctx.get("risk_level", dev_result.get("risk_level", "LOW")),
+            mock_code_diff=dev_result.get("mock_code_diff", ctx.get("mock_code_diff", "")),
+            implementation_plan=dev_result.get("implementation_plan", ctx.get("implementation_plan", "")),
+        )
+
+        logger.info(
+            f"[QualityGate] complexity={gate_result.complexity} "
+            f"score={gate_result.score} recommendation={gate_result.recommendation}"
+        )
+
+        return {
+            "gate_evaluation": gate_result.to_dict(),
+            "gate_error": None,
+        }
+    except Exception as e:
+        logger.error(f"[QualityGate] Evaluation failed: {e}")
+        return {
+            "gate_evaluation": None,
+            "gate_error": str(e),
+        }
 
 
 # =============================================================================
@@ -272,7 +331,15 @@ def route_target(state: PipelineState) -> str:
 # =============================================================================
 
 def build_graph():
-    """Build and compile the unified LangGraph workflow."""
+    """Build and compile the unified LangGraph workflow.
+
+    Pipeline:
+      intent_agent → [END]
+      po_agent     → [END]
+      ux_agent     → [END]
+      dev_agent    → sandbox_gate → (retry dev_agent | END)
+      qa_agent     → quality_gate → [END]
+    """
     workflow = StateGraph(PipelineState)
 
     # AIDLC SDLC pipeline nodes
@@ -282,13 +349,14 @@ def build_graph():
     workflow.add_node("dev_agent", node_dev_agent)
     workflow.add_node("sandbox_gate", node_sandbox_gate)
     workflow.add_node("qa_agent", node_qa_agent)
+    workflow.add_node("quality_gate", node_quality_gate)
     # Error node
     workflow.add_node("error_node", lambda state: {"error": f"Unknown node_target: {state.get('node_target')}"})
 
     workflow.set_conditional_entry_point(
         route_target,
         path_map={
-                        "intent_agent": "intent_agent",
+            "intent_agent": "intent_agent",
             "po_agent": "po_agent",
             "ux_agent": "ux_agent",
             "dev_agent": "dev_agent",
@@ -297,9 +365,11 @@ def build_graph():
         },
     )
 
-    for node in ["intent_agent", "po_agent", "ux_agent", "qa_agent", "error_node"]:
+    # Simple terminal nodes (no downstream processing needed)
+    for node in ["intent_agent", "po_agent", "ux_agent", "error_node"]:
         workflow.add_edge(node, END)
-        
+
+    # DEV → Sandbox → (retry or END)
     workflow.add_edge("dev_agent", "sandbox_gate")
     workflow.add_conditional_edges(
         "sandbox_gate",
@@ -309,6 +379,10 @@ def build_graph():
             "END": END
         }
     )
+
+    # QA → Quality Gate → END
+    workflow.add_edge("qa_agent", "quality_gate")
+    workflow.add_edge("quality_gate", END)
 
     return workflow.compile()
 

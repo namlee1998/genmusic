@@ -173,6 +173,52 @@ class QAAgentOutput(BaseModel):
     release_recommendation: str = Field(default="HOLD", description="PASS / HOLD / REWORK")
     summary: str = Field(default="")
 
+
+# =============================================================================
+# Quality Gate Result (output of QualityGate evaluator)
+# =============================================================================
+
+class GateViolation(BaseModel):
+    rule: str = Field(..., description="Rule name that was violated")
+    expected: str = Field(..., description="Expected value / threshold")
+    actual: str = Field(..., description="Actual value found")
+    severity: str = Field(default="BLOCKER", description="BLOCKER | WARNING | INFO")
+
+
+class GateCheck(BaseModel):
+    check: str = Field(..., description="Check name (security_scan, static_analysis, fast_gate)")
+    passed: bool
+    issues: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    message: str = Field(default="")
+
+
+class QualityGateMetrics(BaseModel):
+    total_test_cases: int = Field(default=0)
+    type_counts: dict[str, int] = Field(default_factory=dict)
+    ac_coverage_pct: float = Field(default=0.0)
+    blocker_count: int = Field(default=0)
+    min_total_required: int = Field(default=0)
+    min_happy_required: int = Field(default=0)
+    min_negative_required: int = Field(default=0)
+    min_edge_required: int = Field(default=0)
+    min_security_required: int = Field(default=0)
+    min_ac_coverage_required: float = Field(default=0.0)
+    min_approvers_required: int = Field(default=1)
+
+
+class QualityGateEvaluation(BaseModel):
+    """Result of Quality Gate evaluation. Attached to QAAgentOutput after gate check."""
+    complexity: str = Field(default="small", description="small | medium | large")
+    gate_type: str = Field(default="FAST", description="FAST | ASYNC | STRICT")
+    score: int = Field(default=0, description="Quality score 0-100")
+    recommendation: str = Field(default="HOLD", description="PASS | HOLD | REWORK")
+    violations: list[GateViolation] = Field(default_factory=list)
+    metrics: QualityGateMetrics = Field(default_factory=QualityGateMetrics)
+    gate_checks: list[GateCheck] = Field(default_factory=list)
+    summary: str = Field(default="")
+    passed: bool = Field(default=False)
+
 # Re-export everything
 __all__ = [
     # Original
@@ -188,4 +234,6 @@ __all__ = [
     "UXAgentInput", "UXAgentOutput", "ScreenSpec",
     "DEVAgentInput", "DEVAgentOutput", "ChangedFile",
     "QAAgentInput", "QAAgentOutput", "QATestCase", "ACCoverageRow",
+    # Quality Gate
+    "GateViolation", "GateCheck", "QualityGateMetrics", "QualityGateEvaluation",
 ]

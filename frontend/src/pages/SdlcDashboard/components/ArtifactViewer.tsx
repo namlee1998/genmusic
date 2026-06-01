@@ -49,10 +49,10 @@ export default function ArtifactViewer({ artifacts, selected, onSelect }: Props)
           <textarea
             value={editContent}
             onChange={(e) => setEditContent(e.target.value)}
-            className="w-full h-full p-4 text-sm font-mono bg-surface-container-low border border-outline-variant/30 rounded-xl outline-none focus:border-primary resize-none"
+            className="w-full h-full p-4 text-xs font-mono bg-[#050505] border border-outline-variant rounded outline-none focus:border-secondary resize-none"
           />
-          <div className="flex justify-end gap-2 p-2 bg-surface-container/50 border-t border-outline-variant/30">
-            <button onClick={() => setIsEditing(false)} className="px-3 py-1.5 text-xs font-bold text-on-surface-variant hover:bg-surface-container-high rounded-lg transition-colors">Hủy</button>
+          <div className="flex justify-end gap-2 p-2 bg-[#0d0e13] border-t border-outline-variant">
+            <button onClick={() => setIsEditing(false)} className="px-3 py-1.5 text-xs font-semibold text-on-surface-variant hover:bg-surface-variant rounded transition-colors">Hủy</button>
             <button onClick={() => {
               // Optimistic save (in real app, call API here)
               if (art.contentText) art.contentText = editContent;
@@ -60,7 +60,7 @@ export default function ArtifactViewer({ artifacts, selected, onSelect }: Props)
                 try { art.contentJson = JSON.parse(editContent); } catch(e) {}
               }
               setIsEditing(false);
-            }} className="px-3 py-1.5 text-xs font-bold text-on-primary bg-primary hover:bg-primary/90 rounded-lg transition-colors shadow-md">Lưu & Approve Gate</button>
+            }} className="px-3 py-1.5 text-xs font-semibold text-on-primary bg-primary hover:opacity-90 rounded transition-all shadow-[0_0_10px_rgba(99,102,241,0.2)]">Lưu & Approve Gate</button>
           </div>
         </div>
       );
@@ -130,7 +130,7 @@ export default function ArtifactViewer({ artifacts, selected, onSelect }: Props)
                     setEditContent(selected.contentText || (selected.contentJson ? JSON.stringify(selected.contentJson, null, 2) : ''));
                     setIsEditing(true);
                   }}
-                  className="px-3 py-1 rounded-lg text-xs font-bold bg-primary/10 text-primary hover:bg-primary/20 transition-colors flex items-center gap-1"
+                  className="px-3 py-1 rounded text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20 transition-colors flex items-center gap-1"
                 >
                   <span className="material-symbols-outlined text-[14px]">edit</span>
                   Edit / Groom

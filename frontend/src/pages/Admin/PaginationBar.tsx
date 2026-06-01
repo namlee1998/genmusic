@@ -13,20 +13,20 @@ export function PaginationBar({ count, limit, offset, onPrev, onNext, className 
   const label = count === 0 ? '0 of 0' : `${start}-${end} of ${count}`;
 
   return (
-    <div className={`flex items-center justify-between text-xs text-slate-500 ${className}`}>
+    <div className={`flex items-center justify-between text-xs text-on-surface-variant/80 ${className}`}>
       <span>{label}</span>
       <div className="flex gap-2">
         <button
           disabled={offset === 0}
           onClick={onPrev}
-          className="px-3 py-1 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50"
+          className="px-3 py-1 rounded border border-outline-variant/60 disabled:opacity-30 hover:bg-surface-container-high hover:text-on-surface transition-colors"
         >
           Prev
         </button>
         <button
           disabled={offset + limit >= count}
           onClick={onNext}
-          className="px-3 py-1 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50"
+          className="px-3 py-1 rounded border border-outline-variant/60 disabled:opacity-30 hover:bg-surface-container-high hover:text-on-surface transition-colors"
         >
           Next
         </button>

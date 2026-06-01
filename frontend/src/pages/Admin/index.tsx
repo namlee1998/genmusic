@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom';
 import { useAdminStore } from '@/store/useAdminStore';
+import { useTheme } from '@/theme';
 import { AdminLogin } from './AdminLogin';
 import { AdminDashboard } from './AdminDashboard';
 import { AdminUsers } from './AdminUsers';
@@ -8,16 +9,17 @@ import { AdminUsers } from './AdminUsers';
 function AdminShell() {
   const { token, admin, logout } = useAdminStore();
   const navigate = useNavigate();
+  const { resolvedMode, toggleMode } = useTheme();
 
   if (!token) return <Navigate to="/admin/login" replace />;
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-background text-on-surface flex">
       {/* Sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-40 w-52 bg-white border-r border-slate-100 flex flex-col">
-        <div className="p-5 border-b border-slate-100">
-          <p className="text-xs font-bold text-blue-600 uppercase tracking-widest">A20 Admin</p>
-          <p className="text-xs text-slate-400 mt-0.5 truncate">{admin?.email}</p>
+      <aside className="fixed inset-y-0 left-0 z-40 w-52 bg-surface-container border-r border-outline-variant flex flex-col">
+        <div className="p-5 border-b border-outline-variant">
+          <p className="text-xs font-bold text-primary uppercase tracking-widest font-label-mono">AIDLC Admin</p>
+          <p className="text-[10px] text-on-surface-variant font-label-mono mt-0.5 truncate">{admin?.email}</p>
         </div>
         <nav className="flex-1 p-3 space-y-1">
           {[
@@ -28,31 +30,40 @@ function AdminShell() {
               key={to}
               to={to}
               className={({ isActive }) =>
-                `flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                `flex items-center gap-2.5 px-3 py-2 rounded border text-xs font-semibold transition-all ${
                   isActive
-                    ? 'bg-blue-50 text-blue-700 font-medium'
-                    : 'text-slate-600 hover:bg-slate-50'
+                    ? 'bg-primary/10 border-primary/30 text-primary shadow-[0_0_8px_rgba(99,102,241,0.15)]'
+                    : 'text-on-surface-variant border-transparent hover:bg-surface-variant hover:text-on-surface'
                 }`
               }
             >
               <span className="material-symbols-outlined text-base">{icon}</span>
-              {label}
+              <span>{label}</span>
             </NavLink>
           ))}
         </nav>
-        <div className="p-3 border-t border-slate-100">
+        <div className="p-3 border-t border-outline-variant space-y-1">
+          <button
+            onClick={toggleMode}
+            className="flex items-center gap-2.5 px-3 py-2 w-full rounded border border-transparent text-xs font-semibold text-on-surface-variant hover:bg-surface-variant hover:text-on-surface transition-colors"
+          >
+            <span className="material-symbols-outlined text-base">
+              {resolvedMode === 'dark' ? 'light_mode' : 'dark_mode'}
+            </span>
+            <span>{resolvedMode === 'dark' ? 'Light mode' : 'Dark mode'}</span>
+          </button>
           <button
             onClick={() => { logout(); navigate('/admin/login'); }}
-            className="flex items-center gap-2 px-3 py-2 w-full rounded-lg text-sm text-slate-500 hover:bg-slate-50"
+            className="flex items-center gap-2.5 px-3 py-2 w-full rounded border border-transparent text-xs font-semibold text-on-surface-variant hover:bg-surface-variant hover:text-on-surface transition-colors"
           >
             <span className="material-symbols-outlined text-base">logout</span>
-            Logout
+            <span>Logout</span>
           </button>
         </div>
       </aside>
 
       {/* Main */}
-      <main className="ml-52 min-w-0">
+      <main className="ml-52 flex-1 min-w-0 bg-background min-h-screen">
         <Routes>
           <Route path="dashboard" element={<AdminDashboard />} />
           <Route path="users" element={<AdminUsers />} />

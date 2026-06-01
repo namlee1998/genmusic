@@ -213,26 +213,21 @@ function AppTopBar() {
     `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=0D8ABC&color=fff`;
 
   return (
-    <header className="h-14 shrink-0 z-40 border-b border-outline-variant/20 bg-surface/80 backdrop-blur-xl flex items-center justify-between px-6">
+    <header className="h-16 shrink-0 z-40 border-b border-outline-variant bg-surface-container-lowest/80 backdrop-blur-md flex items-center justify-between px-6">
       <div className="flex items-center gap-3">
-        <img src="/favicon.svg" alt="logo" className="w-7 h-7" />
-        <span className="font-headline font-bold text-sm text-on-surface">
-          AIDLC Platform
-        </span>
-        <span className="text-[10px] font-label text-on-surface-variant bg-surface-container px-2 py-0.5 rounded-full border border-outline-variant/30">
-          v1.2.4
-        </span>
+        <span className="font-headline font-bold text-base text-on-surface tracking-tighter">AIDLC</span>
+        <span className="px-2 py-0.5 rounded bg-surface-variant text-[10px] font-label-mono text-secondary tracking-widest uppercase">Factory</span>
       </div>
 
       <div className="flex items-center flex-1 max-w-xs mx-8">
         <div className="relative w-full">
-          <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-lg">
+          <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-base">
             search
           </span>
           <input
             type="text"
-            placeholder="Tìm kiếm..."
-            className="w-full pl-9 pr-4 py-1.5 bg-surface-container-low border border-outline-variant/30 rounded-xl text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            placeholder="Search projects & assets..."
+            className="w-full pl-9 pr-4 py-1.5 bg-surface-container-lowest border border-outline-variant rounded text-xs focus:border-secondary focus:outline-none focus:ring-1 focus:ring-secondary/40 placeholder:text-on-surface-variant/40"
           />
         </div>
       </div>
@@ -241,7 +236,7 @@ function AppTopBar() {
         <button
           onClick={() => setFeatureRequestFormOpen(true)}
           disabled={!currentProjectId}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-on-primary text-xs font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-primary/20"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-primary hover:bg-primary/95 text-on-primary text-xs font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_10px_rgba(99,102,241,0.2)]"
           title={!currentProjectId ? "Vui lòng chọn một dự án từ Sidebar trước" : ""}
         >
           <span>🚀</span>
@@ -253,7 +248,7 @@ function AppTopBar() {
         <button
           onClick={toggleMode}
           title="Toggle theme"
-          className="w-8 h-8 rounded-xl border border-outline-variant/30 bg-surface-container-low flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-container transition-colors"
+          className="w-8 h-8 rounded border border-outline-variant bg-surface-container-low flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors"
         >
           <span className="material-symbols-outlined text-[17px]">
             {resolvedMode === 'dark' ? 'dark_mode' : 'light_mode'}
@@ -263,7 +258,7 @@ function AppTopBar() {
         <button
           onClick={handleSignOut}
           title="Đăng xuất"
-          className="w-8 h-8 rounded-xl border border-outline-variant/20 bg-surface-container-low flex items-center justify-center text-on-surface-variant hover:text-red-500 transition-colors"
+          className="w-8 h-8 rounded border border-outline-variant bg-surface-container-low flex items-center justify-center text-on-surface-variant hover:text-red-500 transition-colors"
         >
           <span className="material-symbols-outlined text-[18px]">logout</span>
         </button>
@@ -271,16 +266,16 @@ function AppTopBar() {
         <button
           type="button"
           onClick={() => navigate('/profile')}
-          className="flex items-center gap-2 rounded-xl px-2 py-1 text-left transition-colors hover:bg-surface-container-low"
+          className="flex items-center gap-2 rounded px-2 py-1 text-left transition-colors hover:bg-surface-variant"
           title="Hồ sơ cá nhân"
         >
           <div className="text-right">
-            <p className="text-xs font-bold font-headline leading-none">{displayName}</p>
-            <p className="text-[10px] text-on-surface-variant uppercase tracking-widest leading-none mt-0.5">
+            <p className="text-xs font-semibold leading-none">{displayName}</p>
+            <p className="text-[10px] text-on-surface-variant uppercase tracking-widest leading-none mt-0.5 font-label-mono">
               {roleName}
             </p>
           </div>
-          <div className="w-8 h-8 rounded-full border border-outline-variant/20 overflow-hidden">
+          <div className="w-8 h-8 rounded border border-outline-variant overflow-hidden">
             <img
               src={avatarUrl}
               alt="avatar"
@@ -326,10 +321,10 @@ function CreateProjectDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center px-4">
-      <div className="w-full max-w-sm rounded-2xl bg-surface-container-lowest border border-outline-variant/30 shadow-2xl p-5">
-        <h4 className="text-base font-bold font-headline text-on-surface mb-3">Tạo dự án mới</h4>
-        <label className="block text-xs text-on-surface-variant mb-1">Tên dự án</label>
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center px-4">
+      <div className="w-full max-w-sm rounded border border-outline-variant bg-surface-container-lowest shadow-2xl p-5">
+        <h4 className="text-sm font-semibold text-on-surface mb-3">Tạo dự án mới</h4>
+        <label className="block text-[11px] text-on-surface-variant mb-1 font-label-mono uppercase tracking-wider">Tên dự án</label>
         <input
           autoFocus
           value={value}
@@ -338,11 +333,11 @@ function CreateProjectDialog({
             if (e.key === 'Escape') onCancel();
             if (e.key === 'Enter') void handleSubmit();
           }}
-          className="w-full rounded-xl border border-outline-variant/30 px-3 py-2 text-sm outline-none focus:border-primary bg-surface-container-low"
+          className="w-full rounded border border-outline-variant px-3 py-2 text-xs bg-surface-container-low text-on-surface placeholder:text-on-surface-variant/40 focus:border-secondary outline-none transition-colors"
           placeholder="Nhập tên dự án..."
         />
         {error && (
-          <p className="mt-3 rounded-xl border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">
+          <p className="mt-3 rounded border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">
             {error}
           </p>
         )}
@@ -350,14 +345,14 @@ function CreateProjectDialog({
           <button
             onClick={onCancel}
             disabled={submitting}
-            className="px-3 py-2 rounded-lg text-xs font-bold bg-surface-container-high text-on-surface disabled:opacity-50"
+            className="px-3 py-1.5 rounded text-xs font-semibold bg-surface-container-high border border-outline-variant text-on-surface hover:bg-surface-variant disabled:opacity-50 transition-colors"
           >
             Hủy
           </button>
           <button
             onClick={handleSubmit}
             disabled={submitting || !value.trim()}
-            className="px-3 py-2 rounded-lg text-xs font-bold bg-primary text-on-primary disabled:opacity-50"
+            className="px-3 py-1.5 rounded text-xs font-semibold bg-primary text-on-primary hover:opacity-90 disabled:opacity-50 transition-all shadow-[0_0_10px_rgba(99,102,241,0.2)]"
           >
             {submitting ? 'Đang tạo...' : 'Tạo dự án'}
           </button>

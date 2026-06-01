@@ -19,16 +19,16 @@ const TABLE_LIMIT = 10;
 
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4">
-      <p className="mb-1 text-xs text-slate-500">{label}</p>
-      <p className="text-2xl font-bold text-slate-800">{value}</p>
-      {sub && <p className="mt-1 text-xs text-slate-400">{sub}</p>}
+    <div className="rounded border border-outline-variant/60 bg-surface-container p-4">
+      <p className="mb-1 text-xs text-on-surface-variant font-medium">{label}</p>
+      <p className="text-2xl font-bold font-headline text-on-surface">{value}</p>
+      {sub && <p className="mt-1 text-xs text-on-surface-variant/70">{sub}</p>}
     </div>
   );
 }
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">{children}</p>;
+  return <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-on-surface-variant font-headline">{children}</p>;
 }
 
 function formatNumber(value: number | null | undefined) {
@@ -49,7 +49,7 @@ function formatDate(value: string | null | undefined) {
 function traceLink(traceUrl: string | null) {
   if (!traceUrl) {
     return (
-      <button disabled className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-300">
+      <button disabled className="inline-flex items-center gap-1 rounded border border-outline-variant/30 px-2.5 py-1 text-xs text-on-surface-variant/40 cursor-not-allowed">
         <ExternalLink size={12} />
         Trace
       </button>
@@ -61,7 +61,7 @@ function traceLink(traceUrl: string | null) {
       href={traceUrl}
       target="_blank"
       rel="noreferrer"
-      className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50"
+      className="inline-flex items-center gap-1 rounded border border-primary/30 px-2.5 py-1 text-xs font-semibold text-primary hover:bg-primary/10 transition-colors"
     >
       <ExternalLink size={12} />
       Trace
@@ -84,13 +84,13 @@ function getAgentRows(
 
 function FailuresTable({ rows }: { rows: RecentFailureRow[] }) {
   if (!rows.length) {
-    return <p className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-400">No failed agent runs in this window</p>;
+    return <p className="rounded border border-outline-variant/60 bg-surface-container p-4 text-sm text-on-surface-variant">No failed agent runs in this window</p>;
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+    <div className="overflow-hidden rounded border border-outline-variant/60 bg-surface-container">
       <table className="w-full text-left text-sm">
-        <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
+        <thead className="bg-surface-container-high/60 text-xs uppercase tracking-wider text-on-surface-variant font-headline font-semibold">
           <tr>
             <th className="px-4 py-3">Agent</th>
             <th className="px-4 py-3">Task</th>
@@ -101,15 +101,15 @@ function FailuresTable({ rows }: { rows: RecentFailureRow[] }) {
             <th className="px-4 py-3">Trace</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100">
+        <tbody className="divide-y divide-outline-variant/30">
           {rows.map((row) => (
-            <tr key={row.taskId}>
-              <td className="px-4 py-3 font-medium text-slate-700">{row.label}</td>
-              <td className="px-4 py-3 font-mono text-xs text-slate-500">{row.taskId.slice(0, 8)}</td>
-              <td className="px-4 py-3 text-slate-600">{formatDate(row.failedAt)}</td>
-              <td className="px-4 py-3 text-slate-600">{formatMs(row.latencyMs)}</td>
-              <td className="px-4 py-3 text-slate-600">{row.model || '-'}</td>
-              <td className="max-w-xs truncate px-4 py-3 text-slate-600" title={row.error || ''}>
+            <tr key={row.taskId} className="hover:bg-surface-container-high/30 transition-colors">
+              <td className="px-4 py-3 font-semibold text-on-surface">{row.label}</td>
+              <td className="px-4 py-3 font-mono text-xs text-on-surface-variant">{row.taskId.slice(0, 8)}</td>
+              <td className="px-4 py-3 text-on-surface/80">{formatDate(row.failedAt)}</td>
+              <td className="px-4 py-3 text-on-surface/80">{formatMs(row.latencyMs)}</td>
+              <td className="px-4 py-3 text-on-surface/80">{row.model || '-'}</td>
+              <td className="max-w-xs truncate px-4 py-3 text-on-surface/80" title={row.error || ''}>
                 {row.error || '-'}
               </td>
               <td className="px-4 py-3">{traceLink(row.traceUrl)}</td>
@@ -123,13 +123,13 @@ function FailuresTable({ rows }: { rows: RecentFailureRow[] }) {
 
 function TracesTable({ rows }: { rows: RecentTraceRow[] }) {
   if (!rows.length) {
-    return <p className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-400">No traced agent runs in this window</p>;
+    return <p className="rounded border border-outline-variant/60 bg-surface-container p-4 text-sm text-on-surface-variant">No traced agent runs in this window</p>;
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+    <div className="overflow-hidden rounded border border-outline-variant/60 bg-surface-container">
       <table className="w-full text-left text-sm">
-        <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
+        <thead className="bg-surface-container-high/60 text-xs uppercase tracking-wider text-on-surface-variant font-headline font-semibold">
           <tr>
             <th className="px-4 py-3">Agent</th>
             <th className="px-4 py-3">Status</th>
@@ -139,14 +139,14 @@ function TracesTable({ rows }: { rows: RecentTraceRow[] }) {
             <th className="px-4 py-3">Trace</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100">
+        <tbody className="divide-y divide-outline-variant/30">
           {rows.map((row) => (
-            <tr key={row.taskId}>
-              <td className="px-4 py-3 font-medium text-slate-700">{row.label}</td>
-              <td className="px-4 py-3 text-slate-600">{row.status}</td>
-              <td className="px-4 py-3 text-slate-600">{formatDate(row.completedAt || row.failedAt)}</td>
-              <td className="px-4 py-3 text-slate-600">{formatMs(row.latencyMs)}</td>
-              <td className="px-4 py-3 text-slate-600">{row.model || '-'}</td>
+            <tr key={row.taskId} className="hover:bg-surface-container-high/30 transition-colors">
+              <td className="px-4 py-3 font-semibold text-on-surface">{row.label}</td>
+              <td className="px-4 py-3 text-on-surface/80">{row.status}</td>
+              <td className="px-4 py-3 text-on-surface/80">{formatDate(row.completedAt || row.failedAt)}</td>
+              <td className="px-4 py-3 text-on-surface/80">{formatMs(row.latencyMs)}</td>
+              <td className="px-4 py-3 text-on-surface/80">{row.model || '-'}</td>
               <td className="px-4 py-3">{traceLink(row.traceUrl)}</td>
             </tr>
           ))}
@@ -183,8 +183,8 @@ export function AdminDashboard() {
   return (
     <div className="space-y-6 p-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-slate-800">Dashboard</h2>
-        <div className="flex gap-1 rounded-lg bg-slate-100 p-1">
+        <h2 className="text-lg font-bold font-headline text-on-surface">Dashboard</h2>
+        <div className="flex gap-1 bg-surface-container border border-outline-variant/40 rounded p-1">
           {WINDOWS.map((w) => (
             <button
               key={w}
@@ -193,8 +193,10 @@ export function AdminDashboard() {
                 setTracesOffset(0);
                 setWindow(w);
               }}
-              className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-                window === w ? 'bg-white text-blue-600 shadow' : 'text-slate-500 hover:text-slate-700'
+              className={`rounded px-3 py-1 text-xs font-semibold transition-all ${
+                window === w
+                  ? 'bg-primary text-on-primary shadow-sm'
+                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/50'
               }`}
             >
               {w}
@@ -203,10 +205,10 @@ export function AdminDashboard() {
         </div>
       </div>
 
-      {loading && <p className="text-sm text-slate-400">Loading...</p>}
+      {loading && <p className="text-sm text-on-surface-variant">Loading...</p>}
 
       {!loading && !d && (
-        <p className="text-sm text-slate-400">No snapshot data yet. Check back after the hourly batch job runs.</p>
+        <p className="text-sm text-on-surface-variant">No snapshot data yet. Check back after the hourly batch job runs.</p>
       )}
 
       {!loading && (
@@ -227,9 +229,9 @@ export function AdminDashboard() {
               <SectionTitle>Users By Plan</SectionTitle>
               <div className="flex flex-wrap gap-3">
                 {Object.entries(d.users_by_plan).map(([plan, count]) => (
-                  <div key={plan} className="rounded-lg border border-slate-200 bg-white px-5 py-3 text-center">
-                    <p className="text-xs capitalize text-slate-500">{plan}</p>
-                    <p className="text-xl font-bold text-slate-800">{count}</p>
+                  <div key={plan} className="rounded border border-outline-variant/60 bg-surface-container px-5 py-3 text-center min-w-[120px]">
+                    <p className="text-xs capitalize text-on-surface-variant font-medium">{plan}</p>
+                    <p className="text-xl font-bold font-headline text-on-surface mt-0.5">{count}</p>
                   </div>
                 ))}
               </div>
@@ -238,9 +240,9 @@ export function AdminDashboard() {
 
           <div>
             <SectionTitle>Agent Health</SectionTitle>
-            <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+            <div className="overflow-hidden rounded border border-outline-variant/60 bg-surface-container">
               <table className="w-full text-left text-sm">
-                <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
+                <thead className="bg-surface-container-high/60 text-xs uppercase tracking-wider text-on-surface-variant font-headline font-semibold">
                   <tr>
                     <th className="px-4 py-3">Agent</th>
                     <th className="px-4 py-3">Runs</th>
@@ -251,16 +253,22 @@ export function AdminDashboard() {
                     <th className="px-4 py-3">Max latency</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-outline-variant/30">
                   {agentRows.map(({ key, label, runs, latency }) => (
-                    <tr key={key}>
-                      <td className="px-4 py-3 font-medium text-slate-700">{label}</td>
-                      <td className="px-4 py-3 text-slate-600">{formatNumber(runs?.total ?? 0)}</td>
-                      <td className="px-4 py-3 text-slate-600">{runs ? `${runs.successRate}%` : '0%'}</td>
-                      <td className="px-4 py-3 text-slate-600">{runs ? `${runs.failureRate}%` : '0%'}</td>
-                      <td className="px-4 py-3 text-slate-600">{formatMs(latency?.avg)}</td>
-                      <td className="px-4 py-3 text-slate-600">{formatMs(latency?.p95)}</td>
-                      <td className="px-4 py-3 text-slate-600">{formatMs(latency?.max)}</td>
+                    <tr key={key} className="hover:bg-surface-container-high/30 transition-colors">
+                      <td className="px-4 py-3 font-semibold text-on-surface">{label}</td>
+                      <td className="px-4 py-3 text-on-surface-variant">{formatNumber(runs?.total ?? 0)}</td>
+                      <td className="px-4 py-3 text-on-surface-variant font-medium">
+                        <span className="text-green-500">{runs ? `${runs.successRate}%` : '0%'}</span>
+                      </td>
+                      <td className="px-4 py-3 text-on-surface-variant font-medium">
+                        <span className={runs && runs.failureRate > 0 ? 'text-red-500' : 'text-on-surface-variant'}>
+                          {runs ? `${runs.failureRate}%` : '0%'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-on-surface-variant">{formatMs(latency?.avg)}</td>
+                      <td className="px-4 py-3 text-on-surface-variant">{formatMs(latency?.p95)}</td>
+                      <td className="px-4 py-3 text-on-surface-variant">{formatMs(latency?.max)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -309,7 +317,7 @@ export function AdminDashboard() {
             )}
           </div>
 
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-on-surface-variant/60 font-mono">
             {snap && <p>Snapshot at: {formatDate(snap.snapshot_at)}</p>}
             {live && <p>Live metrics updated: {formatDate(live.updatedAt)}</p>}
           </div>

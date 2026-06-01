@@ -1,0 +1,21 @@
+[33mcommit bde4f40ec2df9a5ed8579e09d99aecc64e56a85f[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mstaging[m[33m, [m[1;31morigin/staging[m[33m, [m[1;31morigin/features/giang[m[33m)[m
+Merge: 91030c0 eb7bcfc
+Author: Minh2255 <80587574+trongminh13@users.noreply.github.com>
+Date:   Fri May 29 10:49:10 2026 +0700
+
+    Merge pull request #8 from namlee1998/features/minh2255
+    
+    Features/minh2255
+
+[33mcommit eb7bcfc927eed6c672e3be71a8fac959fca1695d[m[33m ([m[1;31morigin/features/minh2255[m[33m)[m
+Author: Minh2255 <80587574+trongminh13@users.noreply.github.com>
+Date:   Fri May 29 10:47:58 2026 +0700
+
+    refactor: clean up mock artifacts and update core agent workflows and frontend components
+
+[33mcommit 3b9a62d4aba863b93623fafa499d4d7b0f1b492b[m
+Merge: c9083e5 b5ab997
+Author: namlee1998 <longtaiew01@gmail.com>
+Date:   Thu May 28 11:14:45 2026 +0700
+
+    Merge branch 'features/nam' into staging

@@ -196,35 +196,35 @@ export function AuthPage() {
   if (mode === 'success' || mode === 'reset-sent') {
     const isResetSent = mode === 'reset-sent';
     return (
-      <div className="min-h-screen bg-[#0A0B10] flex items-center justify-center p-4">
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
         <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
+          initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="max-w-md w-full bg-[#11131A] rounded-2xl shadow-xl border border-white/10 p-8 text-center space-y-6"
+          className="max-w-md w-full bg-surface-container border border-outline-variant rounded shadow-xl p-8 text-center space-y-6"
         >
-          <div className="w-16 h-16 bg-indigo-500/20 text-indigo-400 rounded-full flex items-center justify-center mx-auto">
+          <div className="w-16 h-16 bg-primary/10 text-primary border border-primary/30 rounded flex items-center justify-center mx-auto shadow-[0_0_15px_rgba(99,102,241,0.15)]">
             <CheckCircle2 size={32} />
           </div>
-          <h2 className="text-2xl font-bold text-white">
+          <h2 className="text-xl font-bold text-white">
             {isResetSent ? 'Check your inbox' : 'Registration Successful'}
           </h2>
-          <p className="text-slate-400">
+          <p className="text-xs text-on-surface-variant/80">
             {isResetSent
               ? 'We sent a password recovery link. Please open your email and follow the instructions.'
               : 'Please check your email to verify your account before signing in.'}
           </p>
-          <Button className="w-full bg-indigo-500 hover:bg-indigo-600 text-white border-none" onClick={() => setMode('signin')}>
+          <button className="w-full h-11 bg-primary hover:opacity-90 text-on-primary text-xs font-semibold rounded shadow-[0_0_10px_rgba(99,102,241,0.2)] transition-all" onClick={() => setMode('signin')}>
             Back to Sign In
-          </Button>
+          </button>
         </motion.div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#0A0B10] flex overflow-hidden font-sans">
+    <div className="min-h-screen bg-background flex overflow-hidden font-sans">
       {/* Left Column */}
-      <div className="flex-1 flex flex-col justify-center px-4 sm:px-6 lg:flex-none lg:w-[480px] xl:w-[540px] bg-[#0A0B10] z-10 relative border-r border-white/5">
+      <div className="flex-1 flex flex-col justify-center px-4 sm:px-6 lg:flex-none lg:w-[480px] xl:w-[540px] bg-background z-10 relative border-r border-outline-variant">
         <div className="mx-auto w-full max-w-sm py-12 relative z-10">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -234,12 +234,9 @@ export function AuthPage() {
             {/* Logo area matching screenshot */}
             <div className="flex justify-between items-center mb-16">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-[#8B5CF6] flex items-center justify-center text-white font-bold text-lg shadow-[0_0_15px_rgba(139,92,246,0.5)]">
-                  AI
-                </div>
                 <span className="text-xl font-bold text-white tracking-wide">AIDLC Platform</span>
               </div>
-              <div className="px-3 py-1 rounded-full border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 text-xs font-bold tracking-wider uppercase">
+              <div className="px-3 py-1 rounded border border-secondary/30 bg-secondary/10 text-secondary text-xs font-bold tracking-wider uppercase">
                 Demo
               </div>
             </div>
@@ -252,13 +249,13 @@ export function AuthPage() {
             </h2>
 
             {(mode === 'signin' || mode === 'signup') && (
-              <p className="text-sm text-slate-400 mb-8">
+              <p className="text-xs text-on-surface-variant mb-8">
                 {mode === 'signin' ? 'Sign in to access the Autonomous Software Factory' : 'Sign up to access the Autonomous Software Factory'}
               </p>
             )}
 
             {mode === 'forgot-password' && (
-              <p className="text-sm text-slate-400 mb-8">
+              <p className="text-xs text-on-surface-variant mb-8">
                 Enter your account email and we will send you a recovery link.
               </p>
             )}
@@ -268,7 +265,7 @@ export function AuthPage() {
             {(mode === 'signin' || mode === 'signup') && (
               <form onSubmit={handleEmailAuth} className="space-y-5">
                 <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-1.5">Email address</label>
+                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase font-label-mono tracking-wider">Email address</label>
                   <input
                     type="email"
                     required
@@ -276,13 +273,13 @@ export function AuthPage() {
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="you@aidlc.ai"
                     autoComplete="email"
-                    className="w-full h-11 px-4 bg-[#13151D] border border-slate-800 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
+                    className="w-full h-10 px-3 bg-[#050505] border border-outline-variant rounded text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:border-secondary focus:ring-1 focus:ring-secondary/40 outline-none transition-colors"
                   />
                 </div>
 
                 <div className="relative group">
                   <div className="flex justify-between items-center mb-1.5">
-                    <label className="block text-sm font-medium text-slate-300">Password</label>
+                    <label className="block text-xs font-semibold text-on-surface-variant uppercase font-label-mono tracking-wider">Password</label>
                   </div>
                   <input
                     type={showPassword ? 'text' : 'password'}
@@ -291,42 +288,42 @@ export function AuthPage() {
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
                     autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-                    className="w-full h-11 px-4 bg-[#13151D] border border-slate-800 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
+                    className="w-full h-10 pl-3 pr-10 bg-[#050505] border border-outline-variant rounded text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:border-secondary focus:ring-1 focus:ring-secondary/40 outline-none transition-colors"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 bottom-3 text-slate-500 hover:text-slate-300 transition-colors"
+                    className="absolute right-3 top-[30px] text-on-surface-variant hover:text-white transition-colors"
                   >
-                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
 
                 {notice && (
-                  <div className="p-3 text-sm text-indigo-300 bg-indigo-900/20 rounded-lg border border-indigo-800/50">
+                  <div className="p-3 text-xs text-primary bg-primary/10 rounded border border-primary/20">
                     {notice}
                   </div>
                 )}
                 {error && (
-                  <div className="p-3 text-sm text-red-400 bg-red-900/20 rounded-lg border border-red-800/50">
+                  <div className="p-3 text-xs text-error bg-error/10 rounded border border-error/20">
                     {error}
                   </div>
                 )}
 
-                <Button
+                <button
                   type="submit"
-                  className="w-full h-12 text-[15px] font-semibold bg-[#8B5CF6] hover:bg-[#7C3AED] text-white border-none rounded-lg shadow-[0_4px_14px_0_rgba(139,92,246,0.39)] hover:shadow-[0_6px_20px_rgba(139,92,246,0.23)] transition duration-200"
+                  className="w-full h-11 text-xs font-semibold bg-primary hover:opacity-95 text-on-primary rounded shadow-[0_0_10px_rgba(99,102,241,0.2)] transition-all"
                   disabled={loading}
                 >
                   {loading ? 'Processing...' : mode === 'signin' ? 'Sign in' : 'Create account'}
-                </Button>
+                </button>
               </form>
             )}
 
             {mode === 'forgot-password' && (
               <form onSubmit={handleForgotPassword} className="space-y-5">
                 <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-1.5">Account Email</label>
+                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase font-label-mono tracking-wider">Account Email</label>
                   <input
                     type="email"
                     required
@@ -334,24 +331,24 @@ export function AuthPage() {
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="you@aidlc.ai"
                     autoComplete="email"
-                    className="w-full h-11 px-4 bg-[#13151D] border border-slate-800 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
+                    className="w-full h-10 px-3 bg-[#050505] border border-outline-variant rounded text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:border-secondary focus:ring-1 focus:ring-secondary/40 outline-none transition-colors"
                   />
                 </div>
                 {error && (
-                  <div className="p-3 text-sm text-red-400 bg-red-900/20 rounded-lg border border-red-800/50">
+                  <div className="p-3 text-xs text-error bg-error/10 rounded border border-error/20">
                     {error}
                   </div>
                 )}
-                <Button
+                <button
                   type="submit"
-                  className="w-full h-12 text-[15px] font-semibold bg-[#8B5CF6] hover:bg-[#7C3AED] text-white border-none rounded-lg shadow-[0_4px_14px_0_rgba(139,92,246,0.39)] transition duration-200"
+                  className="w-full h-11 text-xs font-semibold bg-primary hover:opacity-95 text-on-primary rounded shadow-[0_0_10px_rgba(99,102,241,0.2)] transition-all"
                   disabled={loading}
                 >
                   {loading ? 'Sending...' : 'Send reset link'}
-                </Button>
+                </button>
                 <button
                   type="button"
-                  className="w-full text-sm text-slate-400 hover:text-white transition-colors mt-4"
+                  className="w-full text-xs text-on-surface-variant hover:text-white transition-colors mt-4"
                   onClick={() => setMode('signin')}
                 >
                   Back to sign in
@@ -362,7 +359,7 @@ export function AuthPage() {
             {mode === 'update-password' && (
               <form onSubmit={handleUpdatePassword} className="space-y-5">
                  <div className="relative group">
-                  <label className="block text-sm font-medium text-slate-300 mb-1.5">New Password</label>
+                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase font-label-mono tracking-wider">New Password</label>
                   <input
                     type={showNewPassword ? 'text' : 'password'}
                     required
@@ -370,18 +367,18 @@ export function AuthPage() {
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="••••••••"
                     autoComplete="new-password"
-                    className="w-full h-11 px-4 bg-[#13151D] border border-slate-800 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
+                    className="w-full h-10 pl-3 pr-10 bg-[#050505] border border-outline-variant rounded text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:border-secondary focus:ring-1 focus:ring-secondary/40 outline-none transition-colors"
                   />
                   <button
                     type="button"
                     onClick={() => setShowNewPassword(!showNewPassword)}
-                    className="absolute right-3 bottom-3 text-slate-500 hover:text-slate-300 transition-colors"
+                    className="absolute right-3 top-[30px] text-on-surface-variant hover:text-white transition-colors"
                   >
-                    {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-1.5">Confirm New Password</label>
+                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase font-label-mono tracking-wider">Confirm New Password</label>
                   <input
                     type={showNewPassword ? 'text' : 'password'}
                     required
@@ -389,24 +386,24 @@ export function AuthPage() {
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="••••••••"
                     autoComplete="new-password"
-                    className="w-full h-11 px-4 bg-[#13151D] border border-slate-800 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
+                    className="w-full h-10 px-3 bg-[#050505] border border-outline-variant rounded text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:border-secondary focus:ring-1 focus:ring-secondary/40 outline-none transition-colors"
                   />
                 </div>
                 {error && (
-                  <div className="p-3 text-sm text-red-400 bg-red-900/20 rounded-lg border border-red-800/50">
+                  <div className="p-3 text-xs text-error bg-error/10 rounded border border-error/20">
                     {error}
                   </div>
                 )}
-                <Button
+                <button
                   type="submit"
-                  className="w-full h-12 text-[15px] font-semibold bg-[#8B5CF6] hover:bg-[#7C3AED] text-white border-none rounded-lg shadow-[0_4px_14px_0_rgba(139,92,246,0.39)] transition duration-200"
+                  className="w-full h-11 text-xs font-semibold bg-primary hover:opacity-95 text-on-primary rounded shadow-[0_0_10px_rgba(99,102,241,0.2)] transition-all"
                   disabled={loading}
                 >
                   {loading ? 'Updating...' : 'Update password'}
-                </Button>
+                </button>
                 <button
                   type="button"
-                  className="w-full text-sm text-slate-400 hover:text-white transition-colors mt-4"
+                  className="w-full text-xs text-on-surface-variant hover:text-white transition-colors mt-4"
                   onClick={resetToSignIn}
                 >
                   Cancel and return to sign in
@@ -417,16 +414,16 @@ export function AuthPage() {
             {/* Demo Account Autofill Card */}
             {(mode === 'signin') && (
               <div 
-                className="mt-8 p-4 rounded-xl border border-indigo-500/20 bg-gradient-to-br from-[#13151D] to-[#0A0B10] hover:border-indigo-500/40 cursor-pointer transition-all group"
+                className="mt-8 p-4 rounded border border-primary/20 bg-surface-container hover:border-primary/40 cursor-pointer transition-all group"
                 onClick={() => {
                   setEmail('dev@aidlc.ai');
                   setPassword('dev123');
                 }}
               >
-                <p className="text-[10px] font-bold text-slate-400 tracking-wider mb-3 uppercase">Demo Account - Click to Autofill</p>
+                <p className="text-[9px] font-label-mono text-on-surface-variant/80 tracking-wider mb-2.5 uppercase">Demo Account - Click to Autofill</p>
                 <div className="flex items-center gap-3">
-                  <span className="px-2 py-1 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300">DEVELOPER</span>
-                  <span className="text-sm font-mono text-slate-400 group-hover:text-white transition-colors">dev@aidlc.ai - dev123</span>
+                  <span className="px-2 py-1 rounded border border-primary/30 bg-primary/10 text-[9px] font-label-mono text-primary uppercase">DEVELOPER</span>
+                  <span className="text-xs font-mono text-on-surface-variant group-hover:text-white transition-colors">dev@aidlc.ai - dev123</span>
                 </div>
               </div>
             )}
@@ -439,7 +436,7 @@ export function AuthPage() {
                     setError(null);
                     setNotice(null);
                   }}
-                  className="text-sm font-medium text-slate-400 hover:text-white transition-colors"
+                  className="text-xs font-medium text-on-surface-variant hover:text-white transition-colors"
                 >
                   {mode === 'signin' ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
                 </button>
@@ -452,7 +449,7 @@ export function AuthPage() {
                       setError(null);
                       setNotice(null);
                     }}
-                    className="text-sm font-medium text-indigo-400 hover:text-indigo-300 transition-colors"
+                    className="text-xs font-medium text-secondary hover:underline transition-colors"
                   >
                     Forgot password?
                   </button>
@@ -464,10 +461,10 @@ export function AuthPage() {
       </div>
 
       {/* Right Column */}
-      <div className="hidden lg:flex relative flex-1 bg-[#0A0B10] overflow-hidden items-center justify-center">
+      <div className="hidden lg:flex relative flex-1 bg-background overflow-hidden items-center justify-center">
         {/* Glow Effects */}
-        <div className="absolute top-[-20%] right-[-10%] w-[800px] h-[800px] rounded-full bg-indigo-900/20 blur-[120px] pointer-events-none" />
-        <div className="absolute bottom-[-20%] left-[10%] w-[600px] h-[600px] rounded-full bg-blue-900/10 blur-[100px] pointer-events-none" />
+        <div className="absolute top-[-20%] right-[-10%] w-[800px] h-[800px] rounded-full bg-primary/5 blur-[120px] pointer-events-none" />
+        <div className="absolute bottom-[-20%] left-[10%] w-[600px] h-[600px] rounded-full bg-secondary/5 blur-[100px] pointer-events-none" />
         
         <div className="relative z-20 w-full max-w-[600px] px-12 xl:px-16">
           <motion.div
@@ -475,34 +472,34 @@ export function AuthPage() {
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.8, ease: 'easeOut' }}
           >
-            <h1 className="text-[44px] xl:text-[56px] font-black text-white tracking-tight leading-[1.1] mb-6 font-['Outfit',sans-serif]">
+            <h1 className="text-[40px] xl:text-[48px] font-bold text-white tracking-tight leading-[1.1] mb-6">
               End-to-End<br />
-              <span className="bg-gradient-to-r from-[#8B5CF6] to-[#C084FC] bg-clip-text text-transparent">Autonomous</span><br />
-              <span className="bg-gradient-to-r from-[#8B5CF6] to-[#38BDF8] bg-clip-text text-transparent">Software Factory</span>
+              <span className="bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">Autonomous</span><br />
+              <span className="text-on-surface">Software Factory</span>
             </h1>
             
-            <p className="text-[15px] xl:text-base text-slate-400 leading-relaxed mb-10 max-w-lg">
+            <p className="text-xs xl:text-sm text-on-surface-variant leading-relaxed mb-10 max-w-lg">
               Supervisor-worker workflow: one supervisor fans out PO, UX, DEV, and QA workers in parallel, then fans in for HITL review.<br/>
               Full Human-in-the-Loop control with audit-ready artifacts.
             </p>
 
-            <div className="space-y-3">
-              {/* Feature Cards */}
-              <div className="flex items-center gap-4 p-4 rounded-xl border border-white/5 bg-white/[0.02] hover:bg-white/[0.04] transition-colors cursor-default">
-                <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center font-bold text-white text-sm">AI</div>
-                <p className="text-sm text-slate-300">Supervisor-worker branching with parallel execution</p>
+            <div className="grid grid-cols-2 gap-4">
+              {/* Feature Cards with 4px rounded and 1px border */}
+              <div className="p-4 rounded border border-outline-variant bg-surface-container/30">
+                <div className="font-semibold text-xs text-on-surface mb-1">Branching</div>
+                <p className="text-[11px] text-on-surface-variant">Parallel execution with worker branching</p>
               </div>
-              <div className="flex items-center gap-4 p-4 rounded-xl border border-white/5 bg-white/[0.02] hover:bg-white/[0.04] transition-colors cursor-default">
-                <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center font-bold text-white text-[11px]">HITL</div>
-                <p className="text-sm text-slate-300">HITL gates with approve / reject / rework</p>
+              <div className="p-4 rounded border border-outline-variant bg-surface-container/30">
+                <div className="font-semibold text-xs text-on-surface mb-1">HITL Gates</div>
+                <p className="text-[11px] text-on-surface-variant">HITL review gates: approve / reject / rework</p>
               </div>
-              <div className="flex items-center gap-4 p-4 rounded-xl border border-white/5 bg-white/[0.02] hover:bg-white/[0.04] transition-colors cursor-default">
-                <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center font-bold text-white text-xs">LOG</div>
-                <p className="text-sm text-slate-300">Immutable audit trail - export JSON / CSV</p>
+              <div className="p-4 rounded border border-outline-variant bg-surface-container/30">
+                <div className="font-semibold text-xs text-on-surface mb-1">Audit Trail</div>
+                <p className="text-[11px] text-on-surface-variant">Immutable logs with export options</p>
               </div>
-              <div className="flex items-center gap-4 p-4 rounded-xl border border-white/5 bg-white/[0.02] hover:bg-white/[0.04] transition-colors cursor-default">
-                <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center font-bold text-white text-[10px]">RISK</div>
-                <p className="text-sm text-slate-300">Risk-based HITL review for HIGH risk changes</p>
+              <div className="p-4 rounded border border-outline-variant bg-surface-container/30">
+                <div className="font-semibold text-xs text-on-surface mb-1">Risk Controls</div>
+                <p className="text-[11px] text-on-surface-variant">Risk-based HITL gate enforcement</p>
               </div>
             </div>
           </motion.div>

@@ -40,31 +40,39 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
   return (
     <div
       className={`
-        flex flex-col border-r border-outline-variant/20
+        flex flex-col border-r border-outline-variant
         bg-surface-container-lowest transition-all duration-200 shrink-0
         ${collapsed ? 'w-12' : 'w-56'}
       `}
     >
       {/* Header */}
       <div
-        className={`flex items-center border-b border-outline-variant/20 shrink-0 ${collapsed ? 'justify-center h-12' : 'justify-between px-3 h-12'}`}
+        className={`flex items-center border-b border-outline-variant shrink-0 ${collapsed ? 'justify-center h-16' : 'justify-between px-4 h-16'}`}
       >
         {!collapsed && (
-          <span className="text-[10px] font-bold font-headline text-on-surface-variant uppercase tracking-widest">
-            Dự án
+          <span className="text-[11px] font-label-mono text-on-surface-variant uppercase tracking-widest px-1">
+            Projects
           </span>
         )}
         <button
           onClick={onCreateProject}
           title="Tạo dự án mới"
-          className="w-7 h-7 rounded-lg flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-container transition-colors"
+          className="w-7 h-7 rounded flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-variant transition-colors"
         >
           <span className="material-symbols-outlined text-[18px]">add</span>
         </button>
       </div>
 
       {/* Project list */}
-      <div className="flex-1 overflow-y-auto custom-scrollbar py-2 px-2 min-h-0">
+      <div className="flex-1 overflow-y-auto custom-scrollbar py-3 px-2 min-h-0 space-y-1">
+        {!collapsed && (
+          <div className="px-2 mb-1">
+            <span className="text-[9px] font-label-mono text-on-surface-variant/60 uppercase tracking-widest">
+              Workspace
+            </span>
+          </div>
+        )}
+        
         {projects.map((project, idx) => {
           const dotColor = DOT_COLORS[idx % DOT_COLORS.length];
           const isActive = project.id === activeProjectId;
@@ -75,12 +83,12 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
                 key={project.id}
                 title={`${project.name}${project.role ? ` - ${project.role}` : ''}`}
                 onClick={() => onSelectProject(project.id)}
-                className="flex items-center justify-center py-2.5 cursor-pointer"
+                className="flex items-center justify-center py-2.5 cursor-pointer rounded hover:bg-surface-variant"
               >
                 <div
-                  className={`w-2.5 h-2.5 rounded-full ${dotColor} transition-all ${
+                  className={`w-2 h-2 rounded-full ${dotColor} transition-all ${
                     isActive
-                      ? 'scale-125 ring-2 ring-primary/30 ring-offset-1 ring-offset-surface-container-lowest'
+                      ? 'scale-125 ring-2 ring-primary/40 ring-offset-2 ring-offset-background'
                       : 'opacity-60'
                   }`}
                 />
@@ -93,16 +101,16 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
               key={project.id}
               onClick={() => onSelectProject(project.id)}
               className={`
-                flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors
+                flex items-center gap-2.5 px-3 py-2 rounded border cursor-pointer transition-all duration-150
                 ${
                   isActive
-                    ? 'bg-surface-container-high text-on-surface text-xs font-semibold'
-                    : 'text-on-surface-variant text-xs hover:bg-surface-container hover:text-on-surface'
+                    ? 'bg-primary/10 border-primary/40 text-primary shadow-[0_0_10px_rgba(99,102,241,0.15)] font-semibold'
+                    : 'text-on-surface-variant border-transparent hover:bg-surface-variant hover:text-on-surface'
                 }
               `}
             >
               <div className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
-              <span className="truncate leading-tight">{project.name}</span>
+              <span className="truncate leading-tight text-xs">{project.name}</span>
               {project.role && (
                 <span className={`ml-auto shrink-0 rounded border px-1.5 py-0.5 text-[9px] uppercase ${roleBadgeClass(project.role)}`}>
                   {project.role}
@@ -116,7 +124,7 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
                     event.stopPropagation();
                     onOpenSettings(project.id);
                   }}
-                  className="shrink-0 text-on-surface-variant hover:text-primary"
+                  className="shrink-0 text-on-surface-variant hover:text-primary transition-colors ml-1"
                 >
                   <span className="material-symbols-outlined text-[15px]">settings</span>
                 </button>
@@ -125,12 +133,18 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
           );
         })}
 
+        {!collapsed && projects.length === 0 && (
+          <div className="py-6 px-2 text-center text-[11px] text-on-surface-variant/60">
+            Chưa có dự án
+          </div>
+        )}
+
         {!collapsed && (
           <>
-            <div className="my-2 mx-1 border-t border-outline-variant/20" />
+            <div className="my-2 mx-1 border-t border-outline-variant" />
             <button
               onClick={onCreateProject}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-on-surface-variant hover:text-primary hover:bg-surface-container transition-colors"
+              className="w-full flex items-center gap-2 px-3 py-2 rounded text-xs text-on-surface-variant hover:text-primary hover:bg-surface-variant transition-colors"
             >
               <span className="material-symbols-outlined text-[14px]">add</span>
               <span>Tạo dự án mới</span>
@@ -140,13 +154,13 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
       </div>
 
       {/* Footer toggle */}
-      <div className="border-t border-outline-variant/20 p-2 shrink-0">
+      <div className="border-t border-outline-variant p-2 shrink-0">
         <button
           onClick={onToggleCollapse}
           title={collapsed ? 'Mở rộng' : 'Thu gọn'}
           className={`
-            w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs
-            text-on-surface-variant hover:bg-surface-container transition-colors
+            w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs
+            text-on-surface-variant hover:bg-surface-variant transition-colors
             ${collapsed ? 'justify-center' : ''}
           `}
         >

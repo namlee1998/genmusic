@@ -8,9 +8,9 @@ const WINDOWS = [
 ] as const;
 
 const BAR_COLORS = [
-  'bg-blue-500',
-  'bg-indigo-500',
-  'bg-violet-500',
+  'bg-primary',
+  'bg-primary/80',
+  'bg-secondary',
 ];
 
 function fmtRate(rate: number, prev: number | null): string {
@@ -35,19 +35,21 @@ export function AdminFunnel() {
   }, [windowDays]);
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-5">
+    <div className="bg-surface-container rounded border border-outline-variant/60 p-5">
       <div className="flex items-center justify-between mb-5">
         <div>
-          <h3 className="text-sm font-semibold text-slate-800">Pipeline Completion Funnel</h3>
-          <p className="text-xs text-slate-400 mt-0.5">Projects that completed each agent stage</p>
+          <h3 className="text-sm font-semibold font-headline text-on-surface">Pipeline Completion Funnel</h3>
+          <p className="text-xs text-on-surface-variant mt-0.5">Projects that completed each agent stage</p>
         </div>
-        <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
+        <div className="flex gap-1 bg-surface-container-low border border-outline-variant/40 rounded p-1">
           {WINDOWS.map(({ label, days }) => (
             <button
               key={days}
               onClick={() => setWindowDays(days)}
-              className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                windowDays === days ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'
+              className={`px-3 py-1 rounded text-xs font-semibold transition-all ${
+                windowDays === days
+                  ? 'bg-primary text-on-primary shadow-sm'
+                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high/50'
               }`}
             >
               {label}
@@ -56,8 +58,8 @@ export function AdminFunnel() {
         </div>
       </div>
 
-      {loading && <p className="text-sm text-slate-400 py-4">Loading...</p>}
-      {error && <p className="text-sm text-red-500 py-4">{error}</p>}
+      {loading && <p className="text-sm text-on-surface-variant py-4">Loading...</p>}
+      {error && <p className="text-sm text-error py-4">{error}</p>}
 
       {!loading && !error && data && (
         <div className="space-y-4">
@@ -67,22 +69,22 @@ export function AdminFunnel() {
             return (
               <div key={step.agent}>
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-xs font-medium text-slate-600">{step.label}</span>
+                  <span className="text-xs font-medium text-on-surface-variant">{step.label}</span>
                   <div className="flex items-center gap-3">
                     {prevRate !== null && (
-                      <span className="text-xs text-slate-400">{fmtRate(step.rate, prevRate)}</span>
+                      <span className="text-xs text-on-surface-variant/60">{fmtRate(step.rate, prevRate)}</span>
                     )}
-                    <span className="text-xs font-semibold text-slate-700 w-10 text-right">
+                    <span className="text-xs font-semibold text-on-surface w-10 text-right">
                       {step.rate}%
                     </span>
-                    <span className="text-xs text-slate-400 w-14 text-right">
+                    <span className="text-xs text-on-surface-variant/60 w-14 text-right">
                       {step.count.toLocaleString()} proj
                     </span>
                   </div>
                 </div>
-                <div className="h-5 bg-slate-100 rounded-full overflow-hidden">
+                <div className="h-5 bg-[#050505] rounded overflow-hidden border border-outline-variant/30">
                   <div
-                    className={`h-full rounded-full transition-all duration-500 ${BAR_COLORS[i]}`}
+                    className={`h-full rounded transition-all duration-500 ${BAR_COLORS[i % BAR_COLORS.length]}`}
                     style={{ width: `${(step.count / maxCount) * 100}%` }}
                   />
                 </div>
@@ -90,11 +92,11 @@ export function AdminFunnel() {
             );
           })}
 
-          <div className="pt-3 border-t border-slate-100 flex justify-between items-center">
-            <span className="text-xs text-slate-500">End-to-end completion rate</span>
-            <span className={`text-sm font-bold ${
-              data.overall_rate >= 50 ? 'text-green-600' :
-              data.overall_rate >= 25 ? 'text-yellow-600' : 'text-red-600'
+          <div className="pt-3 border-t border-outline-variant/30 flex justify-between items-center">
+            <span className="text-xs text-on-surface-variant">End-to-end completion rate</span>
+            <span className={`text-sm font-bold font-headline ${
+              data.overall_rate >= 50 ? 'text-green-500' :
+              data.overall_rate >= 25 ? 'text-warning' : 'text-error'
             }`}>
               {data.overall_rate}%
             </span>
@@ -103,7 +105,7 @@ export function AdminFunnel() {
       )}
 
       {!loading && !error && data && data.steps[0]?.count === 0 && (
-        <p className="text-sm text-slate-400 py-4">No completed runs in this window.</p>
+        <p className="text-sm text-on-surface-variant py-4">No completed runs in this window.</p>
       )}
     </div>
   );
