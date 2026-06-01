@@ -32,7 +32,7 @@ Mentor đang kỳ vọng team tập trung vào:
 - Product phải chạy tốt, mượt mà.
 - Data có thể mock nhưng trải nghiệm phải giống sản phẩm thật.
 
-2. Problem Statement
+2. Problem Statement
 Hiện nay nhiều AI coding tools có thể hỗ trợ viết code nhanh hơn, nhưng phần lớn chỉ tập
 trung vào một tác vụ riêng lẻ như code generation, code completion hoặc bug fixing. Chúng
 chưa thể hiện rõ một quy trình phát triển phần mềm end-to-end có phân vai, có artifact
@@ -69,7 +69,7 @@ User có thể thực hiện một demo end-to-end như sau:
 9. Human quyết định release / hold / request changes.
 10. Audit trail lưu toàn bộ quá trình.
 
-4. How BMAD, OMO and HITL Are Used
+4. How BMAD, OMO and HITL Are Used
 Đây là phần quan trọng nhất để tránh hiểu nhầm rằng team chỉ copy tool có sẵn.
 
 4.1 BMAD được dùng như thế nào?
@@ -128,7 +128,7 @@ DEV Agent outputs:
 - mock_code_diff.md
 - changed_files.json
 
-- risk_assessment.md
+- risk_assessment.md
 QA Agent outputs:
 - test_cases.md
 - qa_report.md
@@ -199,7 +199,7 @@ Feature Request
 → Agent Runner executes selected agent
 → Lifecycle hook logs event
 
-→ Self-review validates artifact
+→ Self-review validates artifact
 → Human gate approves/rejects
 → Todo Enforcer checks missing phase/artifact
 → Workflow proceeds or loops back
@@ -267,7 +267,7 @@ Human kiểm soát gì?
 Requirement đúng đề bài
 chưa? AC rõ chưa?
 
-Generate PRD + Stories + AC]
+Generate PRD + Stories + AC]
 E --> E1[PO Self-review
 Check output contract]
 E1 --> G1{Human Gate 1
@@ -313,7 +313,7 @@ DRAFT
 → FINAL_REVIEW
 → READY / HOLD
 
-Reject/rework states:
+Reject/rework states:
 PO_REWORK
 UX_REWORK
 DEV_REWORK
@@ -372,7 +372,7 @@ User/System
 
 All agents
 
-Data Group
+Data Group
 
 Purpose
 
@@ -465,7 +465,7 @@ Human/Mentor
 "Keep UI consistent with current design",
 "Mock data is allowed for demo"
 
-]
+]
 }
 
 7.5 HITL Decision schema
@@ -504,7 +504,7 @@ Input
 Feature Request Data
 Project Context Data
 
-Responsibilities
+Responsibilities
 - Làm rõ problem statement.
 - Xác định target user.
 - Tạo user stories.
@@ -550,7 +550,7 @@ Output quality rules
 - Mỗi user story chính phải có user flow tương ứng.
 - Mỗi screen phải có state phù hợp.
 
-- UX spec phải đủ chi tiết để DEV Agent implement.
+- UX spec phải đủ chi tiết để DEV Agent implement.
 - Không được bỏ qua error states với critical flow.
 
 Human gate
@@ -593,7 +593,7 @@ Implementation Plan
 Code Diff
 Risk Assessment
 
-Responsibilities
+Responsibilities
 - Sinh test cases từ acceptance criteria.
 - Tạo AC coverage matrix.
 - Tạo QA report.
@@ -681,7 +681,7 @@ Component inventory Yes
 
 Buttons, forms, alerts, etc.
 
-Field
+Field
 
 Required Notes
 
@@ -791,7 +791,7 @@ nào, và pass/fail dựa trên expected result nào.
 "steps": [
 "Open login page",
 
-"Check Google login button"
+"Check Google login button"
 ],
 "expected_result": "Google login button is visible and clickable",
 "actual_result": null,
@@ -880,7 +880,7 @@ Release quality
 
 Final review packet + release decision gate
 
-12. System Architecture
+12. System Architecture
 12.1 Logical architecture
 flowchart LR
 FE[Frontend
@@ -921,7 +921,7 @@ Approval Service
 - Stores human decisions
 - Applies gate transition rules
 
-Audit Log Service
+Audit Log Service
 - Records all actions
 - Provides timeline for mentor/user
 Quality Gate Service
@@ -959,7 +959,7 @@ Shows:
 13.2 Workflow Detail Page
 Shows:
 
-PO Analysis → UX Design → Development → QA Review → Final Review
+PO Analysis → UX Design → Development → QA Review → Final Review
 
 Each phase shows:
 - Agent name
@@ -1001,7 +1001,7 @@ Example:
 10:17 QA Agent generated test cases
 10:20 Human approved final release
 
-14. MVP Scope
+14. MVP Scope
 14.1 Must-have
 - Web app chạy được
 - Feature request intake
@@ -1043,7 +1043,7 @@ Week 1 — Foundation
 - Setup frontend/backend skeleton
 - Setup database schema
 
-Week 2 — Core workflow
+Week 2 — Core workflow
 - Create feature request API/UI
 - Implement workflow run
 - Implement PO Agent mock
@@ -1086,7 +1086,7 @@ faster.
 Priority: High
 Target user: End user
 
-Constraints:
+Constraints:
 - Must not break existing email login
 - Must support login failure state
 - Must redirect to dashboard after successful login
@@ -1155,7 +1155,7 @@ Report not enough
 
 Build web app with real
 
-Risk
+Risk
 
 Impact
 
@@ -1169,4 +1169,4 @@ Fails core requirement
 Use artifact handoff + state
 machine
 
-
+

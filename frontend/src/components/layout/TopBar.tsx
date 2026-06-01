@@ -19,10 +19,10 @@ export const TopBar: React.FC<TopBarProps> = ({ searchPlaceholder = 'Search...' 
   };
 
   const displayName =
-    user?.user_metadata?.company_name || user?.email?.split('@')[0] || 'Admin Console';
-  const roleName = user?.user_metadata?.job_title || 'Enterprise';
+    (user?.user_metadata?.company_name as string | undefined) || user?.email?.split('@')[0] || 'Admin Console';
+  const roleName = (user?.user_metadata?.job_title as string | undefined) || 'Enterprise';
   // Use UI Avatars to generate a placeholder avatar based on the display name
-  const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=0D8ABC&color=fff`;
+  const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(String(displayName))}&background=0D8ABC&color=fff`;
 
   return (
     <header className="fixed top-0 right-0 left-64 h-16 z-40 border-b border-outline-variant/30 bg-surface/80 backdrop-blur-xl flex justify-between items-center px-8 shadow-[0_8px_40px_-28px_rgba(36,42,66,0.45)]">

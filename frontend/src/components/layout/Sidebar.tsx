@@ -36,7 +36,7 @@ export const Sidebar: React.FC = () => {
           </div>
           <div>
             <h1 className="text-[15px] font-bold text-on-surface tracking-tight font-headline leading-tight">
-              AIDLC Platform Auto Testcase Generator
+              AIDLC Control Platform
             </h1>
             <p className="text-[10px] text-on-surface-variant font-label uppercase tracking-widest opacity-80">
               v1.2.4

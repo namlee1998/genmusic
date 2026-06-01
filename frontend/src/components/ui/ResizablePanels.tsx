@@ -64,7 +64,9 @@ export function ResizablePanels({
         const containerW = containerRef.current.offsetWidth;
         const newPct = clamp(startPercent.current + (dx / containerW) * 100);
         setLeftPercent(newPct);
-        try { localStorage.setItem(`rpanel_${storageKey}`, String(newPct)); } catch {}
+        try { localStorage.setItem(`rpanel_${storageKey}`, String(newPct)); } catch {
+          // Ignore storage errors (e.g. quota exceeded)
+        }
       });
     };
     const onMouseUp = () => {

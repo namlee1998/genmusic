@@ -1,8 +1,8 @@
 import React from 'react';
-import { motion } from 'framer-motion';
+
 import { useSdlcStore } from '@/store/useSdlcStore';
 import AgentPhaseCard from './AgentPhaseCard';
-import * as sdlcApi from '@/services/api/sdlcApi';
+
 
 const PHASES = [
   { key: 'po',  label: 'PO Agent',  icon: '📋', gate: 'REQUIREMENT_GATE', color: '#6366f1' },
@@ -16,17 +16,19 @@ interface Props {
   onRunNext: (phase: string, sourceTaskId: string, feedbackPrompt?: string) => void;
   onOpenGate: (taskId: string) => void;
   onViewArtifacts: (taskId: string) => void;
+  onGateDecision?: (taskId: string, decision: 'APPROVE' | 'REJECT' | 'REQUEST_CHANGES', comment: string) => Promise<void>;
   sseLogs: string[];
   activePhase: string | null;
   sseActive: boolean;
 }
 
-export default function StageInspector({ onRunIntent, onRunNext, onOpenGate, onViewArtifacts, sseLogs, activePhase, sseActive }: Props) {
+export default function StageInspector({ onRunIntent, onRunNext, onOpenGate, onViewArtifacts, onGateDecision, sseLogs, activePhase, sseActive }: Props) {
   const { workflowStatus } = useSdlcStore();
   const phases = workflowStatus?.phases;
 
   // The intent agent is like the "User Feature Request / Supervisor" in this graph
-  const intentData = (phases as any)?.['intent'] ?? null;
+  const phasesMap = phases as Record<string, unknown> | undefined;
+  const intentData = (phasesMap?.['intent'] as NonNullable<typeof phases>[keyof NonNullable<typeof phases>]) ?? null;
   const isIntentDone = intentData?.status === 'completed';
   const isIntentApproved = intentData?.hitlDecision?.decision === 'APPROVE' || intentData?.versionStatus === 'committed';
 
@@ -85,11 +87,17 @@ export default function StageInspector({ onRunIntent, onRunNext, onOpenGate, onV
                       phase={phase}
                       phaseData={phaseData}
                       isUnlocked={!!isUnlocked}
-                      isActive={(activePhase as any) === phase.key && sseActive}
+                      isActive={activePhase === phase.key && sseActive}
                       sseLogs={activePhase === phase.key ? sseLogs : []}
                       onRun={() => { if (prevPhaseData?.taskId) onRunNext(phase.key, prevPhaseData.taskId, phaseData?.hitlDecision?.comment); }}
                       onOpenGate={() => { if (phaseData?.taskId) onOpenGate(phaseData.taskId); }}
                       onViewArtifacts={() => { if (phaseData?.taskId) onViewArtifacts(phaseData.taskId); }}
+                      onGateDecision={onGateDecision ? (decision, comment) => {
+                        if (phaseData?.taskId) {
+                          return onGateDecision(phaseData.taskId, decision, comment);
+                        }
+                        return Promise.resolve();
+                      } : undefined}
                     />
                   </div>
                 );

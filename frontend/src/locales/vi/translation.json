@@ -54,7 +54,7 @@
       "tag": "Ví dụ thực tế",
       "title": "Xem sự biến đổi",
       "subtitle": "Từ mô tả tiếng người ↔ mã YAML thực thi — hoàn toàn tự động.",
-      "terminal": "mobile-testgen / pipeline demo",
+      "terminal": "aidlc-platform / pipeline demo",
       "inputTag": "ĐẦU VÀO",
       "outputTag": "ĐẦU RA",
       "aiGenerated": "AI Tạo Ra"
@@ -86,14 +86,14 @@
       "startBtn": "Bắt Đầu Miễn Phí"
     },
     "footer": {
-      "copyright": "© 2026 AIDLC Platform Auto Testcase Generator. Được xây dựng dành cho QA Engineers.",
+      "copyright": "© 2026 AIDLC Control Platform. Được phát triển bởi Team 6.",
       "docs": "Tài liệu",
       "architecture": "Kiến trúc",
       "signIn": "Đăng nhập"
     }
   },
   "nav": {
-    "title": "Mobile TestGen",
+    "title": "AIDLC Platform",
     "badge": "AI Cấp Quyền",
     "signIn": "Đăng Nhập",
     "goToApp": "Vào Ứng Dụng",

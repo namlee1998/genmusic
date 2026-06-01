@@ -77,6 +77,7 @@ interface SdlcState {
   // ── Audit Trail ───────────────────────────────────────────────────────
   auditEvents: AuditEvent[];
   isFeatureRequestFormOpen: boolean;
+  isAuditSidebarOpen: boolean;
 
   // ── Error ─────────────────────────────────────────────────────────────
   error: string | null;
@@ -91,8 +92,10 @@ interface SdlcState {
   setTaskStatus: (status: TaskStatus | null) => void;
   setArtifacts: (artifacts: Artifact[]) => void;
   selectArtifact: (artifact: Artifact | null) => void;
+  updateArtifactContent: (artifactId: string, contentText?: string, contentJson?: unknown) => void;
   setAuditEvents: (events: AuditEvent[]) => void;
   setFeatureRequestFormOpen: (isOpen: boolean) => void;
+  setAuditSidebarOpen: (isOpen: boolean) => void;
   setError: (msg: string | null) => void;
   clearTask: () => void;
 }
@@ -110,6 +113,7 @@ export const useSdlcStore = create<SdlcState>((set) => ({
   selectedArtifact: null,
   auditEvents: [],
   isFeatureRequestFormOpen: false,
+  isAuditSidebarOpen: false,
   error: null,
 
   setProjectId: (id) => {
@@ -125,8 +129,29 @@ export const useSdlcStore = create<SdlcState>((set) => ({
   setTaskStatus: (status) => set({ taskStatus: status }),
   setArtifacts: (artifacts) => set({ artifacts }),
   selectArtifact: (artifact) => set({ selectedArtifact: artifact }),
+  updateArtifactContent: (artifactId, contentText, contentJson) =>
+    set((s) => ({
+      artifacts: s.artifacts.map((a) =>
+        a.id === artifactId
+          ? {
+              ...a,
+              ...(contentText !== undefined ? { contentText } : {}),
+              ...(contentJson !== undefined ? { contentJson } : {}),
+            }
+          : a
+      ),
+      selectedArtifact:
+        s.selectedArtifact?.id === artifactId
+          ? {
+              ...s.selectedArtifact,
+              ...(contentText !== undefined ? { contentText } : {}),
+              ...(contentJson !== undefined ? { contentJson } : {}),
+            }
+          : s.selectedArtifact,
+    })),
   setAuditEvents: (events) => set({ auditEvents: events }),
   setFeatureRequestFormOpen: (isOpen) => set({ isFeatureRequestFormOpen: isOpen }),
+  setAuditSidebarOpen: (isOpen) => set({ isAuditSidebarOpen: isOpen }),
   setError: (msg) => set({ error: msg }),
   clearTask: () => set({ activeTaskId: null, activePhase: null, taskStatus: null, sseLogs: [], sseActive: false }),
 }));

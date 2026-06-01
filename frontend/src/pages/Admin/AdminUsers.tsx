@@ -42,7 +42,12 @@ function ExpandedRow({
     setDetail(result);
   }, [userId, usageOffset]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void load();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [load]);
 
   const act = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -209,7 +214,12 @@ export function AdminUsers() {
     }
   }, [offset, planFilter, statusFilter, search, limit]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void load();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [load]);
 
   const toggleExpand = (userId: string) => {
     setExpandedUserId((prev) => (prev === userId ? null : userId));

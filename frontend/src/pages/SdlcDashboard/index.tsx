@@ -1,19 +1,22 @@
 import './sdlc.css';
-import { useEffect, useState, useCallback, Fragment } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSdlcStore } from '@/store/useSdlcStore';
 import * as sdlcApi from '@/services/api/sdlcApi';
 import { useAppStore } from '@/store/useAppStore';
-import AgentPhaseCard from './components/AgentPhaseCard';
+
 import StageInspector from './components/StageInspector';
 import HumanGatePanel from './components/HumanGatePanel';
 import ArtifactViewer from './components/ArtifactViewer';
 import AuditTimeline from './components/AuditTimeline';
+import { AuditSidebar } from './components/AuditSidebar';
+import FinalReviewPacket from './components/FinalReviewPacket';
 import FeatureRequestForm from './components/FeatureRequestForm';
 import EmptyProjectState from './components/EmptyProjectState';
 import KanbanBoard from './components/KanbanBoard';
 
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const PHASES = [
   { key: 'intent', label: 'Intent Agent', icon: '🧠', gate: 'REQUIREMENT_GATE', color: '#f59e0b' },
   { key: 'po',  label: 'PO Agent',  icon: '📋', gate: 'REQUIREMENT_GATE', color: '#6366f1' },
@@ -25,22 +28,23 @@ const PHASES = [
 export default function SdlcDashboard() {
   const { currentProjectId, treeLoaded, fetchTree } = useAppStore();
   const {
-    projectId, workflowStatus, workflowLoading, activeTaskId, activePhase,
+    projectId, workflowStatus, workflowLoading, activePhase,
     sseLogs, sseActive, artifacts, selectedArtifact, auditEvents,
     setProjectId, setWorkflowStatus, setWorkflowLoading,
     setActiveTask, appendSseLog, setSseActive, setArtifacts,
     selectArtifact, setAuditEvents, setError,
     isFeatureRequestFormOpen, setFeatureRequestFormOpen,
+    isAuditSidebarOpen, setAuditSidebarOpen,
   } = useSdlcStore();
 
   const [gateTaskId, setGateTaskId]     = useState<string | null>(null);
   const [sseAbort, setSseAbort]         = useState<AbortController | null>(null);
   const [panel, setPanel]               = useState<'artifacts' | 'audit'>('artifacts');
-  const [viewMode, setViewMode]         = useState<'kanban' | 'pipeline'>('kanban');
+  const [viewMode, setViewMode]         = useState<'kanban' | 'pipeline' | 'release'>('kanban');
 
   useEffect(() => {
     if (currentProjectId && currentProjectId !== projectId) setProjectId(currentProjectId);
-  }, [currentProjectId]);
+  }, [currentProjectId, projectId, setProjectId]);
 
   // Load project if visited directly
   useEffect(() => {
@@ -54,9 +58,9 @@ export default function SdlcDashboard() {
     try {
       const ws = await sdlcApi.getWorkflowStatus(projectId);
       setWorkflowStatus(ws);
-    } catch (e) { setError('Failed to load workflow status'); }
+    } catch { setError('Failed to load workflow status'); }
     finally { setWorkflowLoading(false); }
-  }, [projectId]);
+  }, [projectId, setError, setWorkflowLoading, setWorkflowStatus]);
 
   useEffect(() => { refreshStatus(); }, [refreshStatus]);
 
@@ -64,7 +68,7 @@ export default function SdlcDashboard() {
   useEffect(() => {
     if (!projectId) return;
     sdlcApi.getAuditTrail(projectId).then((d) => setAuditEvents(d.events)).catch(() => {});
-  }, [projectId, workflowStatus]);
+  }, [projectId, workflowStatus, setAuditEvents]);
 
   // SSE subscription
   const startSSE = useCallback((taskId: string, phase: typeof PHASES[number]['key']) => {
@@ -80,9 +84,17 @@ export default function SdlcDashboard() {
         setArtifacts(task.artifacts || []);
       },
       onError: (d) => { setSseActive(false); setError((d.message as string) || 'Agent error'); },
+      onWarning: (msg) => { appendSseLog(`⚠️ ${msg}`); }
     });
     setSseAbort(abort);
-  }, [sseAbort, refreshStatus]);
+  }, [sseAbort, refreshStatus, appendSseLog, setActiveTask, setArtifacts, setError, setSseActive]);
+
+  // Clean up SSE subscription on unmount
+  useEffect(() => {
+    return () => {
+      sseAbort?.abort();
+    };
+  }, [sseAbort]);
 
   // Run handlers
   const handleRunIntent = async (fr: sdlcApi.FeatureRequest) => {
@@ -106,11 +118,15 @@ export default function SdlcDashboard() {
     startSSE(res.task_id, phase);
   };
 
+  const handleGateDecisionWithId = async (taskId: string, decision: sdlcApi.GateDecisionPayload['decision'], comment: string) => {
+    await sdlcApi.submitGateDecision(taskId, { decision, comment });
+    await refreshStatus();
+  };
+
   const handleGateDecision = async (decision: sdlcApi.GateDecisionPayload['decision'], comment: string) => {
     if (!gateTaskId) return;
-    await sdlcApi.submitGateDecision(gateTaskId, { decision, comment });
+    await handleGateDecisionWithId(gateTaskId, decision, comment);
     setGateTaskId(null);
-    await refreshStatus();
   };
 
   // Artifact viewer
@@ -126,7 +142,7 @@ export default function SdlcDashboard() {
         <EmptyProjectState />
       ) : (
         <>
-          <div className="flex bg-surface-container border-b border-outline-variant/30 px-6 py-2 gap-4 shrink-0">
+          <div className="flex bg-surface-container border-b border-outline-variant/30 px-6 py-2 gap-4 items-center shrink-0">
             <button
               onClick={() => setViewMode('kanban')}
               className={`px-4 py-1.5 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors ${viewMode === 'kanban' ? 'bg-primary text-on-primary' : 'hover:bg-surface-container-high text-on-surface-variant'}`}
@@ -139,12 +155,48 @@ export default function SdlcDashboard() {
             >
               ⚙️ Pipeline Inspector
             </button>
+            <button
+              onClick={() => setViewMode('release')}
+              className={`px-4 py-1.5 rounded-lg text-sm font-bold flex items-center gap-2 relative transition-colors ${viewMode === 'release' ? 'bg-primary text-on-primary' : 'hover:bg-surface-container-high text-on-surface-variant'}`}
+            >
+              📦 Final Release Packet
+              {workflowStatus?.currentPhase === 'FINAL_REVIEW' && (
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-error rounded-full animate-ping" />
+              )}
+            </button>
+            
+            <button
+              onClick={() => setAuditSidebarOpen(!isAuditSidebarOpen)}
+              className={`ml-auto px-4 py-1.5 border border-outline-variant/30 rounded-lg text-xs font-bold flex items-center gap-2 transition-colors ${
+                isAuditSidebarOpen
+                  ? 'bg-primary/20 border-primary/50 text-primary'
+                  : 'bg-surface-container-high hover:bg-surface-container-highest text-on-surface'
+              }`}
+            >
+              <span className="material-symbols-outlined text-sm">history</span>
+              Lịch sử duyệt
+            </button>
           </div>
 
           <div className="flex-1 flex flex-col min-h-0 relative">
+            {workflowLoading && (
+              <div className="absolute inset-0 z-20 bg-background/60 backdrop-blur-[1px] flex items-center justify-center">
+                <div className="flex flex-col items-center gap-3 bg-surface-container-high/80 border border-outline-variant/30 px-6 py-4 rounded-xl shadow-xl">
+                  <div className="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent"></div>
+                  <span className="text-xs text-on-surface font-semibold">Đang tải dữ liệu SDLC...</span>
+                </div>
+              </div>
+            )}
+
             {viewMode === 'kanban' ? (
               <div className="absolute inset-0 z-10 bg-background">
                 <KanbanBoard onRunIntent={handleRunIntent} />
+              </div>
+            ) : null}
+
+            {viewMode === 'release' ? (
+              <div className="absolute inset-0 z-10 bg-background overflow-hidden flex flex-col">
+                <FinalReviewPacket projectId={projectId} />
               </div>
             ) : null}
 
@@ -152,9 +204,10 @@ export default function SdlcDashboard() {
             <div className="sdlc-pipeline" style={{ paddingTop: '10px' }}>
               <StageInspector
                 onRunIntent={() => setFeatureRequestFormOpen(true)}
-                onRunNext={handleRunNext as any}
+                onRunNext={handleRunNext as unknown as (phase: string, sourceTaskId: string, feedbackPrompt?: string) => void}
                 onOpenGate={(taskId) => setGateTaskId(taskId)}
                 onViewArtifacts={handleViewArtifacts}
+                onGateDecision={handleGateDecisionWithId}
                 sseLogs={sseLogs}
                 activePhase={activePhase}
                 sseActive={sseActive}
@@ -217,7 +270,7 @@ export default function SdlcDashboard() {
       <AnimatePresence>
         {gateTaskId && (
           <motion.div className="sdlc-modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <motion.div className="sdlc-modal" initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}>
+            <motion.div className="sdlc-modal sdlc-modal--large" initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}>
               <HumanGatePanel
                 taskId={gateTaskId}
                 onDecision={handleGateDecision}
@@ -227,6 +280,9 @@ export default function SdlcDashboard() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── Audit Sidebar Drawer ────────────────────────────────────── */}
+      <AuditSidebar />
     </div>
   );
 }

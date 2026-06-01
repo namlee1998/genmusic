@@ -204,13 +204,13 @@ function AppTopBar() {
 
   const displayName =
     profile?.full_name ||
-    user?.user_metadata?.company_name ||
+    (user?.user_metadata?.company_name as string | undefined) ||
     user?.email?.split('@')[0] ||
     'Admin Console';
-  const roleName = profile?.job_title || user?.user_metadata?.job_title || 'QA Engineer';
+  const roleName = profile?.job_title || (user?.user_metadata?.job_title as string | undefined) || 'QA Engineer';
   const avatarUrl =
     profile?.avatar_url ||
-    `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=0D8ABC&color=fff`;
+    `https://ui-avatars.com/api/?name=${encodeURIComponent(String(displayName))}&background=0D8ABC&color=fff`;
 
   return (
     <header className="h-16 shrink-0 z-40 border-b border-outline-variant bg-surface-container-lowest/80 backdrop-blur-md flex items-center justify-between px-6">

@@ -26,22 +26,22 @@ BMAD HITL Flow - Sequence Diagram Report
 
 Page 1
 
-BMAD HITL Flow - Sequence Diagram Report
+BMAD HITL Flow - Sequence Diagram Report
 
 Page 2
 
-BMAD HITL Flow - Sequence Diagram Report
+BMAD HITL Flow - Sequence Diagram Report
 
 Page 3
 
-3. HITL checkpoints
+3. HITL checkpoints
 BMAD không bắt human approve từng tool call. Human chỉ tham gia ở checkpoint có ý nghĩa sản phẩm hoặc chất lượng.
 
 BMAD HITL Flow - Sequence Diagram Report
 
 Page 4
 
-4. Artifact handoff giữa các session
+4. Artifact handoff giữa các session
 Cơ chế pass artifact qua file system giúp workflow dễ audit, dễ resume và dễ kiểm tra chất lượng. Session sau đọc artifact đã được user review, thay vì phụ thuộc
 vào memory ẩn.
 
@@ -49,7 +49,7 @@ BMAD HITL Flow - Sequence Diagram Report
 
 Page 5
 
-5. Diễn giải dùng trong báo cáo / thuyết trình
+5. Diễn giải dùng trong báo cáo / thuyết trình
 Sơ đồ này mô tả BMAD workflow dưới dạng 4 session agent tách biệt. User bắt đầu bằng một feature request. Mary, với vai trò Business Analyst, tạo product brief
 và PRFAQ để làm rõ vấn đề, target user và constraints. Sau đó user đọc artifact và quyết định chuyển sang John hoặc yêu cầu Mary sửa.
 John, với vai trò Product Manager, đọc artifact của Mary, phỏng vấn user để làm rõ requirement, rồi tạo PRD và epics/stories. John cũng chạy readiness check để
@@ -84,4 +84,4 @@ BMAD HITL Flow - Sequence Diagram Report
 
 Page 6
 
-
+

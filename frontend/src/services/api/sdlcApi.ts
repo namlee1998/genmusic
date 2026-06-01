@@ -79,11 +79,28 @@ export const subscribeTaskSSE = (
     onProgress?: (data: Record<string, unknown>) => void;
     onCompleted?: (data: Record<string, unknown>) => void;
     onError?: (data: Record<string, unknown>) => void;
+    onWarning?: (message: string) => void;
   }
 ): AbortController => {
   const abort = new AbortController();
+  let delay = 1000;
+  let timeoutTimer: NodeJS.Timeout | null = null;
+  let isDone = false;
 
-  (async () => {
+  const resetTimeout = () => {
+    if (timeoutTimer) clearTimeout(timeoutTimer);
+    if (isDone || abort.signal.aborted) return;
+    
+    timeoutTimer = setTimeout(() => {
+      handlers.onWarning?.('No progress events received in the last 60 seconds.');
+    }, 60000);
+  };
+
+  const connect = async () => {
+    if (abort.signal.aborted || isDone) return;
+
+    resetTimeout();
+
     try {
       const session = getStoredAuthSession();
       const headers: Record<string, string> = {};
@@ -96,7 +113,14 @@ export const subscribeTaskSSE = (
         signal: abort.signal,
         headers
       });
-      if (!response.body) return;
+
+      if (!response.body) {
+        throw new Error('Response body is null');
+      }
+
+      // Reset delay on successful connection
+      delay = 1000;
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -105,6 +129,7 @@ export const subscribeTaskSSE = (
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
+
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
@@ -113,22 +138,43 @@ export const subscribeTaskSSE = (
           if (line.startsWith('event: ')) {
             currentEvent = line.slice(7).trim();
           } else if (line.startsWith('data: ') && currentEvent) {
+            resetTimeout();
             try {
               const data = JSON.parse(line.slice(6));
               if (currentEvent === 'progress') handlers.onProgress?.(data);
-              else if (currentEvent === 'completed') handlers.onCompleted?.(data);
-              else if (currentEvent === 'error') handlers.onError?.(data);
-            } catch (_) {}
+              else if (currentEvent === 'completed') {
+                isDone = true;
+                if (timeoutTimer) clearTimeout(timeoutTimer);
+                handlers.onCompleted?.(data);
+                return;
+              } else if (currentEvent === 'error') {
+                isDone = true;
+                if (timeoutTimer) clearTimeout(timeoutTimer);
+                handlers.onError?.(data);
+                return;
+              }
+            } catch {
+              // Ignore JSON parse errors for non-progress events
+            }
             currentEvent = null;
           }
         }
       }
     } catch (err) {
-      if (!(err instanceof DOMException && err.name === 'AbortError')) {
-        handlers.onError?.({ message: 'SSE connection error' });
+      if (abort.signal.aborted) {
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        return;
+      }
+      
+      if (!isDone) {
+        console.warn(`[SSE] Disconnected. Reconnecting in ${delay}ms...`, err);
+        setTimeout(connect, delay);
+        delay = Math.min(delay * 2, 30000);
       }
     }
-  })();
+  };
+
+  connect();
 
   return abort;
 };

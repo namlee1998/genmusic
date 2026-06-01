@@ -4,8 +4,6 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/store/useAuthStore';
 import {
   ChevronRight,
-  Sparkles,
-  CheckCircle2,
   ArrowDown,
   Bot,
   Zap,
@@ -15,11 +13,9 @@ import {
   PenTool,
   Terminal,
   ShieldCheck,
-  Activity,
   UserCheck,
   Gavel,
   History,
-  FileText
 } from 'lucide-react';
 
 const fadeUp = {
@@ -77,14 +73,12 @@ function PipelineStep({
   icon: Icon,
   title,
   desc,
-  color,
   isLast,
 }: {
   step: string;
   icon: React.ElementType;
   title: string;
   desc: string;
-  color: string;
   isLast: boolean;
 }) {
   return (
@@ -228,7 +222,6 @@ Implement a fully functional Kanban board to manage feature backlogs within a pr
                   icon={Lightbulb}
                   title="Intent Agent"
                   desc="Parses raw user requests to extract core business logic."
-                  color="bg-primary"
                   isLast={false}
                 />
               </motion.div>
@@ -243,7 +236,6 @@ Implement a fully functional Kanban board to manage feature backlogs within a pr
                   icon={ClipboardList}
                   title="PO Agent"
                   desc="Drafts detailed PRDs and Acceptance Criteria."
-                  color="bg-primary"
                   isLast={false}
                 />
               </motion.div>
@@ -258,7 +250,6 @@ Implement a fully functional Kanban board to manage feature backlogs within a pr
                   icon={PenTool}
                   title="UX Agent"
                   desc="Generates user flows and wireframe specifications."
-                  color="bg-primary"
                   isLast={false}
                 />
               </motion.div>
@@ -273,7 +264,6 @@ Implement a fully functional Kanban board to manage feature backlogs within a pr
                   icon={Terminal}
                   title="DEV Agent"
                   desc="Writes code, database schemas, and API routes."
-                  color="bg-primary"
                   isLast={false}
                 />
               </motion.div>
@@ -288,7 +278,6 @@ Implement a fully functional Kanban board to manage feature backlogs within a pr
                   icon={ShieldCheck}
                   title="QA Agent"
                   desc="Validates coverage and generates test suites."
-                  color="bg-primary"
                   isLast={true}
                 />
               </motion.div>

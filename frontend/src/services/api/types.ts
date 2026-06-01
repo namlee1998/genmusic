@@ -264,7 +264,7 @@ export interface YamlFile {
 export interface AuthUser {
   id: string;
   email: string | null;
-  user_metadata?: Record<string, any> | null;
+  user_metadata?: Record<string, unknown> | null;
 }
 
 export interface AuthSession {
