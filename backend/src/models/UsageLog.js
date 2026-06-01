@@ -1,47 +1,45 @@
-const supabase = require('../config/database');
+const prisma = require('../config/database');
 
 class UsageLogModel {
   static async create({ userId, projectId, taskId, agentType, status, tokenInput, tokenOutput, creditsCharged }) {
     const tokenTotal = (tokenInput || 0) + (tokenOutput || 0);
-    const { data, error } = await supabase
-      .from('usage_logs')
-      .insert([{
-        user_id: userId,
-        project_id: projectId || null,
-        task_id: taskId || null,
-        agent_type: agentType,
+    const data = await prisma.usageLog.create({
+      data: {
+        userId,
+        projectId: projectId || null,
+        taskId: taskId || null,
+        agentType,
         status,
-        token_input: tokenInput || 0,
-        token_output: tokenOutput || 0,
-        token_total: tokenTotal,
-        credits_charged: creditsCharged || 0,
-        executed_at: new Date().toISOString(),
-      }])
-      .select()
-      .single();
-    if (error) throw error;
+        tokenInput: tokenInput || 0,
+        tokenOutput: tokenOutput || 0,
+        tokenTotal,
+        creditsCharged: creditsCharged || 0,
+        executedAt: new Date(),
+      }
+    });
     return this._map(data);
   }
 
   static async listByUser(userId, { limit = 50, offset = 0 } = {}) {
-    const { data, error } = await supabase
-      .from('usage_logs')
-      .select('*')
-      .eq('user_id', userId)
-      .order('executed_at', { ascending: false })
-      .range(offset, offset + limit - 1);
-    if (error) throw error;
+    const data = await prisma.usageLog.findMany({
+      where: { userId },
+      orderBy: { executedAt: 'desc' },
+      skip: offset,
+      take: limit
+    });
     return (data || []).map(this._map);
   }
 
   static async listByUserPaginated(userId, { limit = 50, offset = 0 } = {}) {
-    const { data, error, count } = await supabase
-      .from('usage_logs')
-      .select('*', { count: 'exact' })
-      .eq('user_id', userId)
-      .order('executed_at', { ascending: false })
-      .range(offset, offset + limit - 1);
-    if (error) throw error;
+    const [data, count] = await Promise.all([
+      prisma.usageLog.findMany({
+        where: { userId },
+        orderBy: { executedAt: 'desc' },
+        skip: offset,
+        take: limit
+      }),
+      prisma.usageLog.count({ where: { userId } })
+    ]);
     return {
       rows: (data || []).map(this._map),
       count: count || 0,
@@ -52,17 +50,22 @@ class UsageLogModel {
 
   /** Aggregate token & credit totals for a user within a date window. */
   static async sumByUser(userId, since) {
-    const { data, error } = await supabase
-      .from('usage_logs')
-      .select('token_total, credits_charged')
-      .eq('user_id', userId)
-      .eq('status', 'completed')
-      .gte('executed_at', since.toISOString());
-    if (error) throw error;
+    const data = await prisma.usageLog.findMany({
+      where: {
+        userId,
+        status: 'completed',
+        executedAt: { gte: since }
+      },
+      select: {
+        tokenTotal: true,
+        creditsCharged: true
+      }
+    });
+
     return (data || []).reduce(
       (acc, row) => ({
-        tokenTotal: acc.tokenTotal + (row.token_total || 0),
-        creditsCharged: acc.creditsCharged + (row.credits_charged || 0),
+        tokenTotal: acc.tokenTotal + (row.tokenTotal || 0),
+        creditsCharged: acc.creditsCharged + (row.creditsCharged || 0),
       }),
       { tokenTotal: 0, creditsCharged: 0 },
     );
@@ -70,27 +73,27 @@ class UsageLogModel {
 
   /** Delete logs older than cutoffDate (90-day retention). */
   static async deleteOlderThan(cutoffDate) {
-    const { error } = await supabase
-      .from('usage_logs')
-      .delete()
-      .lt('executed_at', cutoffDate.toISOString());
-    if (error) throw error;
+    await prisma.usageLog.deleteMany({
+      where: {
+        executedAt: { lt: cutoffDate }
+      }
+    });
   }
 
   static _map(row) {
     if (!row) return null;
     return {
       id: row.id,
-      userId: row.user_id,
-      projectId: row.project_id,
-      taskId: row.task_id,
-      agentType: row.agent_type,
+      userId: row.userId,
+      projectId: row.projectId,
+      taskId: row.taskId,
+      agentType: row.agentType,
       status: row.status,
-      tokenInput: row.token_input,
-      tokenOutput: row.token_output,
-      tokenTotal: row.token_total,
-      creditsCharged: row.credits_charged,
-      executedAt: row.executed_at,
+      tokenInput: row.tokenInput,
+      tokenOutput: row.tokenOutput,
+      tokenTotal: row.tokenTotal,
+      creditsCharged: row.creditsCharged,
+      executedAt: row.executedAt,
     };
   }
 }

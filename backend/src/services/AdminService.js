@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const supabase = require('../config/database');
+const prisma = require('../config/database');
 const AdminUser = require('../models/AdminUser');
 const UserSubscription = require('../models/UserSubscription');
 const Plan = require('../models/Plan');
@@ -145,34 +145,33 @@ class AdminService {
 
   async listUsers({ limit = 50, offset = 0, planId, status, search } = {}) {
     // Fetch subscriptions with pagination filters
-    let query = supabase
-      .from('user_subscriptions')
-      .select('*', { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
-
-    if (planId) query = query.eq('plan_id', planId);
-    if (status) query = query.eq('status', status);
-
-    const { data: subs, error, count } = await query;
-    if (error) throw error;
+    const where = {};
+    if (planId) where.planId = planId;
+    if (status) where.status = status;
+    const count = await prisma.userSubscription.count({ where });
+    const subs = await prisma.userSubscription.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip: offset,
+      take: limit,
+    });
 
     // Fetch Supabase auth user emails for each subscription
     const rows = await Promise.all(
       (subs || []).map(async (sub) => {
         const profile = await this._getProfile(sub.user_id);
         return {
-          userId: sub.user_id,
+          userId: sub.userId,
           email: profile?.email || null,
           fullName: profile?.full_name || null,
-          planId: sub.plan_id,
+          planId: sub.planId,
           status: sub.status,
-          creditsUsed: sub.credits_used,
-          creditsTotal: sub.credits_total,
-          creditsRemaining: sub.credits_total - sub.credits_used,
-          periodStart: sub.period_start,
-          periodEnd: sub.period_end,
-          createdAt: sub.created_at,
+          creditsUsed: sub.creditsUsed || 0,
+          creditsTotal: sub.creditsTotal || 0,
+          creditsRemaining: (sub.creditsTotal || 0) - (sub.creditsUsed || 0),
+          periodStart: sub.periodStart || null,
+          periodEnd: sub.periodEnd || null,
+          createdAt: sub.createdAt,
         };
       }),
     );
@@ -241,11 +240,10 @@ class AdminService {
   }
 
   async resetCredits(userId, actingAdminId) {
-    const { error } = await supabase
-      .from('user_subscriptions')
-      .update({ credits_used: 0, status: 'active', updated_at: new Date().toISOString() })
-      .eq('user_id', userId);
-    if (error) throw error;
+    await prisma.userSubscription.updateMany({
+      where: { userId },
+      data: { creditsUsed: 0, status: 'active' }
+    });
     await this._writeAudit(actingAdminId, 'reset_credits', 'user', userId, {});
   }
 
@@ -255,14 +253,14 @@ class AdminService {
     const since = new Date(Date.now() - windowDays * 86400_000).toISOString();
 
     const [r1, r2, r3] = await Promise.all([
-      supabase.from('tasks').select('project_id').eq('type', 'extract-flows').eq('status', 'completed').gte('created_at', since),
-      supabase.from('tasks').select('project_id').eq('type', 'generate-testcases').eq('status', 'completed').gte('created_at', since),
-      supabase.from('tasks').select('project_id').eq('type', 'generate-automation').eq('status', 'completed').gte('created_at', since),
+      prisma.task.findMany({ where: { type: 'extract-flows', status: 'completed', createdAt: { gte: new Date(since) } }, select: { projectId: true } }),
+      prisma.task.findMany({ where: { type: 'generate-testcases', status: 'completed', createdAt: { gte: new Date(since) } }, select: { projectId: true } }),
+      prisma.task.findMany({ where: { type: 'generate-automation', status: 'completed', createdAt: { gte: new Date(since) } }, select: { projectId: true } }),
     ]);
 
-    const a1 = new Set((r1.data || []).map(r => r.project_id));
-    const a2 = new Set((r2.data || []).map(r => r.project_id));
-    const a3 = new Set((r3.data || []).map(r => r.project_id));
+    const a1 = new Set((r1 || []).map(r => r.projectId));
+    const a2 = new Set((r2 || []).map(r => r.projectId));
+    const a3 = new Set((r3 || []).map(r => r.projectId));
 
     const n1 = a1.size;
     const n2 = [...a1].filter(id => a2.has(id)).length;
@@ -282,76 +280,80 @@ class AdminService {
   // ─── Usage & Audit ───────────────────────────────────────────────────────
 
   async getRecentUsage({ limit = 100, offset = 0 } = {}) {
-    const { data, error, count } = await supabase
-      .from('usage_logs')
-      .select('*', { count: 'exact' })
-      .order('executed_at', { ascending: false })
-      .range(offset, offset + limit - 1);
-    if (error) throw error;
+    const count = await prisma.usageLog.count();
+    const data = await prisma.usageLog.findMany({
+      orderBy: { executedAt: 'desc' },
+      skip: offset,
+      take: limit,
+    });
     return { rows: (data || []).map(UsageLog._map), count: count || 0 };
   }
 
   async getAuditLog({ limit = 100, offset = 0 } = {}) {
-    const { data, error, count } = await supabase
-      .from('audit_logs')
-      .select('*', { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
-    if (error) throw error;
+    const count = await prisma.auditLog.count();
+    const data = await prisma.auditLog.findMany({
+      orderBy: { createdAt: 'desc' },
+      skip: offset,
+      take: limit,
+    });
     return { rows: data || [], count: count || 0 };
   }
 
   // ─── Private ─────────────────────────────────────────────────────────────
 
   async _getProfile(userId) {
-    const { data: authData } = await supabase.auth.admin.getUserById(userId);
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('full_name')
-      .eq('user_id', userId)
-      .single();
+    const user = await prisma.user.findUnique({ where: { id: userId } });
     return {
-      email: authData?.user?.email || null,
-      full_name: profile?.full_name || null,
+      email: user?.email || null,
+      full_name: null, // Full name handled locally now
     };
   }
 
   async _writeAudit(adminId, action, targetType, targetId, payload) {
-    await supabase.from('audit_logs').insert([{
-      admin_id: adminId,
-      action,
-      target_type: targetType,
-      target_id: targetId,
-      payload,
-    }]);
+    await prisma.auditLog.create({
+      data: {
+        userId: adminId,
+        action,
+        entityType: targetType,
+        entityId: targetId,
+        details: JSON.stringify(payload),
+      }
+    });
   }
 
   async _getLiveStats(window, pagination) {
     const since = windowToSince(window);
     const failuresPagination = pagination.failures || clampPagination();
     const tracesPagination = pagination.traces || clampPagination();
-    const usageResult = await supabase
-      .from('usage_logs')
-      .select('user_id, project_id, task_id, agent_type, status, token_input, token_output, token_total, credits_charged, executed_at')
-      .gte('executed_at', since);
-
-    if (usageResult.error) throw usageResult.error;
-
-    const usageRows = usageResult.data || [];
-    const usageByTask = latestUsageByTask(usageRows);
+    const usageRows = await prisma.usageLog.findMany({
+      where: { executedAt: { gte: new Date(since) } },
+    });
+    
+    // Compatibility mapping
+    const mappedUsageRows = usageRows.map(r => ({
+      ...r,
+      user_id: r.userId, project_id: r.projectId, task_id: r.taskId, agent_type: r.agentType,
+      token_input: r.tokenInput, token_output: r.tokenOutput, token_total: r.tokenTotal,
+      credits_charged: r.creditsCharged, executed_at: r.executedAt
+    }));
+    
+    const usageByTask = latestUsageByTask(mappedUsageRows);
     const taskIds = Object.keys(usageByTask);
     let taskRows = [];
 
     if (taskIds.length > 0) {
-      const taskResult = await supabase
-        .from('tasks')
-        .select('id, project_id, type, status, error, updated_at, created_at, observability, source_run_id')
-        .in('id', taskIds)
-        .in('status', ['completed', 'failed'])
-        .limit(200);
+      const taskRowsResult = await prisma.task.findMany({
+        where: { id: { in: taskIds }, status: { in: ['completed', 'failed'] } },
+        take: 200,
+      });
 
-      if (taskResult.error) throw taskResult.error;
-      taskRows = taskResult.data || [];
+      taskRows = taskRowsResult.map(r => ({
+        ...r,
+        project_id: r.projectId,
+        updated_at: r.updatedAt,
+        created_at: r.createdAt,
+        source_run_id: r.sourceRunId,
+      }));
     }
 
     taskRows.sort((a, b) => {

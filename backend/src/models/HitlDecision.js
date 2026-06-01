@@ -1,4 +1,4 @@
-const supabase = require('../config/database');
+const prisma = require('../config/database');
 
 /**
  * HitlDecision — Human-in-the-Loop quality gate decisions.
@@ -9,61 +9,42 @@ const supabase = require('../config/database');
  */
 class HitlDecisionModel {
   static async create(data) {
-    const { data: record, error } = await supabase
-      .from('hitl_decisions')
-      .insert([{
+    const record = await prisma.hitlDecision.create({
+      data: {
         id: data.id,
-        workflow_run_id: data.workflowRunId,
-        task_id: data.taskId,
-        project_id: data.projectId,
+        workflowRunId: data.workflowRunId || data.workflow_run_id,
+        taskId: data.taskId || data.task_id,
+        projectId: data.projectId || data.project_id,
         gate: data.gate,
         decision: data.decision,
         comment: data.comment || null,
-        reviewer_id: data.reviewerId || null,
-        created_at: new Date().toISOString(),
-      }])
-      .select()
-      .single();
-
-    if (error) throw error;
+        reviewerId: data.reviewerId || data.reviewer_id || null,
+      }
+    });
     return this._map(record);
   }
 
   static async findByTaskId(taskId) {
-    const { data, error } = await supabase
-      .from('hitl_decisions')
-      .select('*')
-      .eq('task_id', taskId)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') return null;
-      throw error;
-    }
+    const data = await prisma.hitlDecision.findFirst({
+      where: { taskId },
+      orderBy: { createdAt: 'desc' }
+    });
     return this._map(data);
   }
 
   static async findByProjectId(projectId) {
-    const { data, error } = await supabase
-      .from('hitl_decisions')
-      .select('*')
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: true });
-
-    if (error) throw error;
+    const data = await prisma.hitlDecision.findMany({
+      where: { projectId },
+      orderBy: { createdAt: 'asc' }
+    });
     return (data || []).map(this._map);
   }
 
   static async findLatestByWorkflowRunId(workflowRunId) {
-    const { data, error } = await supabase
-      .from('hitl_decisions')
-      .select('*')
-      .eq('workflow_run_id', workflowRunId)
-      .order('created_at', { ascending: true });
-
-    if (error) throw error;
+    const data = await prisma.hitlDecision.findMany({
+      where: { workflowRunId },
+      orderBy: { createdAt: 'asc' }
+    });
     return (data || []).map(this._map);
   }
 
@@ -71,14 +52,14 @@ class HitlDecisionModel {
     if (!row) return null;
     return {
       id: row.id,
-      workflowRunId: row.workflow_run_id,
-      taskId: row.task_id,
-      projectId: row.project_id,
+      workflowRunId: row.workflowRunId,
+      taskId: row.taskId,
+      projectId: row.projectId,
       gate: row.gate,
       decision: row.decision,
       comment: row.comment,
-      reviewerId: row.reviewer_id,
-      createdAt: row.created_at,
+      reviewerId: row.reviewerId,
+      createdAt: row.createdAt,
     };
   }
 }

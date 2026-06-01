@@ -1,121 +1,83 @@
-const supabase = require('../config/database');
+const prisma = require('../config/database');
 
 class ProjectMemberModel {
   static async create(data) {
-    const { data: record, error } = await supabase
-      .from('project_members')
-      .insert([{
-        project_id: data.projectId,
-        user_id: data.userId,
+    const record = await prisma.projectMembership.create({
+      data: {
+        projectId: data.projectId,
+        userId: data.userId,
         role: data.role,
-        invited_by: data.invitedBy || null,
-      }])
-      .select()
-      .single();
-
-    if (error) throw error;
+        invitedBy: data.invitedBy || null,
+        joinedAt: new Date(),
+      }
+    });
     return this._map(record);
   }
 
   static async find(projectId, userId) {
-    const { data, error } = await supabase
-      .from('project_members')
-      .select('*')
-      .eq('project_id', projectId)
-      .eq('user_id', userId)
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') return null;
-      throw error;
-    }
+    const data = await prisma.projectMembership.findFirst({
+      where: { projectId, userId }
+    });
     return this._map(data);
   }
 
   static async listByProject(projectId) {
-    const { data, error } = await supabase
-      .from('project_members')
-      .select('*')
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: true });
-
-    if (error) throw error;
+    const data = await prisma.projectMembership.findMany({
+      where: { projectId },
+      orderBy: { joinedAt: 'asc' }
+    });
     return (data || []).map(this._map);
   }
 
   static async listByUser(userId) {
-    const { data, error } = await supabase
-      .from('project_members')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: true });
-
-    if (error) throw error;
+    const data = await prisma.projectMembership.findMany({
+      where: { userId },
+      orderBy: { joinedAt: 'asc' }
+    });
     return (data || []).map(this._map);
   }
 
   static async countByProject(projectId) {
-    const { count, error } = await supabase
-      .from('project_members')
-      .select('*', { count: 'exact', head: true })
-      .eq('project_id', projectId);
-    if (error) throw error;
-    return count || 0;
+    return prisma.projectMembership.count({
+      where: { projectId }
+    });
   }
 
   static async countOwnedByUser(userId) {
-    const { count, error } = await supabase
-      .from('project_members')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', userId)
-      .eq('role', 'owner');
-    if (error) throw error;
-    return count || 0;
+    return prisma.projectMembership.count({
+      where: { userId, role: 'owner' }
+    });
   }
 
   static async countOwners(projectId) {
-    const { count, error } = await supabase
-      .from('project_members')
-      .select('*', { count: 'exact', head: true })
-      .eq('project_id', projectId)
-      .eq('role', 'owner');
-
-    if (error) throw error;
-    return count || 0;
+    return prisma.projectMembership.count({
+      where: { projectId, role: 'owner' }
+    });
   }
 
   static async updateRole(projectId, userId, role) {
-    const { data, error } = await supabase
-      .from('project_members')
-      .update({ role })
-      .eq('project_id', projectId)
-      .eq('user_id', userId)
-      .select()
-      .single();
-
-    if (error) throw error;
-    return this._map(data);
+    await prisma.projectMembership.updateMany({
+      where: { projectId, userId },
+      data: { role }
+    });
+    return this.find(projectId, userId);
   }
 
   static async delete(projectId, userId) {
-    const { error } = await supabase
-      .from('project_members')
-      .delete()
-      .eq('project_id', projectId)
-      .eq('user_id', userId);
-
-    if (error) throw error;
+    await prisma.projectMembership.deleteMany({
+      where: { projectId, userId }
+    });
   }
 
   static _map(row) {
     if (!row) return null;
     return {
-      projectId: row.project_id,
-      userId: row.user_id,
+      projectId: row.projectId,
+      userId: row.userId,
       role: row.role,
-      invitedBy: row.invited_by,
-      joinedAt: row.joined_at,
-      createdAt: row.created_at,
+      invitedBy: row.invitedBy,
+      joinedAt: row.joinedAt,
+      createdAt: row.joinedAt, 
     };
   }
 }

@@ -1,23 +1,19 @@
-const supabase = require('../config/database');
+const prisma = require('../config/database');
 
 class TestcaseModel {
   static async create(data) {
-    const { data: record, error } = await supabase
-      .from('testcases')
-      .insert([{
+    const record = await prisma.testcase.create({
+      data: {
         id: data.id,
-        task_id: data.taskId,
-        project_id: data.projectId,
-        feature_name: data.featureName,
-        flow_name: data.flowName,
-        scenario_data: data.scenarioData,
-        automation_yaml: data.automationYaml,
-        yaml_filename: data.yamlFilename,
-      }])
-      .select()
-      .single();
-
-    if (error) throw error;
+        taskId: data.taskId,
+        projectId: data.projectId,
+        featureName: data.featureName,
+        flowName: data.flowName,
+        scenarioData: data.scenarioData,
+        automationYaml: data.automationYaml,
+        yamlFilename: data.yamlFilename,
+      }
+    });
     return this._map(record);
   }
 
@@ -26,52 +22,48 @@ class TestcaseModel {
 
     const rows = records.map(data => ({
       id: data.id,
-      task_id: data.taskId,
-      project_id: data.projectId ?? null,
-      feature_name: data.featureName,
-      flow_name: data.flowName,
-      scenario_data: data.scenarioData,
-      automation_yaml: data.automationYaml ?? null,
-      yaml_filename: data.yamlFilename ?? null,
+      taskId: data.taskId,
+      projectId: data.projectId ?? null,
+      featureName: data.featureName,
+      flowName: data.flowName,
+      scenarioData: data.scenarioData,
+      automationYaml: data.automationYaml ?? null,
+      yamlFilename: data.yamlFilename ?? null,
     }));
 
-    const { data: result, error } = await supabase
-      .from('testcases')
-      .insert(rows)
-      .select();
+    await prisma.testcase.createMany({ data: rows });
 
-    if (error) throw error;
+    const ids = rows.map(r => r.id).filter(Boolean);
+    let result = [];
+    if (ids.length > 0) {
+      result = await prisma.testcase.findMany({ where: { id: { in: ids } } });
+    } else {
+      const taskIds = [...new Set(rows.map(r => r.taskId))];
+      result = await prisma.testcase.findMany({ where: { taskId: { in: taskIds } } });
+    }
+
     return (result || []).map(row => this._map(row));
   }
 
   static async findByTaskId(taskId) {
-    const { data, error } = await supabase
-      .from('testcases')
-      .select('*')
-      .eq('task_id', taskId)
-      .order('created_at', { ascending: true });
-
-    if (error) throw error;
+    const data = await prisma.testcase.findMany({
+      where: { taskId },
+      orderBy: { createdAt: 'asc' }
+    });
     return (data || []).map(this._map);
   }
 
   static async deleteByTaskId(taskId) {
-    const { error } = await supabase
-      .from('testcases')
-      .delete()
-      .eq('task_id', taskId);
-
-    if (error) throw error;
+    await prisma.testcase.deleteMany({
+      where: { taskId }
+    });
   }
 
   static async findByProjectId(projectId) {
-    const { data, error } = await supabase
-      .from('testcases')
-      .select('*')
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: true });
-
-    if (error) throw error;
+    const data = await prisma.testcase.findMany({
+      where: { projectId },
+      orderBy: { createdAt: 'asc' }
+    });
     return (data || []).map(this._map);
   }
 
@@ -79,15 +71,15 @@ class TestcaseModel {
     if (!row) return null;
     return {
       id: row.id,
-      taskId: row.task_id,
-      projectId: row.project_id,
-      featureName: row.feature_name,
-      flowName: row.flow_name,
-      scenarioData: row.scenario_data,
-      automationYaml: row.automation_yaml,
-      yamlFilename: row.yaml_filename,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
+      taskId: row.taskId,
+      projectId: row.projectId,
+      featureName: row.featureName,
+      flowName: row.flowName,
+      scenarioData: row.scenarioData,
+      automationYaml: row.automationYaml,
+      yamlFilename: row.yamlFilename,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
     };
   }
 }
