@@ -44,6 +44,7 @@ class PipelineState(TypedDict, total=False):
     session_id: str
     node_target: str
     context: dict
+    a2a_handoff: dict  # A2AHandoff payload passed along the pipeline
     # Original agents
     agent_1_result: dict | None
     agent_1_error: str | None
@@ -158,7 +159,27 @@ async def node_po_agent(state: PipelineState) -> dict:
             feedback_prompt=ctx.get("feedback_prompt", ""),
         )
         result = await run_po_agent(input_data)
-        return {"po_result": result.model_dump(), "po_error": None}
+        
+        # Populate initial A2AHandoff
+        prd_content = result.prd
+        if result.user_stories:
+            prd_content += "\n\n## User Stories\n"
+            for us in result.user_stories:
+                prd_content += f"- **{us.id}**: As a {us.role}, I want {us.want} so that {us.so_that}.\n"
+        if result.acceptance_criteria:
+            prd_content += "\n\n## Acceptance Criteria\n"
+            for ac in result.acceptance_criteria:
+                prd_content += f"- {ac}\n"
+
+        handoff = {
+            "prd_context": prd_content,
+            "ux_spec": "",
+            "test_cases": [],
+            "quality_gate_status": "",
+            "risk_level": "LOW"
+        }
+
+        return {"po_result": result.model_dump(), "po_error": None, "a2a_handoff": handoff}
     except Exception as e:
         return {"po_result": None, "po_error": str(e)}
 
@@ -167,13 +188,23 @@ async def node_ux_agent(state: PipelineState) -> dict:
     """Run UX Agent: UX Spec + User Flow + Wireframe."""
     try:
         ctx = state.get("context", {})
+        handoff = state.get("a2a_handoff", {})
+        
+        # UX Agent reads prd from A2AHandoff if available, otherwise context
+        prd_text = handoff.get("prd_context", ctx.get("prd", ""))
+        
         input_data = UXAgentInput(
-            prd=ctx.get("prd", ""),
+            prd=prd_text,
             acceptance_criteria=ctx.get("acceptance_criteria", []),
             feedback_prompt=ctx.get("feedback_prompt", ""),
         )
         result = await run_ux_agent(input_data)
-        return {"ux_result": result.model_dump(), "ux_error": None}
+        
+        # Update Handoff with UX Spec
+        if handoff:
+            handoff["ux_spec"] = result.ux_spec
+            
+        return {"ux_result": result.model_dump(), "ux_error": None, "a2a_handoff": handoff}
     except Exception as e:
         return {"ux_result": None, "ux_error": str(e)}
 
@@ -183,15 +214,19 @@ async def node_dev_agent(state: PipelineState) -> dict:
     try:
         ctx = state.get("context", {})
         pc_data = ctx.get("project_context", {})
+        handoff = state.get("a2a_handoff", {})
         
         # If we are in a rework loop, append the sandbox report to the feedback prompt
         fp = ctx.get("feedback_prompt", "")
         if state.get("sandbox_report"):
             fp += f"\n\n[SYSTEM] Sandbox execution failed. Please fix the code. Error:\n{state.get('sandbox_report')}"
             
+        prd_text = handoff.get("prd_context", ctx.get("prd", ""))
+        ux_text = handoff.get("ux_spec", ctx.get("ux_spec", ""))
+            
         input_data = DEVAgentInput(
-            prd=ctx.get("prd", ""),
-            ux_spec=ctx.get("ux_spec", ""),
+            prd=prd_text,
+            ux_spec=ux_text,
             user_flow=ctx.get("user_flow", ""),
             acceptance_criteria=ctx.get("acceptance_criteria", []),
             project_context=ProjectContext(**pc_data) if isinstance(pc_data, dict) else ProjectContext(),
@@ -201,10 +236,14 @@ async def node_dev_agent(state: PipelineState) -> dict:
         
         retries = state.get("dev_retries", 0)
         
+        if handoff:
+            handoff["risk_level"] = result.risk_level
+        
         return {
             "dev_result": result.model_dump(), 
             "dev_error": None,
-            "dev_retries": retries
+            "dev_retries": retries,
+            "a2a_handoff": handoff
         }
     except Exception as e:
         return {"dev_result": None, "dev_error": str(e)}
@@ -241,19 +280,28 @@ async def node_qa_agent(state: PipelineState) -> dict:
     """Run QA Agent: Test Cases + QA Report + Coverage Matrix."""
     try:
         ctx = state.get("context", {})
+        handoff = state.get("a2a_handoff", {})
+        
+        prd_text = handoff.get("prd_context", ctx.get("prd", ""))
+        ux_text = handoff.get("ux_spec", ctx.get("ux_spec", ""))
+        
         input_data = QAAgentInput(
-            prd=ctx.get("prd", ""),
+            prd=prd_text,
             acceptance_criteria=ctx.get("acceptance_criteria", []),
-            ux_spec=ctx.get("ux_spec", ""),
+            ux_spec=ux_text,
             implementation_plan=ctx.get("implementation_plan", ""),
             mock_code_diff=ctx.get("mock_code_diff", ""),
             sandbox_report=ctx.get("sandbox_report", ""),
             risk_assessment=ctx.get("risk_assessment", ""),
-            risk_level=ctx.get("risk_level", "LOW"),
+            risk_level=handoff.get("risk_level", ctx.get("risk_level", "LOW")),
             feedback_prompt=ctx.get("feedback_prompt", ""),
         )
         result = await run_qa_agent(input_data)
-        return {"qa_result": result.model_dump(), "qa_error": None}
+        
+        if handoff:
+            handoff["test_cases"] = [tc.title for tc in result.test_cases]
+            
+        return {"qa_result": result.model_dump(), "qa_error": None, "a2a_handoff": handoff}
     except Exception as e:
         return {"qa_result": None, "qa_error": str(e)}
 

@@ -1,49 +1,41 @@
-const supabase = require('../config/database');
+const prisma = require('../config/database');
 
 class FeatureBacklog {
   static async create(data) {
-    const { data: record, error } = await supabase
-      .from('feature_backlogs')
-      .insert([data])
-      .select()
-      .single();
-
-    if (error) throw error;
+    const mapped = {
+        projectId: data.project_id || data.projectId,
+        taskId: data.task_id || data.taskId,
+        title: data.title,
+        description: data.description,
+        priority: data.priority,
+        status: data.status,
+    };
+    Object.keys(mapped).forEach(k => mapped[k] === undefined && delete mapped[k]);
+    const record = await prisma.featureBacklog.create({ data: mapped });
     return record;
   }
 
   static async findByProjectId(projectId) {
-    const { data, error } = await supabase
-      .from('feature_backlogs')
-      .select('*')
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
+    const data = await prisma.featureBacklog.findMany({
+      where: { projectId },
+      orderBy: { createdAt: 'desc' }
+    });
     return data;
   }
 
   static async updateStatus(id, status) {
-    const { data, error } = await supabase
-      .from('feature_backlogs')
-      .update({ status, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) throw error;
+    const data = await prisma.featureBacklog.update({
+      where: { id },
+      data: { status }
+    });
     return data;
   }
 
   static async linkTask(id, taskId) {
-    const { data, error } = await supabase
-      .from('feature_backlogs')
-      .update({ task_id: taskId, status: 'IN_PROGRESS', updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) throw error;
+    const data = await prisma.featureBacklog.update({
+      where: { id },
+      data: { taskId, status: 'IN_PROGRESS' }
+    });
     return data;
   }
 }

@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const { PORT, NODE_ENV, FRONTEND_URL } = require('./config/environment');
-const supabase = require('./config/database');
+const prisma = require('./config/database');
 const routes = require('./routes');
 const { startBatchJobs } = require('./jobs/batchJob');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
@@ -53,13 +53,13 @@ app.use(errorHandler);
 // Start server
 const startServer = async () => {
   try {
-    // Test Supabase connection
-    const { error } = await supabase.from('documents').select('id').limit(1);
-    if (error && error.code !== 'PGRST116') {
-      console.error('[Supabase] Connection test failed:', error.message);
-      console.warn('[Supabase] Ensure tables exist: documents, tasks, testcases');
-    } else {
-      console.log('[Supabase] Connection verified.');
+    // Test Prisma connection
+    try {
+      await prisma.$connect();
+      console.log('[Prisma] Connection verified.');
+    } catch (dbError) {
+      console.error('[Prisma] Connection test failed:', dbError.message);
+      console.warn('[Prisma] Ensure database exists and schema is pushed');
     }
 
     // Start listening

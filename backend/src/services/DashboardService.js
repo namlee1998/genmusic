@@ -1,4 +1,4 @@
-const supabase = require('../config/database');
+const prisma = require('../config/database');
 
 const TIME_WINDOWS = ['1d', '7d', '30d'];
 
@@ -20,48 +20,49 @@ class DashboardService {
       runsByAgentResult,
     ] = await Promise.all([
       // Total users with subscriptions
-      supabase.from('user_subscriptions').select('user_id, plan_id, status', { count: 'exact' }),
+      prisma.userSubscription.count(),
 
       // Users by plan and status breakdown
-      supabase.from('user_subscriptions').select('plan_id, status'),
+      prisma.userSubscription.findMany({
+        select: { planId: true, status: true },
+      }),
 
       // Active users in window (distinct user_ids that ran an agent)
-      supabase
-        .from('usage_logs')
-        .select('user_id')
-        .gte('executed_at', since),
+      prisma.usageLog.findMany({
+        where: { executedAt: { gte: new Date(since) } },
+        select: { userId: true },
+        distinct: ['userId'],
+      }),
 
       // Total runs in window
-      supabase
-        .from('usage_logs')
-        .select('status', { count: 'exact' })
-        .gte('executed_at', since),
+      prisma.usageLog.count({
+        where: { executedAt: { gte: new Date(since) } },
+      }),
 
       // Credits charged in window
-      supabase
-        .from('usage_logs')
-        .select('credits_charged')
-        .eq('status', 'completed')
-        .gte('executed_at', since),
+      prisma.usageLog.findMany({
+        where: { status: 'completed', executedAt: { gte: new Date(since) } },
+        select: { creditsCharged: true },
+      }),
 
       // Runs by agent in window
-      supabase
-        .from('usage_logs')
-        .select('agent_type, status')
-        .gte('executed_at', since),
+      prisma.usageLog.findMany({
+        where: { executedAt: { gte: new Date(since) } },
+        select: { agentType: true, status: true },
+      }),
     ]);
 
-    const subs = subscriptionsResult.data || [];
+    const subs = subscriptionsResult || [];
     const usersByPlan = subs.reduce((acc, s) => {
-      acc[s.plan_id] = (acc[s.plan_id] || 0) + 1;
+      acc[s.planId] = (acc[s.planId] || 0) + 1;
       return acc;
     }, {});
     const quotaExceededUsers = subs.filter((s) => s.status === 'quota_exceeded').length;
     const suspendedUsers = subs.filter((s) => s.status === 'suspended').length;
 
-    const activeUserIds = new Set((activeUsersResult.data || []).map((r) => r.user_id));
+    const activeUserIds = new Set((activeUsersResult || []).map((r) => r.userId));
 
-    const allRuns = runsByAgentResult.data || [];
+    const allRuns = runsByAgentResult || [];
     const runsByAgent = allRuns.reduce((acc, r) => {
       acc[r.agent_type] = (acc[r.agent_type] || 0) + 1;
       return acc;
@@ -69,13 +70,13 @@ class DashboardService {
     const successfulRuns = allRuns.filter((r) => r.status === 'completed').length;
     const failedRuns = allRuns.filter((r) => r.status === 'failed').length;
 
-    const totalCredits = (creditsResult.data || []).reduce(
-      (sum, r) => sum + (r.credits_charged || 0),
+    const totalCredits = (creditsResult || []).reduce(
+      (sum, r) => sum + (r.creditsCharged || 0),
       0,
     );
 
     return {
-      total_users: usersResult.count || 0,
+      total_users: usersResult || 0,
       active_users: activeUserIds.size,
       quota_exceeded_users: quotaExceededUsers,
       suspended_users: suspendedUsers,
@@ -95,15 +96,12 @@ class DashboardService {
     for (const window of TIME_WINDOWS) {
       try {
         const data = await this.computeSnapshot(window);
-        const { error } = await supabase.from('dashboard_snapshots').upsert(
-          { snapshot_at: now.toISOString(), time_window: window, data },
-          { onConflict: 'snapshot_at,time_window' },
-        );
-        if (error) {
-          console.error(`[DashboardService] Failed to save snapshot (${window}):`, error.message);
-        } else {
-          console.log(`[DashboardService] Snapshot saved: ${window}`);
-        }
+        await prisma.dashboardSnapshot.upsert({
+          where: { date: new Date(now.setHours(0,0,0,0)) }, // approximate replacement for onConflict
+          update: { metrics: JSON.stringify(data) },
+          create: { date: new Date(now.setHours(0,0,0,0)), metrics: JSON.stringify(data) },
+        });
+        console.log(`[DashboardService] Snapshot saved: ${window}`);
       } catch (err) {
         console.error(`[DashboardService] Error computing snapshot (${window}):`, err.message);
       }
@@ -112,11 +110,10 @@ class DashboardService {
     // Clean up usage_logs older than 90 days
     try {
       const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-      const { error } = await supabase
-        .from('usage_logs')
-        .delete()
-        .lt('executed_at', cutoff.toISOString());
-      if (!error) console.log('[DashboardService] Old usage logs cleaned up.');
+      await prisma.usageLog.deleteMany({
+        where: { executedAt: { lt: cutoff } }
+      });
+      console.log('[DashboardService] Old usage logs cleaned up.');
     } catch (err) {
       console.error('[DashboardService] Cleanup error:', err.message);
     }
@@ -125,14 +122,14 @@ class DashboardService {
   async getLatestSnapshots() {
     const results = {};
     for (const window of TIME_WINDOWS) {
-      const { data, error } = await supabase
-        .from('dashboard_snapshots')
-        .select('*')
-        .eq('time_window', window)
-        .order('snapshot_at', { ascending: false })
-        .limit(1)
-        .single();
-      if (!error && data) results[window] = data;
+      try {
+        const data = await prisma.dashboardSnapshot.findFirst({
+          orderBy: { createdAt: 'desc' }
+        });
+        if (data) results[window] = JSON.parse(data.metrics);
+      } catch (err) {
+        console.error(err);
+      }
     }
     return results;
   }

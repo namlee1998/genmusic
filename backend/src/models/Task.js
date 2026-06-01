@@ -1,41 +1,28 @@
-const supabase = require('../config/database');
+const prisma = require('../config/database');
 
 class TaskModel {
   static async create(data) {
-    const { data: record, error } = await supabase
-      .from('tasks')
-      .insert([{
+    const record = await prisma.task.create({
+      data: {
         id: data.id,
-        project_id: data.projectId,
+        projectId: data.projectId,
         type: data.type,
         status: data.status || 'pending',
-        prompt_profile: data.promptProfile,
+        promptProfile: data.promptProfile,
         result: data.result,
         error: data.error,
-        input_content_hash: data.inputContentHash || null,
-        output_content_hash: data.outputContentHash || null,
-        source_run_id: data.sourceRunId || null,
-        version_status: data.versionStatus || 'draft',
+        inputContentHash: data.inputContentHash || null,
+        outputContentHash: data.outputContentHash || null,
+        sourceRunId: data.sourceRunId || null,
+        versionStatus: data.versionStatus || 'draft',
         observability: data.observability || {},
-      }])
-      .select()
-      .single();
-
-    if (error) throw error;
+      }
+    });
     return this._map(record);
   }
 
   static async findById(id) {
-    const { data, error } = await supabase
-      .from('tasks')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') return null;
-      throw error;
-    }
+    const data = await prisma.task.findUnique({ where: { id } });
     return this._map(data);
   }
 
@@ -44,84 +31,73 @@ class TaskModel {
   }
 
   static async update(id, data) {
-    const { data: record, error } = await supabase
-      .from('tasks')
-      .update({
-        ...data,
-        updated_at: data.updated_at || new Date().toISOString(),
-      })
-      .eq('id', id)
-      .select()
-      .single();
+    const mapped = {
+      updatedAt: data.updated_at ? new Date(data.updated_at) : new Date(),
+      status: data.status,
+      result: data.result,
+      error: data.error,
+      versionStatus: data.version_status || data.versionStatus,
+      observability: data.observability,
+      outputContentHash: data.output_content_hash || data.outputContentHash,
+      sourceRunId: data.source_run_id || data.sourceRunId,
+    };
+    Object.keys(mapped).forEach(k => mapped[k] === undefined && delete mapped[k]);
 
-    if (error) throw error;
+    const record = await prisma.task.update({
+      where: { id },
+      data: mapped
+    });
     return this._map(record);
   }
 
   static async findByProjectId(projectId) {
-    const { data, error } = await supabase
-      .from('tasks')
-      .select('*')
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
+    const data = await prisma.task.findMany({
+      where: { projectId },
+      orderBy: { createdAt: 'desc' }
+    });
     return (data || []).map(this._map);
   }
 
   static async list(filters = {}) {
     const limit = Number.isFinite(filters.limit) ? filters.limit : 50;
-    let query = supabase
-      .from('tasks')
-      .select('*')
-      .order('updated_at', { ascending: false })
-      .limit(Math.max(1, Math.min(limit, 200)));
+    const take = Math.max(1, Math.min(limit, 200));
 
-    if (filters.type)      query = query.eq('type', filters.type);
-    if (filters.status)    query = query.eq('status', filters.status);
-    if (filters.projectId) query = query.eq('project_id', filters.projectId);
-    if (filters.sinceDate) query = query.gte('created_at', filters.sinceDate);
+    const where = {};
+    if (filters.type)      where.type = filters.type;
+    if (filters.status)    where.status = filters.status;
+    if (filters.projectId) where.projectId = filters.projectId;
+    if (filters.sinceDate) where.createdAt = { gte: new Date(filters.sinceDate) };
 
-    const { data, error } = await query;
-    if (error) throw error;
+    const data = await prisma.task.findMany({
+      where,
+      orderBy: { updatedAt: 'desc' },
+      take
+    });
     return (data || []).map(this._map);
   }
 
   static async deleteById(id) {
-    const { error } = await supabase
-      .from('tasks')
-      .delete()
-      .eq('id', id);
-
-    if (error) throw error;
+    await prisma.task.delete({ where: { id } });
   }
 
   static async findLatestByProject(projectId, type, status = null, versionStatus = null) {
-    let query = supabase
-      .from('tasks')
-      .select('*')
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: false })
-      .limit(1);
+    const where = { projectId };
+    if (type) where.type = type;
+    if (status) where.status = status;
+    if (versionStatus) where.versionStatus = versionStatus;
 
-    if (type) query = query.eq('type', type);
-    if (status) query = query.eq('status', status);
-    if (versionStatus) query = query.eq('version_status', versionStatus);
-
-    const { data, error } = await query;
-    if (error) throw error;
-    return data?.[0] ? this._map(data[0]) : null;
+    const data = await prisma.task.findFirst({
+      where,
+      orderBy: { createdAt: 'desc' }
+    });
+    return this._map(data);
   }
 
   static async commitTask(id) {
-    const { data: record, error } = await supabase
-      .from('tasks')
-      .update({ version_status: 'committed' })
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) throw error;
+    const record = await prisma.task.update({
+      where: { id },
+      data: { versionStatus: 'committed' }
+    });
     return this._map(record);
   }
 
@@ -129,18 +105,18 @@ class TaskModel {
     if (!row) return null;
     return {
       id: row.id,
-      projectId: row.project_id,
+      projectId: row.projectId,
       type: row.type,
       status: row.status,
-      promptProfile: row.prompt_profile,
+      promptProfile: row.promptProfile,
       result: row.result,
       error: row.error,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-      inputContentHash: row.input_content_hash || null,
-      outputContentHash: row.output_content_hash || null,
-      sourceRunId: row.source_run_id || null,
-      versionStatus: row.version_status || 'committed',
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      inputContentHash: row.inputContentHash || null,
+      outputContentHash: row.outputContentHash || null,
+      sourceRunId: row.sourceRunId || null,
+      versionStatus: row.versionStatus || 'committed',
       observability: row.observability || {},
     };
   }

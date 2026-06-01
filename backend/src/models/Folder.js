@@ -1,92 +1,72 @@
-const supabase = require('../config/database');
+const prisma = require('../config/database');
 
 class FolderModel {
   static async create(data) {
-    const { data: record, error } = await supabase
-      .from('folders')
-      .insert([{
+    const record = await prisma.folder.create({
+      data: {
         id: data.id,
-        project_id: data.projectId,
-        parent_id: data.parentId || null,
+        projectId: data.projectId || data.project_id,
+        parentId: data.parentId || data.parent_id || null,
         name: data.name,
-        sort_order: data.sortOrder ?? 0,
-      }])
-      .select()
-      .single();
-
-    if (error) throw error;
+        sortOrder: (data.sortOrder || data.sort_order) ?? 0,
+      }
+    });
     return this._map(record);
   }
 
   static async findById(id) {
-    const { data, error } = await supabase
-      .from('folders')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') return null;
-      throw error;
-    }
+    const data = await prisma.folder.findUnique({ where: { id } });
     return this._map(data);
   }
 
   static async listByProjectId(projectId) {
-    const { data, error } = await supabase
-      .from('folders')
-      .select('*')
-      .eq('project_id', projectId)
-      .order('sort_order', { ascending: true })
-      .order('created_at', { ascending: true });
-
-    if (error) throw error;
+    const data = await prisma.folder.findMany({
+      where: { projectId },
+      orderBy: [
+        { sortOrder: 'asc' },
+        { createdAt: 'asc' }
+      ]
+    });
     return (data || []).map(this._map);
   }
 
   static async listAll() {
-    const { data, error } = await supabase
-      .from('folders')
-      .select('*')
-      .order('created_at', { ascending: true });
-
-    if (error) throw error;
+    const data = await prisma.folder.findMany({
+      orderBy: { createdAt: 'asc' }
+    });
     return (data || []).map(this._map);
   }
 
   static async update(id, payload) {
-    const { data: record, error } = await supabase
-      .from('folders')
-      .update({
-        ...payload,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', id)
-      .select()
-      .single();
+    const mapped = {
+        projectId: payload.projectId || payload.project_id,
+        parentId: payload.parentId || payload.parent_id,
+        name: payload.name,
+        sortOrder: payload.sortOrder || payload.sort_order,
+    };
+    Object.keys(mapped).forEach(k => mapped[k] === undefined && delete mapped[k]);
 
-    if (error) throw error;
+    const record = await prisma.folder.update({
+      where: { id },
+      data: mapped
+    });
     return this._map(record);
   }
 
   static async delete(id) {
-    const { error } = await supabase
-      .from('folders')
-      .delete()
-      .eq('id', id);
-    if (error) throw error;
+    await prisma.folder.delete({ where: { id } });
   }
 
   static _map(row) {
     if (!row) return null;
     return {
       id: row.id,
-      projectId: row.project_id,
-      parentId: row.parent_id,
+      projectId: row.projectId,
+      parentId: row.parentId,
       name: row.name,
-      sortOrder: row.sort_order,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
+      sortOrder: row.sortOrder,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
     };
   }
 }

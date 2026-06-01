@@ -1,26 +1,18 @@
-const supabase = require('../config/database');
+const prisma = require('../config/database');
 
 class PlanModel {
   static async findAll() {
-    const { data, error } = await supabase
-      .from('plans')
-      .select('*')
-      .eq('is_active', true)
-      .order('credits_limit', { ascending: true });
-    if (error) throw error;
+    const data = await prisma.plan.findMany({
+      where: { isActive: true },
+      orderBy: { creditsLimit: 'asc' }
+    });
     return (data || []).map(this._map);
   }
 
   static async findById(id) {
-    const { data, error } = await supabase
-      .from('plans')
-      .select('*')
-      .eq('id', id)
-      .single();
-    if (error) {
-      if (error.code === 'PGRST116') return null;
-      throw error;
-    }
+    const data = await prisma.plan.findUnique({
+      where: { id }
+    });
     return this._map(data);
   }
 
@@ -29,13 +21,13 @@ class PlanModel {
     return {
       id: row.id,
       name: row.name,
-      creditsLimit: row.credits_limit,
-      maxProjects: row.max_projects ?? null,
-      maxMembersPerProject: row.max_members_per_project ?? null,
-      taskHistoryDays: row.task_history_days ?? null,
+      creditsLimit: row.creditsLimit,
+      maxProjects: row.maxProjects ?? null,
+      maxMembersPerProject: row.maxMembersPerProject ?? null,
+      taskHistoryDays: row.taskHistoryDays ?? null,
       description: row.description,
-      isActive: row.is_active,
-      createdAt: row.created_at,
+      isActive: row.isActive,
+      createdAt: row.createdAt,
     };
   }
 }

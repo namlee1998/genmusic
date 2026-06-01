@@ -1,4 +1,4 @@
-const supabase = require('../config/database');
+const prisma = require('../config/database');
 
 const TOKENS_PER_CREDIT = 1000;
 
@@ -6,37 +6,31 @@ class UserSubscriptionModel {
   static get TOKENS_PER_CREDIT() { return TOKENS_PER_CREDIT; }
 
   static async findByUserId(userId) {
-    const { data, error } = await supabase
-      .from('user_subscriptions')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
-    if (error) {
-      if (error.code === 'PGRST116') return null;
-      throw error;
-    }
+    const data = await prisma.userSubscription.findUnique({
+      where: { userId }
+    });
     return this._map(data);
   }
 
   static async upsert({ userId, planId, creditsTotal, periodStart, periodEnd = null }) {
-    const { data, error } = await supabase
-      .from('user_subscriptions')
-      .upsert(
-        {
-          user_id: userId,
-          plan_id: planId,
-          credits_total: creditsTotal,
-          credits_used: 0,
-          status: 'active',
-          period_start: periodStart || new Date().toISOString(),
-          period_end: periodEnd,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'user_id' },
-      )
-      .select()
-      .single();
-    if (error) throw error;
+    const data = await prisma.userSubscription.upsert({
+      where: { userId },
+      update: {
+        planId,
+        creditsTotal,
+        periodStart: periodStart ? new Date(periodStart) : new Date(),
+        periodEnd: periodEnd ? new Date(periodEnd) : null,
+      },
+      create: {
+        userId,
+        planId,
+        creditsTotal,
+        creditsUsed: 0,
+        status: 'active',
+        periodStart: periodStart ? new Date(periodStart) : new Date(),
+        periodEnd: periodEnd ? new Date(periodEnd) : null,
+      }
+    });
     return this._map(data);
   }
 
@@ -45,44 +39,49 @@ class UserSubscriptionModel {
    * Returns the updated row, or null if user has no subscription.
    */
   static async incrementCreditsUsed(userId, creditsToAdd) {
-    const { data, error } = await supabase.rpc('increment_credits_used', {
-      p_user_id: userId,
-      p_credits: creditsToAdd,
-    });
-    if (error) throw error;
-    return data ? this._map(data) : null;
+    try {
+      const data = await prisma.userSubscription.update({
+        where: { userId },
+        data: {
+          creditsUsed: { increment: creditsToAdd }
+        }
+      });
+      return this._map(data);
+    } catch (e) {
+      if (e.code === 'P2025') return null; // Not found
+      throw e;
+    }
   }
 
   static async updateStatus(userId, status) {
-    const { data, error } = await supabase
-      .from('user_subscriptions')
-      .update({ status, updated_at: new Date().toISOString() })
-      .eq('user_id', userId)
-      .select()
-      .single();
-    if (error) throw error;
+    const data = await prisma.userSubscription.update({
+      where: { userId },
+      data: { status }
+    });
     return this._map(data);
   }
 
   static async assignPlan(userId, planId, creditsTotal, periodEnd = null) {
-    const { data, error } = await supabase
-      .from('user_subscriptions')
-      .upsert(
-        {
-          user_id: userId,
-          plan_id: planId,
-          credits_total: creditsTotal,
-          credits_used: 0,
-          status: 'active',
-          period_start: new Date().toISOString(),
-          period_end: periodEnd,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'user_id' },
-      )
-      .select()
-      .single();
-    if (error) throw error;
+    const data = await prisma.userSubscription.upsert({
+      where: { userId },
+      update: {
+        planId,
+        creditsTotal,
+        creditsUsed: 0,
+        status: 'active',
+        periodStart: new Date(),
+        periodEnd: periodEnd ? new Date(periodEnd) : null,
+      },
+      create: {
+        userId,
+        planId,
+        creditsTotal,
+        creditsUsed: 0,
+        status: 'active',
+        periodStart: new Date(),
+        periodEnd: periodEnd ? new Date(periodEnd) : null,
+      }
+    });
     return this._map(data);
   }
 
@@ -90,16 +89,16 @@ class UserSubscriptionModel {
     if (!row) return null;
     return {
       id: row.id,
-      userId: row.user_id,
-      planId: row.plan_id,
+      userId: row.userId,
+      planId: row.planId,
       status: row.status,
-      creditsUsed: row.credits_used,
-      creditsTotal: row.credits_total,
-      creditsRemaining: row.credits_total - row.credits_used,
-      periodStart: row.period_start,
-      periodEnd: row.period_end,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
+      creditsUsed: row.creditsUsed,
+      creditsTotal: row.creditsTotal,
+      creditsRemaining: row.creditsTotal - row.creditsUsed,
+      periodStart: row.periodStart,
+      periodEnd: row.periodEnd,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
     };
   }
 }

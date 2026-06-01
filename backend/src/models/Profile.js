@@ -1,79 +1,78 @@
-const supabase = require('../config/database');
+const prisma = require('../config/database');
 
 class ProfileModel {
   static async findByUserId(userId) {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') return null;
-      throw error;
-    }
+    const data = await prisma.profile.findUnique({
+      where: { userId }
+    });
     return this._map(data);
   }
 
   static async upsert(userId, data) {
-    const { data: record, error } = await supabase
-      .from('profiles')
-      .upsert(
-        {
-          user_id: userId,
-          ...data,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'user_id' },
-      )
-      .select()
-      .single();
+    // Map snake_case or mixed to camelCase for Prisma
+    const mapped = {
+      fullName: data.full_name || data.fullName,
+      age: data.age,
+      jobTitle: data.job_title || data.jobTitle,
+      address: data.address,
+      phone: data.phone,
+      bio: data.bio,
+      avatarUrl: data.avatar_url || data.avatarUrl,
+      avatarPath: data.avatar_path || data.avatarPath,
+    };
+    
+    // Remove undefined
+    Object.keys(mapped).forEach(key => mapped[key] === undefined && delete mapped[key]);
 
-    if (error) throw error;
+    const record = await prisma.profile.upsert({
+      where: { userId },
+      update: mapped,
+      create: { userId, ...mapped }
+    });
     return this._map(record);
   }
 
   static async update(userId, data) {
-    const { data: record, error } = await supabase
-      .from('profiles')
-      .update({
-        ...data,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('user_id', userId)
-      .select()
-      .single();
+    const mapped = {
+      fullName: data.full_name || data.fullName,
+      age: data.age,
+      jobTitle: data.job_title || data.jobTitle,
+      address: data.address,
+      phone: data.phone,
+      bio: data.bio,
+      avatarUrl: data.avatar_url || data.avatarUrl,
+      avatarPath: data.avatar_path || data.avatarPath,
+    };
 
-    if (error) {
-      if (error.code === 'PGRST116') return null;
-      throw error;
-    }
+    Object.keys(mapped).forEach(key => mapped[key] === undefined && delete mapped[key]);
+
+    const record = await prisma.profile.update({
+      where: { userId },
+      data: mapped
+    });
     return this._map(record);
   }
 
   static async delete(userId) {
-    const { error } = await supabase
-      .from('profiles')
-      .delete()
-      .eq('user_id', userId);
-
-    if (error) throw error;
+    await prisma.profile.delete({
+      where: { userId }
+    });
   }
 
   static _map(row) {
     if (!row) return null;
     return {
-      userId: row.user_id,
-      fullName: row.full_name,
+      userId: row.userId,
+      fullName: row.fullName,
       age: row.age,
-      jobTitle: row.job_title,
+      jobTitle: row.jobTitle,
       address: row.address,
       phone: row.phone,
       bio: row.bio,
-      avatarUrl: row.avatar_url,
-      avatarPath: row.avatar_path,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
+      avatarUrl: row.avatarUrl,
+      avatarPath: row.avatarPath,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
     };
   }
 }

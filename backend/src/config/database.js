@@ -1,12 +1,5 @@
-const { createClient } = require('@supabase/supabase-js');
-const { SUPABASE_URL, SUPABASE_SECRET_KEY } = require('./environment');
+const { PrismaClient } = require('@prisma/client');
 
-if (!SUPABASE_URL || !SUPABASE_SECRET_KEY) {
-  throw new Error(
-    '[Supabase] SUPABASE_URL and SUPABASE_SECRET_KEY must be set in environment variables.'
-  );
-}
+const prisma = new PrismaClient();
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY);
-
-module.exports = supabase;
+module.exports = prisma;

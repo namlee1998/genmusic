@@ -17,6 +17,16 @@ from src.schemas import (
 )
 
 # =============================================================================
+# A2A Handoff (Context passed between pipelines)
+# =============================================================================
+class A2AHandoff(BaseModel):
+    prd_context: str = Field(default="")
+    ux_spec: str = Field(default="")
+    test_cases: list[str] = Field(default_factory=list)
+    quality_gate_status: str = Field(default="")
+    risk_level: str = Field(default="LOW")
+
+# =============================================================================
 # Feature Request (input to PO Agent)
 # =============================================================================
 
@@ -236,4 +246,7 @@ __all__ = [
     "QAAgentInput", "QAAgentOutput", "QATestCase", "ACCoverageRow",
     # Quality Gate
     "GateViolation", "GateCheck", "QualityGateMetrics", "QualityGateEvaluation",
+    
+    # Context Pipeline
+    "A2AHandoff",
 ]
