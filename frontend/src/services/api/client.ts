@@ -30,7 +30,7 @@ api.interceptors.response.use(
 
     if (error.response?.status === 401) {
       clearStoredAuthSession();
-      if (window.location.pathname.startsWith('/app')) {
+      if (window.location.pathname.startsWith('/sdlc')) {
         window.location.href = '/auth';
       }
     }

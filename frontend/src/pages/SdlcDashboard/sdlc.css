@@ -791,3 +791,59 @@
   font-weight: 500;
   font-family: 'JetBrains Mono', monospace;
 }
+
+/* =========================================================================
+   Responsive Breakpoints & Adjustments
+   ========================================================================= */
+@media (max-width: 1024px) {
+  .artifact-viewer {
+    grid-template-columns: 200px 1fr;
+  }
+  .arch-workers {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+  .arch-outputs {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+}
+
+@media (max-width: 768px) {
+  .sdlc-dashboard {
+    padding: 0.75rem;
+    gap: 1rem;
+  }
+  .artifact-viewer {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+    height: auto;
+    max-height: none;
+  }
+  .artifact-list {
+    border-right: none;
+    border-bottom: 1px solid #1e293b;
+    max-height: 180px;
+  }
+  .penpot-body {
+    grid-template-columns: 1fr;
+  }
+  .penpot-image-pane {
+    border-right: none;
+    border-bottom: 1px solid #1e293b;
+  }
+  .fr-row {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+  .arch-workers {
+    grid-template-columns: 1fr;
+  }
+  .arch-outputs {
+    grid-template-columns: 1fr;
+  }
+  .sdlc-connector-rework {
+    display: none;
+  }
+}
+

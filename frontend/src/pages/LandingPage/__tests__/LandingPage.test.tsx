@@ -47,31 +47,31 @@ describe('LandingPage', () => {
         <LandingPage />
       </BrowserRouter>
     );
-    expect(screen.getByText(/Stop writing tests/i)).toBeInTheDocument();
-    expect(screen.getByText(/Start Generating Tests/i)).toBeInTheDocument();
+    expect(screen.getByText(/End-to-End Autonomous/i)).toBeInTheDocument();
+    expect(screen.getByText(/Deploy Your First Agent/i)).toBeInTheDocument();
   });
 
-  it('navigates to /auth when "Start Generating Tests" is clicked and user is not authenticated', () => {
+  it('navigates to /auth when "Deploy Your First Agent" is clicked and user is not authenticated', () => {
     render(
       <BrowserRouter>
         <LandingPage />
       </BrowserRouter>
     );
-    const startButton = screen.getByText(/Start Generating Tests/i);
+    const startButton = screen.getByText(/Deploy Your First Agent/i);
     fireEvent.click(startButton);
     expect(mockNavigate).toHaveBeenCalledWith('/auth');
   });
 
-  it('navigates to /app when "Start Generating Tests" is clicked and user is authenticated', () => {
+  it('navigates to /sdlc when "Deploy Your First Agent" is clicked and user is authenticated', () => {
     (useAuthStore as unknown as Mock).mockReturnValue({ session: { user: { id: '1' } } });
     render(
       <BrowserRouter>
         <LandingPage />
       </BrowserRouter>
     );
-    const startButton = screen.getByText(/Start Generating Tests/i);
+    const startButton = screen.getByText(/Deploy Your First Agent/i);
     fireEvent.click(startButton);
-    expect(mockNavigate).toHaveBeenCalledWith('/app');
+    expect(mockNavigate).toHaveBeenCalledWith('/sdlc');
   });
 
   it('navigates to /auth when "Sign In" is clicked in navbar', () => {
@@ -85,3 +85,4 @@ describe('LandingPage', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/auth');
   });
 });
+

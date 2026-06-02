@@ -123,9 +123,20 @@ export default function AgentPhaseCard({
         !isUnlocked ? 'phase-card--locked' : ''
       } ${isWaitingGate ? 'phase-card--waiting' : ''}`}
       style={{ '--phase-color': phase.color } as React.CSSProperties}
-      whileHover={isUnlocked ? { y: -2 } : {}}
-      transition={{ type: 'spring', stiffness: 300 }}
+      whileHover={
+        isUnlocked
+          ? {
+              y: -4,
+              scale: 1.01,
+              boxShadow: '0 12px 30px rgba(0, 0, 0, 0.4), 0 0 15px var(--phase-color, rgba(99, 102, 241, 0.25))',
+              borderColor: 'var(--phase-color, #6366f1)',
+            }
+          : {}
+      }
+      whileTap={isUnlocked ? { scale: 0.99, y: -2 } : {}}
+      transition={{ type: 'spring', stiffness: 400, damping: 25 }}
     >
+
       {/* Header */}
       <div className="phase-card__header">
         <div className="phase-card__icon">{!isUnlocked ? '🔒' : phase.icon}</div>
@@ -258,56 +269,89 @@ export default function AgentPhaseCard({
       {/* Actions */}
       <div className="phase-card__actions">
         {canRun && !isCompleted && (
-          <button className="phase-card__btn phase-card__btn--run" onClick={onRun}>
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            className="phase-card__btn phase-card__btn--run"
+            onClick={onRun}
+          >
             ▶ Run {phase.label}
-          </button>
+          </motion.button>
         )}
         
         {isWaitingGate && !inlineAction && onGateDecision && (
           <div className="inline-hitl-triggers grid grid-cols-3 gap-1 w-full mt-1.5 mb-1.5">
-            <button
+            <motion.button
+              whileHover={{ scale: 1.04, y: -1 }}
+              whileTap={{ scale: 0.96 }}
               onClick={() => setInlineAction('APPROVE')}
-              className="px-1 py-1 rounded bg-success/15 hover:bg-success/25 border border-success/30 text-success text-[10px] font-bold flex items-center justify-center gap-0.5"
+              className="px-1 py-1 rounded bg-success/15 hover:bg-success/25 border border-success/30 text-success text-[10px] font-bold flex items-center justify-center gap-0.5 cursor-pointer"
               title="Phê duyệt nhanh"
             >
               ✓ Approve
-            </button>
-            <button
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.04, y: -1 }}
+              whileTap={{ scale: 0.96 }}
               onClick={() => setInlineAction('REQUEST_CHANGES')}
-              className="px-1 py-1 rounded bg-warning/15 hover:bg-warning/25 border border-warning/30 text-warning text-[10px] font-bold flex items-center justify-center gap-0.5"
+              className="px-1 py-1 rounded bg-warning/15 hover:bg-warning/25 border border-warning/30 text-warning text-[10px] font-bold flex items-center justify-center gap-0.5 cursor-pointer"
               title="Yêu cầu thay đổi"
             >
               🔄 Changes
-            </button>
-            <button
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.04, y: -1 }}
+              whileTap={{ scale: 0.96 }}
               onClick={() => setInlineAction('REJECT')}
-              className="px-1 py-1 rounded bg-error/15 hover:bg-error/25 border border-error/30 text-error text-[10px] font-bold flex items-center justify-center gap-0.5"
+              className="px-1 py-1 rounded bg-error/15 hover:bg-error/25 border border-error/30 text-error text-[10px] font-bold flex items-center justify-center gap-0.5 cursor-pointer"
               title="Từ chối nhanh"
             >
               ❌ Reject
-            </button>
+            </motion.button>
           </div>
         )}
 
         {isCompleted && !isApproved && (
-          <button className="phase-card__btn phase-card__btn--gate" onClick={onOpenGate}>
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            className="phase-card__btn phase-card__btn--gate"
+            onClick={onOpenGate}
+          >
             🔍 Review & Gate
-          </button>
+          </motion.button>
         )}
         {isCompleted && (
-          <button className="phase-card__btn phase-card__btn--view" onClick={onViewArtifacts}>
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            className="phase-card__btn phase-card__btn--view"
+            onClick={onViewArtifacts}
+          >
             📄 View Artifacts
-          </button>
+          </motion.button>
         )}
         {isApproved && !isActive && (
-          <button className="phase-card__btn phase-card__btn--rerun" onClick={onRun} title="Run again">
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            className="phase-card__btn phase-card__btn--rerun"
+            onClick={onRun}
+            title="Run again"
+          >
             🔄 Re-run
-          </button>
+          </motion.button>
         )}
         {isRejected && !isActive && (
-          <button className="phase-card__btn phase-card__btn--rerun" onClick={onRun} title="Apply fixes and re-run">
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            className="phase-card__btn phase-card__btn--rerun"
+            onClick={onRun}
+            title="Apply fixes and re-run"
+          >
             ↺ Rework
-          </button>
+          </motion.button>
         )}
       </div>
     </motion.div>

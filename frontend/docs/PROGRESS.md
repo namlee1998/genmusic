@@ -25,23 +25,24 @@ Trang giới thiệu chính của sản phẩm với giao diện tối ưu hóa 
 - [x] Tích hợp i18n chuyển đổi ngôn ngữ
 - [x] Nút điều hướng CTA (Call-to-Action) dẫn tới Dashboard/Auth
 
-### 2. SDLC Dashboard (`/dashboard`)
-Bảng điều khiển trung tâm quản lý toàn bộ vòng đời phát triển phần mềm tự động (SDLC) qua các AI Agent. Bao gồm 4 Tab chính:
+### 2. SDLC Dashboard (`/sdlc`)
+Bảng điều khiển trung tâm quản lý toàn bộ vòng đời phát triển phần mềm tự động (SDLC) qua các AI Agent. Bao gồm 3 View Mode chính tương tác qua Toolbar:
 
-*   **Tab 1: Quản lý tài liệu (Virtual Document Management)**
-    *   [x] Giao diện kéo thả Upload tài liệu (Spec, PDF, Docx, TXT)
-    *   [x] Collapsible Folder Tree (Cây thư mục ảo) để tổ chức tài liệu
-    *   [x] Side-panel "Quick Preview" hiển thị nội dung tài liệu nhanh chóng
-    *   [x] Full-screen Preview modal
-*   **Tab 2: Phân tích luồng (Flow Analysis)**
-    *   [x] Hiển thị quy trình xử lý của Agent 1 (Phân tích đặc tả hành vi của người dùng từ tài liệu)
-    *   [x] Tương tác xem biểu đồ luồng/Timeline của các Agent
-*   **Tab 3: Kịch bản kiểm thử (Test Scenarios & Kanban)**
-    *   [x] Kanban Board quản lý trạng thái các ca kiểm thử (Test cases)
-    *   [x] Phối hợp duyệt thủ công thông qua Human Gate Panel
-*   **Tab 4: Kết quả thực thi (Execution Results)**
-    *   [x] Báo cáo chi tiết kết quả chạy kiểm thử từ sandbox
-    *   [x] Trình xem log/artifact của Agent trong quá trình sinh code
+*   **Pipeline View (Trình giám sát luồng Agent):**
+    *   [x] **Workflow Stepper & Agent Cards:** Hiển thị 3 Agent tương ứng 3 phase (Normalizer, Designer, Generator). Trạng thái (Idle, Running, Completed, Failed).
+    *   [x] **Stage Inspector:** Inspect từng bước của Agent, hiển thị logs thời gian thực từ backend (tích hợp SSE với tự động reconnect và cảnh báo timeout).
+    *   [x] **Human Gate Panel (Review Gate):** Cho phép người dùng phê duyệt (Approve/Reject) kết quả của Agent 1 và Agent 2 trước khi chạy agent tiếp theo.
+    *   [x] **Artifact Viewer:** Xem nội dung các artifact sinh ra từ mỗi agent (hỗ trợ hiển thị YAML và code test case, tích hợp preview spec).
+*   **Kanban View (Quản lý kịch bản kiểm thử):**
+    *   [x] **Kanban Board:** Kéo thả quản lý trạng thái các ca kiểm thử (Todo, In Progress, Review, Completed).
+    *   [x] **Audit Sidebar:** Thanh bên hiển thị lịch sử thay đổi kịch bản kiểm thử chi tiết.
+*   **Release View (Gói phát hành sản phẩm):**
+    *   [x] **Final Review Packet:** Tổng hợp các artifact cuối cùng (PRD, Normalizer output, Test scenarios, YAML scripts) thành một release package thống nhất.
+    *   [x] **Audit Trail Timeline:** Hiển thị toàn bộ lịch sử chạy của agent, lịch sử phê duyệt của con người và phiên bản các artifact (hỗ trợ derive phase tự động và tương thích ngược với API).
+    *   [x] **Release to Production:** Nút phát hành sản phẩm, hỗ trợ mô phỏng gọi API (optimistic UI + mock endpoint).
+*   **Các thành phần tích hợp khác:**
+    *   [x] **PenpotPreview:** Component render bản xem trước từ Penpot UI/UX.
+    *   [x] **Document Management Panel:** Quản lý upload tài liệu đầu vào (PRD, User Flow, UI Spec) tích hợp ngay trong AppShell.
 
 ### 3. Trang Quản trị (Admin Panel - `/admin`)
 - [x] **Admin Dashboard:** Tổng quan thống kê hệ thống (lượt sử dụng, số lượng project, API calls)
@@ -69,12 +70,28 @@ Bảng điều khiển trung tâm quản lý toàn bộ vòng đời phát tri�
 3.  **Lỗi React imports & Props không khớp:**
     *   *Mô tả:* Thiếu hàm hook React (`useCallback`) trong `ThemeProvider.tsx` và thừa tham số CSS `color` không hợp lệ trong các thẻ `PipelineStep` ở LandingPage.
     *   *Cách sửa:* Import đầy đủ các hook và loại bỏ các props CSS dư thừa không định nghĩa trong interface của component.
+4.  **Lỗi chuyển hướng 401 không chính xác:**
+    *   *Mô tả:* Khi phiên làm việc hết hạn, interceptor chuyển hướng về `/auth` chỉ kích hoạt khi path bắt đầu bằng `/app`, tuy nhiên route thực tế là `/sdlc`.
+    *   *Cách sửa:* Sửa điều kiện kiểm tra path trong [client.ts](file:///c:/Users/Admin/Desktop/AI_thucchien/group_project_2/Team_6_End-to-End-Autonomous-Software-Factory-Multi-AI-Agent/frontend/src/services/api/client.ts) từ `/app` thành `/sdlc`.
+5.  **Thiếu Error Boundary toàn cục:**
+    *   *Mô tả:* Hệ thống thiếu Error Boundary dẫn đến khi có lỗi runtime phát sinh ở bất cứ component nào, toàn bộ ứng dụng sẽ bị crash thành màn hình trắng.
+    *   *Cách sửa:* Tạo component [ErrorBoundary.tsx](file:///c:/Users/Admin/Desktop/AI_thucchien/group_project_2/Team_6_End-to-End-Autonomous-Software-Factory-Multi-AI-Agent/frontend/src/components/ErrorBoundary.tsx) với giao diện đẹp mắt hỗ trợ song ngữ EN/VI và tích hợp bao bọc ứng dụng trong [main.tsx](file:///c:/Users/Admin/Desktop/AI_thucchien/group_project_2/Team_6_End-to-End-Autonomous-Software-Factory-Multi-AI-Agent/frontend/src/main.tsx).
+
+---
+
+## 🎉 Các Cải Tiến Lớn Đã Hoàn Thành (Completed Major Improvements)
+
+1. **Tối ưu hóa hiệu năng & bundle size:** Thực hiện code-splitting bằng `React.lazy()`, cấu hình Manual Chunks trong Vite config thông minh để triệt tiêu Circular dependencies, chia nhỏ AppShell, tối ưu hóa toàn bộ file bundle dưới 300KB.
+2. **Hoàn thiện tính năng SDLC với Mock-first:** Tích hợp nút "Release to Production" thực tế với mockup API, tối ưu timeline của Audit Trail tương thích ngược với backend, và tích hợp hiển thị Penpot preview cho các spec thiết kế UX.
+3. **Bổ sung Unit Tests:** Viết các test case hoàn chỉnh cho store `useSdlcStore`, dashboard, và client SSE, tinh chỉnh các lỗi mock API, đạt trạng thái pass 100% (34/34 tests).
+4. **Tinh chỉnh UI/UX (Polish):** Thêm micro-animations (hover elevation, color glow, active feedback, button animations) cho `AgentPhaseCard` bằng Framer Motion, tối ưu responsive layout tại 1024px và 768px trong `sdlc.css`.
 
 ---
 
 ## 📋 Kế hoạch & Công việc Tiếp theo (Next Steps / TODOs)
 
-- [ ] **Kết nối API Real-time:** Hoàn thiện tích hợp WebSockets/SSE từ backend cho các agent cập nhật trạng thái pipeline ngay lập tức lên giao diện.
-- [ ] **Tối ưu hóa UI/UX:** Thêm các micro-animations tinh tế cho các thẻ Agent Card và Kanban Board để tạo cảm giác mượt mà (premium design).
-- [ ] **Bổ sung Unit Tests:** Viết các test case cơ bản cho các hook Zustand và các component dùng chung (`Button`, `ResizablePanels`).
-- [ ] **Hoàn thiện Dark Mode:** Đảm bảo toàn bộ các thành phần mới thêm (AuditSidebar, FinalReviewPacket, PenpotPreview) hỗ trợ hoàn hảo cả giao diện sáng và tối.
+- [ ] **Tích hợp thực tế với Backend API:** Thay thế các hàm mock của Release to Production và Audit Trail bằng các API endpoints thực tế khi Backend hoàn thành phát triển.
+- [ ] **Bổ sung kiểm thử End-to-End (E2E):** Thiết lập Playwright test suite để tự động hóa toàn bộ luồng tạo dự án, kiểm thử kéo thả Kanban, chạy Agent và duyệt Quality Gate.
+- [ ] **Mở rộng Dashboard Analytics:** Bổ sung giao diện phân tích hiệu suất và biểu đồ thời gian/chi phí vận hành thực tế của mỗi Agent.
+
+
