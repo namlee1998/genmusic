@@ -34,6 +34,7 @@ export default function FinalReviewPacket({ projectId }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [released, setReleased] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
+  const [releasing, setReleasing] = useState(false);
 
   // Reset state when projectId changes (during rendering to avoid useEffect warning)
   const [prevProjectId, setPrevProjectId] = useState(projectId);
@@ -44,6 +45,7 @@ export default function FinalReviewPacket({ projectId }: Props) {
     setError(null);
     setReleased(false);
     setShowConfetti(false);
+    setReleasing(false);
   }
 
   useEffect(() => {
@@ -96,12 +98,20 @@ export default function FinalReviewPacket({ projectId }: Props) {
     });
   };
 
-  const handleRelease = () => {
-    setReleased(true);
-    setShowConfetti(true);
-    setTimeout(() => {
-      setShowConfetti(false);
-    }, 4000);
+  const handleRelease = async () => {
+    setReleasing(true);
+    try {
+      await sdlcApi.releaseToProduction(projectId);
+      setReleased(true);
+      setShowConfetti(true);
+      setTimeout(() => {
+        setShowConfetti(false);
+      }, 4000);
+    } catch (err) {
+      console.error('Failed to release:', err);
+    } finally {
+      setReleasing(false);
+    }
   };
 
   if (loading) {
@@ -169,15 +179,19 @@ export default function FinalReviewPacket({ projectId }: Props) {
           
           <button
             onClick={handleRelease}
-            disabled={released}
+            disabled={released || releasing}
             className={`px-5 py-2 rounded-lg text-xs font-bold flex items-center gap-2 text-white transition-all ${
               released
                 ? 'bg-success/35 border border-success/40 cursor-not-allowed'
+                : releasing
+                ? 'bg-success/50 cursor-wait'
                 : 'bg-success hover:scale-[1.02] shadow-lg shadow-success/20'
             }`}
           >
-            <span className="material-symbols-outlined text-sm">{released ? 'done' : 'rocket_launch'}</span>
-            {released ? 'Released Signed-off' : 'Release to Production'}
+            <span className={`material-symbols-outlined text-sm ${releasing ? 'animate-spin' : ''}`}>
+              {released ? 'done' : releasing ? 'autorenew' : 'rocket_launch'}
+            </span>
+            {released ? 'Released Signed-off' : releasing ? 'Releasing...' : 'Release to Production'}
           </button>
         </div>
       </div>

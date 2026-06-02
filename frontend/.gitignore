@@ -8,3 +8,9 @@ coverage/
 !.env.example
 
 .vercel
+
+# Fallow
+.fallow/
+.fallow*
+fallow.json
+

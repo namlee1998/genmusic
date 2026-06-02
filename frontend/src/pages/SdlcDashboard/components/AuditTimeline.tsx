@@ -38,32 +38,45 @@ export default function AuditTimeline({ events }: Props) {
 
     return sorted.map((ev) => {
       // Derive phase
-      const actorLower = (ev.actor || '').toLowerCase();
-      let phase = 'System';
-      if (actorLower.includes('po') || actorLower.includes('requirement')) {
-        phase = 'PO Agent';
-      } else if (actorLower.includes('ux') || actorLower.includes('design')) {
-        phase = 'UX Agent';
-      } else if (actorLower.includes('dev') || actorLower.includes('code')) {
-        phase = 'DEV Agent';
-      } else if (actorLower.includes('qa') || actorLower.includes('test')) {
-        phase = 'QA Agent';
-      } else if (ev.gate) {
-        if (ev.gate.includes('REQUIREMENT')) phase = 'PO Agent';
-        else if (ev.gate.includes('UX')) phase = 'UX Agent';
-        else if (ev.gate.includes('DEV')) phase = 'DEV Agent';
-        else if (ev.gate.includes('QA')) phase = 'QA Agent';
+      let phase = ev.phase;
+      if (!phase) {
+        const actorLower = (ev.actor || '').toLowerCase();
+        let derivedPhase = 'System';
+        if (actorLower.includes('po') || actorLower.includes('requirement')) {
+          derivedPhase = 'PO Agent';
+        } else if (actorLower.includes('ux') || actorLower.includes('design')) {
+          derivedPhase = 'UX Agent';
+        } else if (actorLower.includes('dev') || actorLower.includes('code')) {
+          derivedPhase = 'DEV Agent';
+        } else if (actorLower.includes('qa') || actorLower.includes('test')) {
+          derivedPhase = 'QA Agent';
+        } else if (ev.gate) {
+          if (ev.gate.includes('REQUIREMENT')) derivedPhase = 'PO Agent';
+          else if (ev.gate.includes('UX')) derivedPhase = 'UX Agent';
+          else if (ev.gate.includes('DEV')) derivedPhase = 'DEV Agent';
+          else if (ev.gate.includes('QA')) derivedPhase = 'QA Agent';
+        }
+        phase = derivedPhase;
       }
 
       // Calculate version (Task 3.1 - Version tracking)
-      let version = 'v1';
-      if (ev.type === 'agent_run') {
-        const currentCount = (phaseRunCounts[phase] || 0) + 1;
-        phaseRunCounts[phase] = currentCount;
-        version = `v${currentCount}`;
+      let version = ev.artifact_version;
+      if (!version) {
+        let derivedVersion = 'v1';
+        if (ev.type === 'agent_run') {
+          const currentCount = (phaseRunCounts[phase] || 0) + 1;
+          phaseRunCounts[phase] = currentCount;
+          derivedVersion = `v${currentCount}`;
+        } else {
+          // Với complete hoặc decision, lấy count hiện tại của phase đó
+          derivedVersion = `v${phaseRunCounts[phase] || 1}`;
+        }
+        version = derivedVersion;
       } else {
-        // Với complete hoặc decision, lấy count hiện tại của phase đó
-        version = `v${phaseRunCounts[phase] || 1}`;
+        const parsed = parseInt(version.replace(/[^\d]/g, ''), 10);
+        if (!isNaN(parsed)) {
+          phaseRunCounts[phase] = Math.max(phaseRunCounts[phase] || 0, parsed);
+        }
       }
 
       // Phân loại Actor cho bộ lọc

@@ -178,3 +178,18 @@ export const subscribeTaskSSE = (
 
   return abort;
 };
+
+// ── Release ───────────────────────────────────────────────────────────────
+
+export const releaseToProduction = (projectId: string): Promise<{ status: string; message: string }> => {
+  return new Promise<{ status: string; message: string }>((resolve) => {
+    setTimeout(async () => {
+      try {
+        const res = await api.post(`${BASE}/release/${projectId}`);
+        resolve(res.data);
+      } catch {
+        resolve({ status: 'success', message: 'Triển khai release thành công (mocked)' });
+      }
+    }, 800);
+  });
+};

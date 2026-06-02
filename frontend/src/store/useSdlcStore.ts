@@ -53,6 +53,8 @@ export interface AuditEvent {
   decision?: string;
   comment?: string;
   type: 'agent_run' | 'agent_complete' | 'hitl_decision';
+  phase?: string;
+  artifact_version?: string;
 }
 
 interface SdlcState {

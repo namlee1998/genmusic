@@ -28,7 +28,7 @@ const SUMMARY_TYPES = new Set([
 type ArtifactCategory = 'visual' | 'summary' | 'document';
 
 function getCategory(artifact: Artifact): ArtifactCategory {
-  if (VISUAL_TYPES.has(artifact.type)) return 'visual';
+  if (VISUAL_TYPES.has(artifact.type) || artifact.phase === 'ux-agent') return 'visual';
   if (SUMMARY_TYPES.has(artifact.type)) return 'summary';
   return 'document';
 }
@@ -161,10 +161,10 @@ function SummaryCard({ art }: { art: Artifact }) {
 }
 
 // ── Visual Hero Section ─────────────────────────────────────────────────────
-
+ 
 function VisualHero({ art }: { art: Artifact }) {
-  // wireframe_spec → dùng PenpotPreview
-  if (art.type === 'wireframe_spec') {
+  // wireframe_spec, ux_spec or ux-agent phase -> dùng PenpotPreview
+  if (art.type === 'wireframe_spec' || art.type === 'ux_spec' || art.phase === 'ux-agent') {
     // Parse screens từ contentText/contentJson nếu có
     const screens = art.contentJson && Array.isArray((art.contentJson as { screens?: unknown[] }).screens)
       ? ((art.contentJson as { screens: Array<{ name: string; description: string }> }).screens)
