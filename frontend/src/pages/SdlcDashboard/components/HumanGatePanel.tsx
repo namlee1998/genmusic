@@ -1,192 +1,233 @@
-import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import * as sdlcApi from '@/services/api/sdlcApi';
-import type { Artifact } from '@/store/useSdlcStore';
-import ReactMarkdown from 'react-markdown';
+import { useMemo, useState } from 'react';
+
+interface GateIssue {
+  code: string;
+  severity: string;
+  detail: string;
+  suggestedAction?: string;
+}
+
+interface GateEvaluation {
+  complexity?: string;
+  gateType?: string;
+  score?: number;
+  recommendation?: string;
+  summary?: string;
+  issues?: GateIssue[];
+}
+
+export type StructuredAction = 'approve' | 'edit_approve' | 'reject';
+
+export interface StructuredDecision {
+  action: StructuredAction;
+  comment: string;
+  retryReason?: string;
+  editedOutput?: Record<string, unknown>;
+  targetFields?: string[];
+  blockingIssues?: Array<{ severity: string; issue: string; expected_fix: string }>;
+  acceptanceChecks?: string[];
+}
 
 interface Props {
   taskId: string;
-  onDecision: (decision: 'APPROVE' | 'REJECT' | 'REQUEST_CHANGES', comment: string) => Promise<void>;
+  gateEvaluation?: GateEvaluation | null;
+  agentOutput?: Record<string, unknown> | null;
+  outputVersion?: number;
+  retryCount?: number;
+  onSubmit: (decision: StructuredDecision) => Promise<void>;
   onClose: () => void;
 }
 
-const DECISIONS = [
-  { value: 'APPROVE' as const,          label: 'Approve',          icon: '✅', cls: 'gate-btn--approve',  desc: 'Output đạt yêu cầu. Tiếp tục phase tiếp theo.' },
-  { value: 'REQUEST_CHANGES' as const,  label: 'Request Changes',  icon: '🔄', cls: 'gate-btn--changes',  desc: 'Cần chỉnh sửa. Agent sẽ chạy lại với feedback.' },
-  { value: 'REJECT' as const,           label: 'Reject',           icon: '❌', cls: 'gate-btn--reject',   desc: 'Output không đạt. Tạm dừng workflow.' },
+// The three structured HITL actions (plan section 2.3.2).
+const ACTIONS = [
+  { value: 'approve' as const, label: 'Approve & hand off', description: 'Validate, commit the approved output, create the A2A handoff, and unlock the next worker.' },
+  { value: 'edit_approve' as const, label: 'Edit by field & approve', description: 'Edit the structured output, re-validate, then approve. The edit is saved as a JSON Patch in the audit log.' },
+  { value: 'reject' as const, label: 'Reject & re-run', description: 'Re-run the owning worker with your feedback (max 3 retries, then escalates).' },
 ];
 
-export default function HumanGatePanel({ taskId, onDecision, onClose }: Props) {
-  const [selected, setSelected] = useState<typeof DECISIONS[number]['value'] | null>(null);
+// Retry reason taxonomy (plan section 2.3.3).
+const RETRY_REASONS = ['schema_invalid', 'ac_not_measurable', 'coverage_gap', 'build_fail', 'quality_low', 'other'];
+const FEEDBACK_EXAMPLES: Record<string, string> = {
+  po: 'Example: Rewrite the acceptance criteria so each one is measurable and clarify the target user.',
+  ux: 'Example: Rework the checkout flow with an explicit error state and a mobile wireframe.',
+  dev: 'Example: Rework the implementation using a refresh-token flow and add a test for token expiry.',
+};
+
+export default function HumanGatePanel({
+  taskId, gateEvaluation, agentOutput, outputVersion = 0, retryCount = 0, onSubmit, onClose,
+}: Props) {
+  const requiresFeedbackRerun = gateEvaluation?.gateType === 'confidence_based'
+    && gateEvaluation.recommendation === 'HOLD';
+  const [action, setAction] = useState<StructuredAction | null>(requiresFeedbackRerun ? 'reject' : null);
   const [comment, setComment] = useState('');
+  const [retryReason, setRetryReason] = useState('other');
+  const [targetFields, setTargetFields] = useState('');
+  const [blockingIssue, setBlockingIssue] = useState('');
+  const [expectedFix, setExpectedFix] = useState('');
+  const [acceptanceChecks, setAcceptanceChecks] = useState('');
+  const [editText, setEditText] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
-  const [activeArtIdx, setActiveArtIdx] = useState(0);
-  const [fetchLoading, setFetchLoading] = useState(true);
-  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  // Reset state when taskId changes (during rendering to avoid useEffect warning)
-  const [prevTaskId, setPrevTaskId] = useState(taskId);
-  if (taskId !== prevTaskId) {
-    setPrevTaskId(taskId);
-    setArtifacts([]);
-    setActiveArtIdx(0);
-    setFetchLoading(true);
-    setFetchError(null);
-    setSelected(null);
-    setComment('');
-  }
+  const approvalBlocked = gateEvaluation?.gateType === 'qa_quality_gate'
+    && gateEvaluation.recommendation !== 'PASS';
+  const visibleActions = requiresFeedbackRerun ? ACTIONS.filter((item) => item.value === 'reject') : ACTIONS;
+  const prettyOutput = useMemo(() => JSON.stringify(agentOutput ?? {}, null, 2), [agentOutput]);
+  const workerLabel = gateEvaluation?.complexity?.toUpperCase() || 'Worker';
+  const feedbackPlaceholder = FEEDBACK_EXAMPLES[gateEvaluation?.complexity || ''] || 'Describe what the worker should improve before rerunning.';
+  const fillDemoFeedback = () => {
+    const issue = gateEvaluation?.issues?.find((item) => item.code === 'oauth_state_csrf_missing')
+      || gateEvaluation?.issues?.[0];
+    setRetryReason('quality_low');
+    setTargetFields('security_notes, callback_handler, sandbox_tests');
+    setBlockingIssue(issue?.detail || 'OAuth callback state validation evidence is missing.');
+    setExpectedFix(issue?.suggestedAction || 'Validate OAuth state against the login session, attach passing security notes, and rerun sandbox tests.');
+    setAcceptanceChecks([
+      'Reject callback when OAuth state does not match the login session',
+      'Attach passing security checklist and sandbox test evidence',
+    ].join('\n'));
+    setComment('Add OAuth state validation against the login session, attach the updated security evidence, and rerun the sandbox checks.');
+  };
 
-  useEffect(() => {
-    let active = true;
-    sdlcApi.getSdlcTaskStatus(taskId)
-      .then((task) => {
-        if (!active) return;
-        setArtifacts(task?.artifacts || []);
-        setFetchLoading(false);
-      })
-      .catch((err) => {
-        if (!active) return;
-        console.error('Failed to fetch artifacts for human gate', err);
-        setFetchError('Không thể tải các artifact để xem trước.');
-        setFetchLoading(false);
-      });
-    return () => { active = false; };
-  }, [taskId]);
+  const selectAction = (value: StructuredAction) => {
+    setAction(value);
+    setError(null);
+    if (value === 'edit_approve' && !editText) setEditText(prettyOutput);
+  };
 
-  const handleSubmit = async () => {
-    if (!selected) return;
+  const submit = async () => {
+    if (!action) return;
+    setError(null);
+
+    let editedOutput: Record<string, unknown> | undefined;
+    if (action === 'edit_approve') {
+      try {
+        editedOutput = JSON.parse(editText);
+        setEditError(null);
+      } catch (e) {
+        setEditError(`Invalid JSON: ${(e as Error).message}`);
+        return;
+      }
+    }
+
     setLoading(true);
     try {
-      await onDecision(selected, comment);
+      await onSubmit({
+        action, comment, retryReason: action === 'reject' ? retryReason : undefined, editedOutput,
+        targetFields: action === 'reject' ? targetFields.split(',').map((item) => item.trim()).filter(Boolean) : undefined,
+        blockingIssues: action === 'reject' ? [{ severity: 'HIGH', issue: blockingIssue, expected_fix: expectedFix }] : undefined,
+        acceptanceChecks: action === 'reject' ? acceptanceChecks.split('\n').map((item) => item.trim()).filter(Boolean) : undefined,
+      });
       onClose();
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message
+        ?? (e as Error)?.message ?? 'Decision failed';
+      setError(msg);
     } finally {
       setLoading(false);
     }
   };
 
-  const activeArtifact = artifacts[activeArtIdx] || null;
+  const submitDisabled = !action || loading
+    || (action === 'approve' && approvalBlocked)
+    || (action === 'reject' && (!comment.trim() || !blockingIssue.trim() || !expectedFix.trim() || !acceptanceChecks.trim()));
 
   return (
-    <div className="gate-panel gate-panel--split">
-      {/* Cột trái: Xem trước Artifact */}
-      <div className="gate-panel__preview flex flex-col min-h-0 bg-[#0d0e13] border border-outline-variant/30 rounded-lg p-5">
-        <h3 className="text-sm font-bold uppercase tracking-wider text-on-surface-variant mb-4 flex items-center gap-2">
-          <span className="material-symbols-outlined text-base">visibility</span> Preview Output Artifacts
-        </h3>
-        
-        {fetchLoading ? (
-          <div className="flex-1 flex flex-col items-center justify-center py-10 gap-3 text-on-surface-variant">
-            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-primary"></div>
-            <span className="text-xs">Đang tải tài liệu review...</span>
-          </div>
-        ) : fetchError ? (
-          <div className="flex-1 flex flex-col items-center justify-center py-10 text-error gap-2 text-xs">
-            <span className="material-symbols-outlined text-3xl">error_outline</span>
-            <span>{fetchError}</span>
-          </div>
-        ) : artifacts.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center py-10 text-on-surface-variant gap-2 text-xs">
-            <span className="material-symbols-outlined text-3xl">description</span>
-            <span>Không tìm thấy artifact nào cho task này.</span>
-          </div>
-        ) : (
-          <div className="flex-1 flex flex-col min-h-0 gap-3">
-            {/* Hàng Tabs chọn Artifact */}
-            <div className="flex flex-wrap gap-1.5 border-b border-outline-variant/20 pb-2">
-              {artifacts.map((art, idx) => (
-                <button
-                  key={art.id}
-                  onClick={() => setActiveArtIdx(idx)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
-                    idx === activeArtIdx
-                      ? 'bg-primary/20 text-primary border border-primary/40'
-                      : 'bg-surface-container-high/40 hover:bg-surface-container-high text-on-surface-variant border border-transparent'
-                  }`}
-                >
-                  {art.title || art.type.toUpperCase()}
-                </button>
-              ))}
-            </div>
-
-            {/* Nội dung Artifact */}
-            <div className="flex-1 overflow-y-auto mt-2 pr-1 max-h-[460px] text-xs leading-relaxed text-on-surface select-text custom-scrollbar">
-              {activeArtifact ? (
-                activeArtifact.contentText ? (
-                  <div className="prose prose-invert max-w-none prose-xs">
-                    <ReactMarkdown>{activeArtifact.contentText}</ReactMarkdown>
-                  </div>
-                ) : activeArtifact.contentJson ? (
-                  <pre className="bg-[#050505] p-4 rounded border border-outline-variant/20 overflow-x-auto text-[10px] font-mono text-[#9cdcfe]">
-                    {JSON.stringify(activeArtifact.contentJson, null, 2)}
-                  </pre>
-                ) : (
-                  <div className="text-center py-10 text-on-surface-variant">Tài liệu rỗng.</div>
-                )
-              ) : null}
-            </div>
-          </div>
-        )}
+    <div className="gate-panel">
+      <div className="gate-panel__header">
+        <h2>{requiresFeedbackRerun ? `${workerLabel} output needs human review` : 'Human review gate'}</h2>
+        <p className="gate-panel__sub">
+          Task <code>{taskId.slice(0, 8)}…</code> · output v{outputVersion}
+          {retryCount > 0 && <> · retries {retryCount}/3</>}
+        </p>
       </div>
 
-      {/* Cột phải: Decision Form */}
-      <div className="gate-panel__form flex flex-col gap-5 justify-between">
-        <div>
-          <div className="gate-panel__header mb-4">
-            <h2 className="flex items-center gap-2 text-base font-bold text-on-surface">
-              <span className="material-symbols-outlined text-primary">gavel</span> Human Quality Gate
-            </h2>
-            <p className="gate-panel__sub text-xs text-on-surface-variant">
-              Task <code>{taskId.slice(0, 8)}…</code> — Đưa ra quyết định phê duyệt
-            </p>
-          </div>
-
-          <div className="gate-decisions flex flex-col gap-2">
-            {DECISIONS.map((d) => (
-              <motion.button
-                key={d.value}
-                className={`gate-btn ${d.cls} ${selected === d.value ? 'gate-btn--selected' : ''}`}
-                onClick={() => setSelected(d.value)}
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
-              >
-                <span className="gate-btn__icon">{d.icon}</span>
-                <div>
-                  <div className="gate-btn__label text-xs font-semibold">{d.label}</div>
-                  <div className="gate-btn__desc text-[10px] text-on-surface-variant mt-0.5">{d.desc}</div>
-                </div>
-              </motion.button>
-            ))}
-          </div>
-
-          <div className="gate-comment mt-4">
-            <label className="text-xs font-semibold text-on-surface-variant block mb-1">
-              Nhận xét / Feedback {selected === 'REQUEST_CHANGES' && <span className="gate-required text-warning">(yêu cầu bắt buộc)</span>}
-            </label>
-            <textarea
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              rows={3}
-              placeholder="Nhận xét, lý do thay đổi hoặc ghi chú cho Agent..."
-              className="gate-textarea text-xs w-full bg-[#050505] border border-outline-variant/30 rounded-lg p-2.5 text-on-surface focus:outline-none focus:border-primary"
-            />
-          </div>
-        </div>
-
-        <div className="gate-actions flex items-center justify-end gap-3 pt-3 border-t border-outline-variant/20">
-          <button onClick={onClose} className="gate-cancel px-4 py-2 border border-outline-variant/30 rounded-lg text-xs hover:bg-surface-container-high/40 transition-colors">
-            Hủy
+      <div className="gate-decisions">
+        {visibleActions.map((a) => (
+          <button key={a.value} className={`gate-btn ${action === a.value ? 'gate-btn--selected' : ''}`} onClick={() => selectAction(a.value)}>
+            <div>
+              <div className="gate-btn__label">{requiresFeedbackRerun ? 'Send feedback & rerun worker' : a.label}</div>
+              <div className="gate-btn__desc">{requiresFeedbackRerun ? 'The worker receives your direction, regenerates its output, and runs validation again.' : a.description}</div>
+            </div>
           </button>
-          <motion.button
-            onClick={handleSubmit}
-            disabled={!selected || loading || (selected === 'REQUEST_CHANGES' && !comment.trim())}
-            className="gate-submit px-4 py-2 bg-primary text-on-primary text-xs font-bold rounded-lg hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            {loading ? '⏳ Đang gửi...' : `Gửi Quyết Định: ${selected || '—'}`}
-          </motion.button>
+        ))}
+      </div>
+
+      {gateEvaluation && (
+        <div className={`gate-evaluation ${gateEvaluation.recommendation === 'PASS' ? 'gate-evaluation--pass' : 'gate-evaluation--hold'}`}>
+          <div className="gate-evaluation__header"><strong>{gateEvaluation.gateType === 'qa_quality_gate' ? 'Automated QA gate' : 'Confidence-based review trigger'}</strong><span>{gateEvaluation.complexity?.toUpperCase()} · {gateEvaluation.score}/100</span></div>
+          <p>{gateEvaluation.recommendation}: {gateEvaluation.summary}</p>
+          {!!gateEvaluation.issues?.length && (
+            <div className="gate-issues">
+              <strong>Issues requiring attention</strong>
+              {gateEvaluation.issues.map((issue) => (
+                <div className="gate-issue" key={`${issue.code}:${issue.detail}`}>
+                  <span>{issue.severity}</span>
+                  <div><b>{issue.code}</b><p>{issue.detail}</p>{issue.suggestedAction && <small>{issue.suggestedAction}</small>}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {approvalBlocked && <small>Approval stays locked until the automated QA gate returns PASS.</small>}
+          {requiresFeedbackRerun && <small>Direct approval is disabled. Add a concrete direction for the worker and rerun it.</small>}
         </div>
+      )}
+
+      {action === 'edit_approve' && (
+        <div className="gate-comment">
+          <label>Edit structured output (JSON) <span className="gate-required">(re-validated on approve)</span></label>
+          <textarea
+            className="gate-textarea" rows={12} value={editText} spellCheck={false}
+            onChange={(e) => { setEditText(e.target.value); setEditError(null); }}
+            style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}
+          />
+          {editError && <small className="gate-required">{editError}</small>}
+        </div>
+      )}
+
+      {action === 'reject' && (
+        <>
+          <button className="gate-demo-fill" type="button" onClick={fillDemoFeedback}>
+            Fill demo review feedback
+          </button>
+          <div className="gate-comment">
+            <label>Retry reason</label>
+            <select className="gate-textarea" value={retryReason} onChange={(e) => setRetryReason(e.target.value)} style={{ height: 36 }}>
+              {RETRY_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
+          <div className="gate-comment">
+            <label>Target fields <span className="gate-muted">(comma-separated)</span></label>
+            <input className="gate-textarea" value={targetFields} onChange={(e) => setTargetFields(e.target.value)} placeholder="security_notes, callback_handler, sandbox_tests" />
+          </div>
+          <div className="gate-comment">
+            <label>Blocking issue <span className="gate-required">(required)</span></label>
+            <textarea className="gate-textarea" rows={2} value={blockingIssue} onChange={(e) => setBlockingIssue(e.target.value)} placeholder="Example: OAuth callback does not validate state against the login session." />
+          </div>
+          <div className="gate-comment">
+            <label>Expected fix <span className="gate-required">(required)</span></label>
+            <textarea className="gate-textarea" rows={2} value={expectedFix} onChange={(e) => setExpectedFix(e.target.value)} placeholder="Example: Add state generation and callback validation, then rerun sandbox tests." />
+          </div>
+          <div className="gate-comment">
+            <label>Acceptance checks <span className="gate-required">(one per line)</span></label>
+            <textarea className="gate-textarea" rows={3} value={acceptanceChecks} onChange={(e) => setAcceptanceChecks(e.target.value)} placeholder={'Reject callback when state does not match\nAttach passing security checklist and sandbox test evidence'} />
+          </div>
+        </>
+      )}
+
+      <div className="gate-comment">
+        <label>Review comment {action === 'reject' && <span className="gate-required">(required)</span>}</label>
+        <textarea className="gate-textarea" rows={3} value={comment} onChange={(e) => setComment(e.target.value)} placeholder={requiresFeedbackRerun ? feedbackPlaceholder : 'Review notes, requested changes, or the rejection reason.'} />
+      </div>
+
+      {error && <div className="delivery-error" style={{ margin: '0 0 8px' }}>{error}</div>}
+
+      <div className="gate-actions">
+        <button className="gate-cancel" onClick={onClose}>Cancel</button>
+        <button className="gate-submit" onClick={submit} disabled={submitDisabled}>
+          {loading ? 'Submitting…' : requiresFeedbackRerun ? 'Send feedback & rerun' : `Submit: ${action || '-'}`}
+        </button>
       </div>
     </div>
   );

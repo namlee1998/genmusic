@@ -69,6 +69,12 @@ class ProjectMemberModel {
     });
   }
 
+  static async deleteByProject(projectId) {
+    await prisma.projectMembership.deleteMany({
+      where: { projectId }
+    });
+  }
+
   static _map(row) {
     if (!row) return null;
     return {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, PlusCircle } from 'lucide-react';
+import { Bot, CheckCircle2, PlusCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAppStore } from '@/store/useAppStore';
 
@@ -19,14 +19,27 @@ export default function EmptyProjectState() {
         </div>
         <h2>Welcome to Autonomous Factory</h2>
         <p>
-          Trạm kiểm soát SDLC (Software Development Life Cycle) đã sẵn sàng.<br/>
-          Vui lòng chọn một dự án từ Sidebar bên trái, hoặc tạo dự án mới để khởi chạy LangGraph Agents.
+          Bắt đầu với một project, sau đó mô tả feature cần xây dựng. Hệ thống sẽ
+          dẫn bạn qua từng AI agent và các bước duyệt kết quả.
         </p>
+        <div className="mt-5 grid gap-2 text-left">
+          {[
+            '1. Tạo project đầu tiên',
+            '2. Chọn New Feature Request và mô tả yêu cầu',
+            '3. Chạy PO Agent từ thẻ backlog',
+            '4. Duyệt kết quả để mở khóa agent tiếp theo',
+          ].map((step) => (
+            <div key={step} className="flex items-center gap-2 text-sm text-on-surface-variant">
+              <CheckCircle2 size={15} className="shrink-0 text-emerald-400" />
+              <span>{step}</span>
+            </div>
+          ))}
+        </div>
         <button 
-          className="sdlc-empty-hint hover:bg-emerald-500/20 transition-colors cursor-pointer"
+          className="sdlc-empty-hint mt-5 hover:bg-emerald-500/20 transition-colors cursor-pointer"
           onClick={() => setCreateProjectDialogOpen(true)}
         >
-          <PlusCircle size={16} /> <span>Tạo dự án đầu tiên của bạn ngay!</span>
+          <PlusCircle size={16} /> <span>Tạo project đầu tiên</span>
         </button>
       </motion.div>
     </div>

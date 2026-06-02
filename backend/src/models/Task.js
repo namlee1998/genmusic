@@ -1,5 +1,21 @@
 const prisma = require('../config/database');
 
+function serializeJson(value, fallback = null) {
+  if (value === undefined) return fallback;
+  if (value === null || typeof value === 'string') return value;
+  return JSON.stringify(value);
+}
+
+function parseJson(value, fallback = null) {
+  if (value === null || value === undefined || value === '') return fallback;
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch (_) {
+    return fallback;
+  }
+}
+
 class TaskModel {
   static async create(data) {
     const record = await prisma.task.create({
@@ -9,13 +25,14 @@ class TaskModel {
         type: data.type,
         status: data.status || 'pending',
         promptProfile: data.promptProfile,
-        result: data.result,
+        result: serializeJson(data.result),
         error: data.error,
         inputContentHash: data.inputContentHash || null,
         outputContentHash: data.outputContentHash || null,
         sourceRunId: data.sourceRunId || null,
         versionStatus: data.versionStatus || 'draft',
-        observability: data.observability || {},
+        observability: serializeJson(data.observability, '{}'),
+        gateMode: data.gateMode || null,
       }
     });
     return this._map(record);
@@ -34,12 +51,19 @@ class TaskModel {
     const mapped = {
       updatedAt: data.updated_at ? new Date(data.updated_at) : new Date(),
       status: data.status,
-      result: data.result,
+      result: data.result === undefined ? undefined : serializeJson(data.result),
       error: data.error,
       versionStatus: data.version_status || data.versionStatus,
-      observability: data.observability,
+      observability: data.observability === undefined ? undefined : serializeJson(data.observability),
       outputContentHash: data.output_content_hash || data.outputContentHash,
       sourceRunId: data.source_run_id || data.sourceRunId,
+      // Structured HITL fields
+      agentOutput: data.agentOutput === undefined ? undefined : serializeJson(data.agentOutput),
+      approvedOutput: data.approvedOutput === undefined ? undefined : serializeJson(data.approvedOutput),
+      outputVersion: data.outputVersion,
+      retryCount: data.retryCount,
+      lastRetryReason: data.lastRetryReason,
+      gateMode: data.gateMode,
     };
     Object.keys(mapped).forEach(k => mapped[k] === undefined && delete mapped[k]);
 
@@ -109,7 +133,7 @@ class TaskModel {
       type: row.type,
       status: row.status,
       promptProfile: row.promptProfile,
-      result: row.result,
+      result: parseJson(row.result),
       error: row.error,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
@@ -117,7 +141,13 @@ class TaskModel {
       outputContentHash: row.outputContentHash || null,
       sourceRunId: row.sourceRunId || null,
       versionStatus: row.versionStatus || 'committed',
-      observability: row.observability || {},
+      observability: parseJson(row.observability, {}),
+      agentOutput: parseJson(row.agentOutput, null),
+      approvedOutput: parseJson(row.approvedOutput, null),
+      outputVersion: row.outputVersion ?? 0,
+      retryCount: row.retryCount ?? 0,
+      lastRetryReason: row.lastRetryReason || null,
+      gateMode: row.gateMode || null,
     };
   }
 }

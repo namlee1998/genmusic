@@ -11,8 +11,19 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from src.schemas.aidlc import POAgentInput, POAgentOutput, UserStory
+from src.mcp.mcp_client import call_tool
 
 logger = logging.getLogger(__name__)
+
+
+def _prepare_po_mcp(title: str) -> list[dict]:
+    result = call_tool("PO", "docs.search", {"query": title})
+    return [{"tool": "docs.search", "result": result}]
+
+
+def _publish_po_mcp(title: str, prd: str, activity: list[dict]) -> list[dict]:
+    result = call_tool("PO", "confluence.write", {"title": title, "content": prd})
+    return [*activity, {"tool": "confluence.write", "result": result}]
 
 SYSTEM_PROMPT = """You are a senior Product Owner with 10+ years of experience writing PRDs for software products.
 
@@ -71,6 +82,7 @@ async def run_po_agent(
     llm = _get_llm(model_config)
     fr = input_data.feature_request
     pc = input_data.project_context
+    mcp_activity = _prepare_po_mcp(fr.title)
 
     user_content = f"""Feature Request:
 - Title: {fr.title}
@@ -107,12 +119,14 @@ Project Context:
                 acceptance_criteria=s.get("acceptance_criteria", []),
             ))
 
+    prd = parsed.get("prd", "")
     return POAgentOutput(
-        prd=parsed.get("prd", ""),
+        prd=prd,
         user_stories=stories,
         acceptance_criteria=parsed.get("acceptance_criteria", []),
         scope=parsed.get("scope", ""),
         out_of_scope=parsed.get("out_of_scope", ""),
+        mcp_activity=_publish_po_mcp(fr.title, prd, mcp_activity),
         summary=parsed.get("summary", f"PO Agent completed for: {fr.title}"),
     )
 
@@ -125,6 +139,8 @@ async def stream_po_agent(
     llm = _get_llm(model_config)
     fr = input_data.feature_request
     pc = input_data.project_context
+    mcp_activity = _prepare_po_mcp(fr.title)
+    yield {"event": "progress", "data": {"step": "mcp", "token": "PO called MCP tool: docs.search"}}
 
     user_content = f"""Feature Request:
 - Title: {fr.title}
@@ -194,6 +210,8 @@ Project Context:
             else:
                 messages.append(SystemMessage(content=f"Your last output was invalid JSON. Error: {str(e)}. Please output ONLY valid JSON."))
 
+    parsed["mcp_activity"] = _publish_po_mcp(fr.title, parsed.get("prd", ""), mcp_activity)
+    yield {"event": "progress", "data": {"step": "mcp", "token": "PO called MCP tool: confluence.write"}}
     yield {
         "event": "completed",
         "data": {

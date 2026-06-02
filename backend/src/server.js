@@ -8,6 +8,17 @@ const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { requestLogger } = require('./middleware/logger');
 
 const app = express();
+const PRISMA_CONNECT_TIMEOUT_MS = 5_000;
+
+const connectPrismaWithTimeout = () => Promise.race([
+  prisma.$connect(),
+  new Promise((_, reject) => {
+    setTimeout(
+      () => reject(new Error(`Timed out after ${PRISMA_CONNECT_TIMEOUT_MS}ms`)),
+      PRISMA_CONNECT_TIMEOUT_MS
+    );
+  }),
+]);
 
 // CORS configuration
 const allowedOrigins = new Set(
@@ -24,7 +35,9 @@ if (NODE_ENV !== 'production') {
 
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.has(origin)) {
+    const isLocalDevOrigin = NODE_ENV !== 'production'
+      && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin || '');
+    if (!origin || allowedOrigins.has(origin) || isLocalDevOrigin) {
       return callback(null, true);
     }
     return callback(new Error(`Origin ${origin} is not allowed by CORS`));
@@ -55,7 +68,7 @@ const startServer = async () => {
   try {
     // Test Prisma connection
     try {
-      await prisma.$connect();
+      await connectPrismaWithTimeout();
       console.log('[Prisma] Connection verified.');
     } catch (dbError) {
       console.error('[Prisma] Connection test failed:', dbError.message);
@@ -66,7 +79,7 @@ const startServer = async () => {
     app.listen(PORT, () => {
       console.log(`[Server] Backend running on http://localhost:${PORT}`);
       console.log(`[Server] Environment: ${NODE_ENV}`);
-      console.log(`[Server] Agents URL: ${process.env.AGENTS_BASE_URL || 'http://localhost:8000'}`);
+      console.log(`[Server] Agents URL: ${process.env.AGENTS_BASE_URL || 'http://127.0.0.1:8001'}`);
       startBatchJobs();
     });
   } catch (error) {

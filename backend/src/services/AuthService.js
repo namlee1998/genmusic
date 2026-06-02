@@ -51,9 +51,25 @@ class AuthService {
 
     // Mock admin logic (preserve existing behavior)
     if ((email === 'admin@vfs.com' && password === 'admin123') || (email === 'dev@aidlc.ai' && password === 'dev123')) {
+      // Upsert keyed on the unique `email`, not a hardcoded id — keying on a
+      // fixed id collides whenever a row with this email already exists under a
+      // different id (Unique constraint failed on `email`).
+      const mockUser = await prisma.user.upsert({
+        where: { email },
+        update: { role: 'admin' },
+        create: {
+          email,
+          password: await bcrypt.hash(password, 10),
+          role: 'admin',
+        },
+      });
+      // Issue a real JWT so getCurrentUser resolves the same user id consistently.
+      const token = jwt.sign({ sub: mockUser.id, email: mockUser.email }, JWT_SECRET, {
+        expiresIn: JWT_EXPIRES_IN,
+      });
       return {
-        session: { access_token: 'mock-admin-token', refresh_token: 'mock-refresh' },
-        user: { id: '00000000-0000-0000-0000-000000000000', email: email },
+        session: { access_token: token, refresh_token: null },
+        user: { id: mockUser.id, email: mockUser.email, role: mockUser.role },
       };
     }
 
@@ -86,8 +102,10 @@ class AuthService {
       throw new ApiError(401, 'Missing access token');
     }
 
+    // Backward compatibility for any session still holding the legacy static
+    // token. New mock logins receive a real JWT (handled below).
     if (accessToken === 'mock-admin-token') {
-      return { id: '00000000-0000-0000-0000-000000000000', email: 'dev@aidlc.ai' };
+      return { id: '00000000-0000-0000-0000-000000000000', email: 'admin@vfs.com', role: 'admin' };
     }
 
     try {

@@ -51,7 +51,7 @@ describe('LandingPage', () => {
     expect(screen.getByText(/Deploy Your First Agent/i)).toBeInTheDocument();
   });
 
-  it('navigates to /auth when "Deploy Your First Agent" is clicked and user is not authenticated', () => {
+  it('navigates to /auth when the primary CTA is clicked and user is not authenticated', () => {
     render(
       <BrowserRouter>
         <LandingPage />
@@ -62,7 +62,7 @@ describe('LandingPage', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/auth');
   });
 
-  it('navigates to /sdlc when "Deploy Your First Agent" is clicked and user is authenticated', () => {
+  it('navigates to /sdlc when the primary CTA is clicked and user is authenticated', () => {
     (useAuthStore as unknown as Mock).mockReturnValue({ session: { user: { id: '1' } } });
     render(
       <BrowserRouter>
@@ -85,4 +85,3 @@ describe('LandingPage', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/auth');
   });
 });
-

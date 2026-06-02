@@ -16,6 +16,12 @@ class FeatureBacklog {
   }
 
   static async findByProjectId(projectId) {
+    // Repair legacy rows left behind when the client moved a card before task creation.
+    await prisma.featureBacklog.updateMany({
+      where: { projectId, status: 'IN_PROGRESS', taskId: null },
+      data: { status: 'TODO' }
+    });
+
     const data = await prisma.featureBacklog.findMany({
       where: { projectId },
       orderBy: { createdAt: 'desc' }
@@ -31,12 +37,27 @@ class FeatureBacklog {
     return data;
   }
 
-  static async linkTask(id, taskId) {
-    const data = await prisma.featureBacklog.update({
-      where: { id },
+  static async linkTask(id, taskId, projectId) {
+    const result = await prisma.featureBacklog.updateMany({
+      where: { id, projectId, status: 'TODO' },
       data: { taskId, status: 'IN_PROGRESS' }
     });
-    return data;
+    if (result.count !== 1) {
+      throw new Error('Backlog item must belong to the project and be in TODO before starting an agent');
+    }
+  }
+
+  static async updateStatusByTaskId(taskId, status) {
+    await prisma.featureBacklog.updateMany({
+      where: { taskId },
+      data: { status }
+    });
+  }
+
+  static async deleteByProject(projectId) {
+    await prisma.featureBacklog.deleteMany({
+      where: { projectId }
+    });
   }
 }
 

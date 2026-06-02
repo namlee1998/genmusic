@@ -3,6 +3,7 @@ const { Project, Folder, Document, ProjectMember } = require('../models');
 const DocumentService = require('./DocumentService');
 const MembershipService = require('./MembershipService');
 const QuotaService = require('./QuotaService');
+const prisma = require('../config/database');
 const { ApiError } = require('../middleware/errorHandler');
 
 class ProjectService {
@@ -61,7 +62,32 @@ class ProjectService {
       await DocumentService.deleteDocument(docId, user, { skipAccessCheck: true });
     }
 
-    await Project.delete(projectId);
+    const tasks = await prisma.task.findMany({
+      where: { projectId },
+      select: { id: true },
+    });
+    const taskIds = tasks.map((task) => task.id);
+
+    await prisma.$transaction([
+      prisma.agentArtifact.deleteMany({
+        where: taskIds.length > 0
+          ? { OR: [{ projectId }, { taskId: { in: taskIds } }] }
+          : { projectId },
+      }),
+      prisma.testcase.deleteMany({ where: { projectId } }),
+      prisma.hitlDecision.deleteMany({ where: { projectId } }),
+      prisma.featureBacklog.deleteMany({ where: { projectId } }),
+      prisma.sessionState.deleteMany({ where: { projectId } }),
+      prisma.usageLog.updateMany({
+        where: { projectId },
+        data: { projectId: null, taskId: null },
+      }),
+      prisma.task.deleteMany({ where: { projectId } }),
+      prisma.folder.deleteMany({ where: { projectId } }),
+      prisma.projectInvitation.deleteMany({ where: { projectId } }),
+      prisma.projectMembership.deleteMany({ where: { projectId } }),
+      prisma.project.delete({ where: { id: projectId } }),
+    ]);
     return true;
   }
 

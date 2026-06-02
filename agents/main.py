@@ -1,6 +1,6 @@
 """
 FastAPI server — AI Agents Service
-Exposes HTTP + SSE endpoints to trigger LangGraph agents.
+Exposes HTTP + SSE endpoints for the direct LangChain worker runtime.
 This is the bridge between The Backend (Node.js) and the AI Agents (Python).
 """
 
@@ -36,7 +36,7 @@ from src.schemas.aidlc import (
 )
 from src.agents.intent_agent import run_intent_agent, stream_intent_agent
 from src.observability import create_trace_context, flush_observability
-from src.workflows.main_pipeline import get_graph, determine_fix_target
+from src.routing.rework import determine_fix_target
 
 load_dotenv(override=True)
 
@@ -52,12 +52,7 @@ logger = logging.getLogger("agents-server")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🤖 AI Agents server starting...")
-    # Pre-initialize the graph
-    try:
-        get_graph()
-        logger.info("✅ LangGraph pipeline initialized")
-    except Exception as e:
-        logger.warning("⚠️  LangGraph init warning: %s", e)
+    logger.info("Direct LangChain worker runtime initialized")
     yield
     flush_observability()
     logger.info("👋 AI Agents server shutting down")
@@ -65,7 +60,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="AIDLC Platform — AI Agents",
-    description="LangGraph-based AI agent service for testcase generation",
+    description="Direct LangChain workers for the four-stage AIDLC pipeline",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -426,4 +421,9 @@ async def stream_agent_ws(session_id: str):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    uvicorn.run(
+        app,
+        host=os.getenv("HOST", "0.0.0.0"),
+        port=int(os.getenv("PORT", "8001")),
+        log_level=os.getenv("LOG_LEVEL", "info").lower(),
+    )

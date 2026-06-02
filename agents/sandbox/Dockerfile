@@ -12,8 +12,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 RUN apt-get install -y nodejs
 
 WORKDIR /app
-COPY requirements.txt .
-RUN pip3 install -r requirements.txt
+RUN pip3 install claude-agent-sdk
 
 # File run_dev.py sẽ được mount/push vào lúc runtime
 CMD ["python3", "/app/run_dev.py"]

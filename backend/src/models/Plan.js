@@ -1,6 +1,35 @@
 const prisma = require('../config/database');
 
 class PlanModel {
+  static async ensureDefaults() {
+    const defaults = [
+      {
+        id: 'free',
+        name: 'Free',
+        creditsLimit: 50,
+        maxProjects: 3,
+        maxMembersPerProject: 3,
+        taskHistoryDays: 30,
+        description: '50 credits/month - up to 50,000 tokens',
+      },
+      {
+        id: 'pro',
+        name: 'Pro',
+        creditsLimit: 1000,
+        maxProjects: null,
+        maxMembersPerProject: 20,
+        taskHistoryDays: null,
+        description: '1,000 credits/month - up to 1,000,000 tokens',
+      },
+    ];
+
+    await Promise.all(defaults.map((plan) => prisma.plan.upsert({
+      where: { id: plan.id },
+      update: plan,
+      create: plan,
+    })));
+  }
+
   static async findAll() {
     const data = await prisma.plan.findMany({
       where: { isActive: true },

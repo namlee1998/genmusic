@@ -16,6 +16,8 @@ router.post('/run-qa-agent',  quotaMiddleware, SdlcController.runQAAgent.bind(Sd
 // ── HITL Gate ────────────────────────────────────────────────────────────
 // POST /api/v1/sdlc/tasks/:task_id/gate-decision  { decision, comment }
 router.post('/tasks/:task_id/gate-decision', SdlcController.submitGateDecision.bind(SdlcController));
+// Structured HITL (plan 2.3/2.8): { decision_id, base_output_version, action, payload, comment }
+router.post('/tasks/:task_id/decision', SdlcController.submitStructuredDecision.bind(SdlcController));
 
 // ── Task Status ──────────────────────────────────────────────────────────
 router.get('/tasks/:task_id',              SdlcController.getTaskStatus.bind(SdlcController));
@@ -25,7 +27,10 @@ router.get('/status/:task_id',             SdlcController.streamStatus.bind(Sdlc
 // GET /api/v1/sdlc/workflow-status?project_id=xxx
 router.get('/workflow-status',                        SdlcController.getWorkflowStatus.bind(SdlcController));
 router.get('/final-review-packet/:project_id',        SdlcController.getFinalReviewPacket.bind(SdlcController));
+router.post('/projects/:project_id/release-decision', SdlcController.submitReleaseDecision.bind(SdlcController));
 router.get('/audit-trail/:project_id',                SdlcController.getAuditTrail.bind(SdlcController));
+router.get('/projects/:project_id/metrics',           SdlcController.getWorkflowMetrics.bind(SdlcController));
+router.get('/projects/:project_id/artifacts',          SdlcController.getProjectArtifacts.bind(SdlcController));
 
 // ── Backlog / Kanban ──────────────────────────────────────────────────────
 router.get('/projects/:project_id/backlog',           SdlcController.getBacklogs.bind(SdlcController));

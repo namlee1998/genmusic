@@ -95,6 +95,17 @@ function computeAcCoverage(acCoverageMatrix = [], acceptanceCriteria = []) {
   return total > 0 ? Math.round((coveredCount / total) * 1000) / 10 : 0;
 }
 
+function computePlanMetrics(testCases = [], typeCounts = {}) {
+  const total = testCases.length;
+  const badCases = (typeCounts.negative || 0) + (typeCounts.edge || 0);
+  const badCaseRatioPct = total > 0 ? Math.round((badCases / total) * 1000) / 10 : 0;
+  const titles = testCases.map((testCase) => String(testCase.title || testCase.name || '').trim().toLowerCase()).filter(Boolean);
+  const duplicateCount = titles.length - new Set(titles).size;
+  const duplicateRatePct = titles.length > 0 ? Math.round((duplicateCount / titles.length) * 1000) / 10 : 0;
+  const scopeViolations = testCases.filter((testCase) => testCase.scope_violation === true || testCase.scopeViolation === true).length;
+  return { badCaseRatioPct, duplicateRatePct, scopeViolations };
+}
+
 /**
  * Simulate security scan — detects anti-patterns in code diff.
  * Returns GateCheck object.
@@ -280,6 +291,7 @@ class QualityGateService {
     const typeCounts = countTestTypes(testCases);
     const totalTestCases = testCases.length;
     const acCoveragePct = computeAcCoverage(acCoverageMatrix, acceptanceCriteria);
+    const { badCaseRatioPct, duplicateRatePct, scopeViolations } = computePlanMetrics(testCases, typeCounts);
 
     // 3. Async gate checks
     let gateChecks = [];
@@ -346,6 +358,33 @@ class QualityGateService {
         expected: `>= ${rules.minAcCoveragePct}% AC coverage`,
         actual: `${acCoveragePct}% AC coverage`,
         severity: acCoveragePct < rules.minAcCoveragePct * 0.7 ? 'BLOCKER' : 'WARNING',
+      });
+    }
+
+    if (badCaseRatioPct < rules.minBadCaseRatioPct) {
+      violations.push({
+        rule: 'minBadCaseRatioPct',
+        expected: `>= ${rules.minBadCaseRatioPct}% negative or edge cases`,
+        actual: `${badCaseRatioPct}% negative or edge cases`,
+        severity: 'BLOCKER',
+      });
+    }
+
+    if (duplicateRatePct > rules.maxDuplicateRatePct) {
+      violations.push({
+        rule: 'maxDuplicateRatePct',
+        expected: `<= ${rules.maxDuplicateRatePct}% duplicate cases`,
+        actual: `${duplicateRatePct}% duplicate cases`,
+        severity: 'BLOCKER',
+      });
+    }
+
+    if (scopeViolations > rules.maxScopeViolations) {
+      violations.push({
+        rule: 'maxScopeViolations',
+        expected: `<= ${rules.maxScopeViolations} scope violations`,
+        actual: `${scopeViolations} scope violations`,
+        severity: 'BLOCKER',
       });
     }
 
@@ -421,6 +460,9 @@ class QualityGateService {
         totalTestCases,
         typeCounts,
         acCoveragePct,
+        badCaseRatioPct,
+        duplicateRatePct,
+        scopeViolations,
         blockerCount,
         minTotalRequired: rules.minTotalTestCases,
         minHappyRequired: rules.minHappyCases,

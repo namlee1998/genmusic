@@ -102,9 +102,16 @@ model Task {
   sourceRunId       String?
   versionStatus     String   @default("committed")
   observability     String?  // JSON string
+  // Structured HITL (plan 2.4 / 2.7 / 2.8): a Task is one step's state.
+  agentOutput       String?  // JSON string — raw output the agent produced
+  approvedOutput    String?  // JSON string — human-approved/edited output (next agent input)
+  outputVersion     Int      @default(0) // optimistic lock, bumped on each edit
+  retryCount        Int      @default(0)
+  lastRetryReason   String?
+  gateMode          String?  // strict_manual | confidence_based | auto_approve_safe
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
-  
+
   userId            String?
   user              User?    @relation(fields: [userId], references: [id])
   project           Project  @relation(fields: [projectId], references: [id])
@@ -187,6 +194,13 @@ model HitlDecision {
   decision      String   // "approve", "reject"
   comment       String?
   reviewerId    String?
+  // Structured HITL + append-only audit (plan 2.3.3 / 2.8 / 3).
+  decisionId        String?  @unique // idempotency key — duplicate is ignored
+  action            String?  // approve | reject | edit_approve | escalation_required
+  baseOutputVersion Int?     // optimistic lock the decision was made against
+  retryReason       String?  // schema_invalid | ac_not_measurable | coverage_gap | build_fail | quality_low | other
+  jsonPatch         String?  // JSON string — RFC 6902 operations (for edit_approve)
+  payload           String?  // JSON string — extra context (rerun input/output, etc.)
   createdAt     DateTime @default(now())
 }
 
@@ -216,7 +230,7 @@ model Plan {
 
 model UserSubscription {
   id            String   @id @default(uuid())
-  userId        String
+  userId        String   @unique
   planId        String
   status        String   @default("active")
   creditsUsed   Int      @default(0)

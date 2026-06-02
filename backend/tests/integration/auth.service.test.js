@@ -1,42 +1,44 @@
+const mockFindUnique = jest.fn();
+const mockVerify = jest.fn();
+
+jest.mock('../../src/config/database', () => ({
+  user: {
+    findUnique: mockFindUnique,
+  },
+}));
+
+jest.mock('jsonwebtoken', () => ({
+  verify: mockVerify,
+  sign: jest.fn(),
+}));
+
+const AuthService = require('../../src/services/AuthService');
+
 describe('AuthService', () => {
-  afterEach(() => {
-    jest.resetModules();
-    jest.dontMock('@supabase/supabase-js');
-    jest.dontMock('../../src/config/environment');
+  beforeEach(() => {
+    jest.clearAllMocks();
   });
 
-  test('uses the publishable key for auth client operations', async () => {
-    const getUser = jest.fn().mockResolvedValue({
-      data: { user: { id: 'user-1' } },
-      error: null,
+  test('resolves the current local JWT user from Prisma', async () => {
+    mockVerify.mockReturnValue({ sub: 'user-1' });
+    mockFindUnique.mockResolvedValue({ id: 'user-1', email: 'dev@example.com', role: 'member' });
+
+    await expect(AuthService.getCurrentUser('access-token')).resolves.toEqual({
+      id: 'user-1',
+      email: 'dev@example.com',
+      role: 'member',
     });
-    const createClient = jest.fn(() => ({ auth: { getUser } }));
-
-    jest.doMock('@supabase/supabase-js', () => ({ createClient }));
-    jest.doMock('../../src/config/environment', () => ({
-      SUPABASE_AUTH_REDIRECT_URL: 'http://localhost:5173/auth',
-      SUPABASE_URL: 'https://example.supabase.co',
-      SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test',
-    }));
-
-    const AuthService = require('../../src/services/AuthService');
-    const user = await AuthService.getCurrentUser('access-token');
-
-    expect(createClient).toHaveBeenCalledWith('https://example.supabase.co', 'sb_publishable_test');
-    expect(getUser).toHaveBeenCalledWith('access-token');
-    expect(user).toEqual({ id: 'user-1' });
+    expect(mockFindUnique).toHaveBeenCalledWith({ where: { id: 'user-1' } });
   });
 
-  test('fails fast when the publishable key is missing', () => {
-    jest.doMock('@supabase/supabase-js', () => ({ createClient: jest.fn() }));
-    jest.doMock('../../src/config/environment', () => ({
-      SUPABASE_AUTH_REDIRECT_URL: 'http://localhost:5173/auth',
-      SUPABASE_URL: 'https://example.supabase.co',
-      SUPABASE_PUBLISHABLE_KEY: undefined,
-    }));
+  test('rejects an invalid local JWT', async () => {
+    mockVerify.mockImplementation(() => {
+      throw new Error('invalid token');
+    });
 
-    expect(() => require('../../src/services/AuthService')).toThrow(
-      'SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY must be set',
-    );
+    await expect(AuthService.getCurrentUser('bad-token')).rejects.toMatchObject({
+      statusCode: 401,
+      message: 'Invalid token',
+    });
   });
 });
