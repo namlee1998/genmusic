@@ -80,11 +80,13 @@ Bảng điều khiển trung tâm quản lý toàn bộ vòng đời phát tri�
 ---
 
 ## 🎉 Các Cải Tiến Lớn Đã Hoàn Thành (Completed Major Improvements)
-
+ 
 1. **Tối ưu hóa hiệu năng & bundle size:** Thực hiện code-splitting bằng `React.lazy()`, cấu hình Manual Chunks trong Vite config thông minh để triệt tiêu Circular dependencies, chia nhỏ AppShell, tối ưu hóa toàn bộ file bundle dưới 300KB.
 2. **Hoàn thiện tính năng SDLC với Mock-first:** Tích hợp nút "Release to Production" thực tế với mockup API, tối ưu timeline của Audit Trail tương thích ngược với backend, và tích hợp hiển thị Penpot preview cho các spec thiết kế UX.
 3. **Bổ sung Unit Tests:** Viết các test case hoàn chỉnh cho store `useSdlcStore`, dashboard, và client SSE, tinh chỉnh các lỗi mock API, đạt trạng thái pass 100% (34/34 tests).
 4. **Tinh chỉnh UI/UX (Polish):** Thêm micro-animations (hover elevation, color glow, active feedback, button animations) cho `AgentPhaseCard` bằng Framer Motion, tối ưu responsive layout tại 1024px và 768px trong `sdlc.css`.
+5. **Tạo Mock Backend Server Express**: Xây dựng máy chủ giả lập Node/Express (`npm run mock` trên cổng 3000) giả lập toàn bộ API của SDLC, Auth, Backlog, Quota và stream log thời gian thực qua Server-Sent Events (SSE), hỗ trợ chạy offline toàn bộ ứng dụng.
+6. **Tích hợp công cụ phân tích tĩnh Fallow**: Tích hợp Fallow dọn dẹp các tệp tin rác cũ, theo dõi sức khỏe mã nguồn ở chế độ watch mode (`npm run fallow:watch`) và loại trừ các tệp báo cáo khỏi git bằng `.gitignore`.
 
 ---
 
