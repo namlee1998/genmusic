@@ -25,9 +25,15 @@ export function AdminFunnel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  // Reset loading and error states when windowDays changes during rendering
+  const [prevWindowDays, setPrevWindowDays] = useState(windowDays);
+  if (windowDays !== prevWindowDays) {
+    setPrevWindowDays(windowDays);
     setLoading(true);
     setError(null);
+  }
+
+  useEffect(() => {
     getAdminFunnel(windowDays)
       .then(setData)
       .catch(() => setError('Failed to load funnel data'))

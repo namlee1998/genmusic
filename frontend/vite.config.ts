@@ -20,6 +20,28 @@ export default defineConfig(({mode}) => {
         '@': path.resolve(__dirname, './src'),
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('react') || id.includes('react-dom') || id.includes('react-router') || id.includes('@remix-run') || id.includes('scheduler')) {
+                return 'vendor-react';
+              }
+              if (id.includes('framer-motion') || id.includes('motion')) {
+                return 'vendor-motion';
+              }
+              if (id.includes('lucide-react')) {
+                return 'vendor-icons';
+              }
+              if (id.includes('axios') || id.includes('zustand') || id.includes('i18next')) {
+                return 'vendor-core';
+              }
+            }
+          },
+        },
+      },
+    },
     server: {
       port: 5173,
       hmr: process.env.DISABLE_HMR !== 'true',

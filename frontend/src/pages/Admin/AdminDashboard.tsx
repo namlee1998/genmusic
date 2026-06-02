@@ -163,8 +163,18 @@ export function AdminDashboard() {
   const [tracesOffset, setTracesOffset] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  // Reset loading state when dependency variables change during rendering
+  const [prevParams, setPrevParams] = useState({ window, failuresOffset, tracesOffset });
+  if (
+    prevParams.window !== window ||
+    prevParams.failuresOffset !== failuresOffset ||
+    prevParams.tracesOffset !== tracesOffset
+  ) {
+    setPrevParams({ window, failuresOffset, tracesOffset });
     setLoading(true);
+  }
+
+  useEffect(() => {
     getAdminStats(window, {
       failuresLimit: TABLE_LIMIT,
       failuresOffset,

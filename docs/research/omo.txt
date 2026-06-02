@@ -10,7 +10,7 @@ Cách thiết kế đúng: quan sát toàn bộ, log toàn bộ, nhưng chỉ y�
 
 Hình 1. Workflow tổng của OMO và các điểm HITL nên gắn vào hệ thống.
 
-3. Cách đọc sơ đồ tổng
+3. Cách đọc sơ đồ tổng
 Bước
 1
 
@@ -95,7 +95,7 @@ Grant/deny permission
 Tạm dừng có kiểm soát.
 Ngăn unauthorized actions.
 
-5. Lifecycle Hooks: nơi inject HITL
+5. Lifecycle Hooks: nơi inject HITL
 
 Hình 2. Hook lifecycle của OMO và các điểm có thể pause/approve/review.
 
@@ -103,7 +103,7 @@ Hình 2. Hook lifecycle của OMO và các điểm có thể pause/approve/revie
 
 Hình 3. Chính sách HITL theo rủi ro: không approve mọi hành động.
 
-7. Câu chốt đưa vào báo cáo
+7. Câu chốt đưa vào báo cáo
 OMO tự động hóa execution bằng IntentGate, Sisyphus, Category Router, tmux parallel agents, Ralph Loop và Todo Enforcer. Tuy
 nhiên, để dùng trong môi trường có kiểm soát, HITL phải được inject qua Prometheus Interview, lifecycle hooks, manual
 interrupt, /pause-/resume và config permissions. Human có thể quan sát toàn bộ quá trình, nhưng chỉ cần approve ở các điểm rủi

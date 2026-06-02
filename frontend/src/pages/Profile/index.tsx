@@ -49,8 +49,20 @@ const toPayload = (form: ProfileForm): ProfilePayload => ({
   bio: form.bio,
 });
 
-const getFriendlyError = (err: any) => {
-  return err?.response?.data?.message || err?.message || 'Không thể lưu thông tin hồ sơ';
+const getFriendlyError = (err: unknown) => {
+  let message = 'Không thể lưu thông tin hồ sơ';
+  if (err instanceof Error) {
+    message = err.message;
+  }
+  try {
+    const axiosError = err as { response?: { data?: { message?: string } } };
+    if (axiosError?.response?.data?.message) {
+      message = axiosError.response.data.message;
+    }
+  } catch {
+    // Ignore
+  }
+  return message;
 };
 
 export function ProfilePage() {
@@ -80,7 +92,7 @@ export function ProfilePage() {
         if (!mounted) return;
         setProfile(nextProfile);
         setForm(toForm(nextProfile));
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (mounted) setError(getFriendlyError(err));
       } finally {
         if (mounted) setLoading(false);
@@ -126,7 +138,7 @@ export function ProfilePage() {
       setForm(toForm(nextProfile));
       setNotice('Đã lưu thông tin hồ sơ.');
       window.dispatchEvent(new CustomEvent('profile-updated', { detail: nextProfile }));
-    } catch (err: any) {
+    } catch (err: unknown) {
       setError(getFriendlyError(err));
     } finally {
       setSaving(false);
@@ -143,7 +155,7 @@ export function ProfilePage() {
       setForm(emptyForm);
       setNotice('Đã xóa thông tin hồ sơ mở rộng.');
       window.dispatchEvent(new CustomEvent('profile-updated', { detail: nextProfile }));
-    } catch (err: any) {
+    } catch (err: unknown) {
       setError(getFriendlyError(err));
     } finally {
       setResetting(false);
@@ -168,7 +180,7 @@ export function ProfilePage() {
       setForm(toForm(nextProfile));
       setNotice('Đã cập nhật ảnh đại diện.');
       window.dispatchEvent(new CustomEvent('profile-updated', { detail: nextProfile }));
-    } catch (err: any) {
+    } catch (err: unknown) {
       setError(getFriendlyError(err));
     } finally {
       setUploadingAvatar(false);
