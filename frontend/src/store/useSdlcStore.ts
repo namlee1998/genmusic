@@ -3,11 +3,12 @@ import type { TaskStatus } from '@/services/api';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
-export type AgentPhase = 'intent' | 'po' | 'ux' | 'dev' | 'qa';
+export type AgentPhase = 'po' | 'ux' | 'dev' | 'qa';
 export type GateDecision = 'APPROVE' | 'REJECT' | 'REQUEST_CHANGES';
 
 export interface Artifact {
   id: string;
+  taskId?: string;
   phase: string;
   type: string;
   key: string;
@@ -35,11 +36,39 @@ export interface PhaseStatus {
 
 export interface WorkflowStatus {
   projectId: string;
+  featureRequest?: {
+    title?: string;
+    description?: string;
+    priority?: string;
+  } | null;
   phases: {
     po: PhaseStatus | null;
     ux: PhaseStatus | null;
     dev: PhaseStatus | null;
     qa: PhaseStatus | null;
+  };
+  releaseGate?: {
+    eligible: boolean;
+    canDecide: boolean;
+    reviewerRole: string | null;
+    decision: HitlDecision | null;
+    status: 'pending' | 'released' | 'rejected';
+    approvalBlocked?: boolean;
+    evidence?: {
+      feature?: { title?: string; description?: string } | string | null;
+      risk?: { level?: string; tags?: string[] } | null;
+      versions?: {
+        po?: { task_id?: string; output_version?: number } | null;
+        ux?: { task_id?: string; output_version?: number } | null;
+        dev?: { task_id?: string; output_version?: number } | null;
+        qa?: { task_id?: string; output_version?: number } | null;
+      } | null;
+      sandbox_result?: { build_ok?: boolean; tests_ran?: boolean; tests_passed?: number; tests_failed?: number } | null;
+      security_gate?: { recommendation?: string } | null;
+      qa_gate?: string | null;
+      coverage_percentage?: number | null;
+      open_blockers?: Array<{ severity?: string; code?: string; detail?: string }>;
+    };
   };
   currentPhase: string;
 }
@@ -49,10 +78,47 @@ export interface AuditEvent {
   actor: string;
   action: string;
   taskId?: string;
+  agent?: string | null;
   gate?: string;
   decision?: string;
-  comment?: string;
-  type: 'agent_run' | 'agent_complete' | 'hitl_decision';
+  comment?: string | null;
+  // Granular state-machine detail (plan TIP-002 / Scenario D).
+  stateFrom?: string | null;
+  stateTo?: string | null;
+  attempt?: number | null;
+  outputVersion?: number | null;
+  versionTag?: string | null;
+  fromAgent?: string | null;
+  toAgent?: string | null;
+  severity?: string | null;
+  retryReason?: string | null;
+  blockingIssueCount?: number;
+  type: 'agent_run' | 'agent_complete' | 'hitl_decision' | 'a2a_handoff' | 'escalation' | 'release_decision' | 'failure';
+}
+
+export interface WorkflowMetrics {
+  projectId: string;
+  generatedAt: string;
+  cycle_time_seconds: number | null;
+  time_per_agent: Record<string, { runs: number; avg_seconds: number | null }>;
+  auto_approval_rate: number;
+  human_rejection_rate: number;
+  rerun_count_per_stage: Record<string, number>;
+  gate_failure_reason_distribution: Record<string, number>;
+  sandbox_pass: boolean | null;
+  qa_gate: string | null;
+  requirement_coverage_percentage: number | null;
+  false_auto_approval_rate: number;
+  dead_letter_count: number;
+  counts: {
+    total_runs: number;
+    auto_approvals: number;
+    human_approvals: number;
+    rejections: number;
+    escalations: number;
+    total_decisions: number;
+  };
+  agent_policy: Record<string, { max_attempts: number; timeout_seconds: number }>;
 }
 
 interface SdlcState {

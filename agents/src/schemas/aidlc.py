@@ -4,6 +4,7 @@ Extends the original schemas from A20-App-155.
 """
 
 from __future__ import annotations
+from datetime import datetime, timezone
 from typing import Any
 from pydantic import BaseModel, Field
 
@@ -20,6 +21,16 @@ from src.schemas import (
 # A2A Handoff (Context passed between pipelines)
 # =============================================================================
 class A2AHandoff(BaseModel):
+    job_id: str = Field(...)
+    from_worker: str = Field(...)
+    to_worker: str = Field(...)
+    artifacts: list[str] = Field(default_factory=list)
+    summary: str = Field(default="")
+    approval_id: str = Field(...)
+    constraints: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    # Transitional fields used by the current in-process adapter.
     prd_context: str = Field(default="")
     ux_spec: str = Field(default="")
     test_cases: list[str] = Field(default_factory=list)
@@ -86,6 +97,7 @@ class POAgentOutput(BaseModel):
     acceptance_criteria: list[str] = Field(default_factory=list, description="Flat list of all ACs")
     scope: str = Field(default="", description="In-scope items — markdown")
     out_of_scope: str = Field(default="", description="Out-of-scope items — markdown")
+    mcp_activity: list[dict[str, Any]] = Field(default_factory=list)
     summary: str = Field(default="")
 
 # =============================================================================
@@ -121,6 +133,14 @@ class ChangedFile(BaseModel):
     reason: str
     change_type: str = Field(default="modify", description="add / modify / delete")
 
+class SandboxReport(BaseModel):
+    """Structured result of running the patch inside the E2B sandbox."""
+    build_ok: bool = Field(default=False, description="Did the patch build/install successfully")
+    tests_ran: bool = Field(default=False, description="Were tests actually executed")
+    tests_passed: int = Field(default=0)
+    tests_failed: int = Field(default=0)
+    logs: str = Field(default="", description="Raw stdout/stderr excerpt — markdown")
+
 class DEVAgentInput(BaseModel):
     prd: str = Field(default="")
     ux_spec: str = Field(default="")
@@ -134,10 +154,16 @@ class DEVAgentOutput(BaseModel):
     architecture_ledger_update: str = Field(default="", description="Những thay đổi kiến trúc sau Story này")
     implementation_plan: str = Field(default="", description="Step-by-step plan — markdown")
     mock_code_diff: str = Field(default="", description="Unified git diff under the legacy field name")
+    # The patch must be a well-defined format so QA knows exactly what to test
+    # (plan section 2.1: "patch của DEV phải định nghĩa rõ là gì").
+    patch_format: str = Field(default="unified_diff", description="unified_diff | file_bundle | git_commit")
     changed_files: list[ChangedFile] = Field(default_factory=list)
+    # AC.id traceability thread: which acceptance criteria this patch implements.
+    linked_ac_ids: list[str] = Field(default_factory=list, description="AC ids this patch implements")
     risk_assessment: str = Field(default="", description="Risk level LOW/MEDIUM/HIGH + reasoning — markdown")
     risk_level: str = Field(default="LOW", description="LOW | MEDIUM | HIGH")
-    sandbox_report: str = Field(default="")
+    sandbox_report: str = Field(default="", description="Human-readable sandbox report — markdown (legacy field)")
+    sandbox_result: SandboxReport = Field(default_factory=SandboxReport, description="Structured sandbox run result")
     patch_branch: str = Field(default="")
     patch_commit: str = Field(default="")
     summary: str = Field(default="")
@@ -148,8 +174,18 @@ class DEVAgentOutput(BaseModel):
 
 class ACCoverageRow(BaseModel):
     ac: str
+    ac_id: str = Field(default="", description="Stable AC id (AC-1...) for cross-agent traceability")
     test_case_ids: list[str]
     covered: bool
+
+class TestRunReport(BaseModel):
+    """Did tests actually run, and what happened — not just a coverage matrix."""
+    executed: bool = Field(default=False, description="Were the test cases actually executed")
+    total: int = Field(default=0)
+    passed: int = Field(default=0)
+    failed: int = Field(default=0)
+    duration_ms: int = Field(default=0)
+    logs: str = Field(default="", description="Test runner output excerpt — markdown")
 
 class QATestCase(BaseModel):
     id: str = Field(..., description="TC-001")
@@ -177,6 +213,14 @@ class QAAgentOutput(BaseModel):
     test_cases: list[QATestCase] = Field(default_factory=list)
     qa_report: str = Field(default="", description="QA Report — markdown")
     ac_coverage_matrix: list[ACCoverageRow] = Field(default_factory=list)
+    # QAOutput is not just a coverage matrix (plan section 2.1): it must report
+    # whether tests actually ran, regression + security findings, and a reasoned
+    # release decision.
+    test_run_report: TestRunReport = Field(default_factory=TestRunReport)
+    regression_risks: list[str] = Field(default_factory=list)
+    security_findings: list[str] = Field(default_factory=list)
+    release_decision: str = Field(default="needs_changes", description="approve | reject | needs_changes")
+    release_reason: str = Field(default="", description="Justification for the release decision")
     pass_count: int = Field(default=0)
     fail_count: int = Field(default=0)
     blocker_count: int = Field(default=0)
@@ -215,6 +259,9 @@ class QualityGateMetrics(BaseModel):
     min_security_required: int = Field(default=0)
     min_ac_coverage_required: float = Field(default=0.0)
     min_approvers_required: int = Field(default=1)
+    bad_case_ratio_pct: float = Field(default=0.0)
+    duplicate_rate_pct: float = Field(default=0.0)
+    scope_violations: int = Field(default=0)
 
 
 class QualityGateEvaluation(BaseModel):
@@ -229,6 +276,72 @@ class QualityGateEvaluation(BaseModel):
     summary: str = Field(default="")
     passed: bool = Field(default=False)
 
+
+# =============================================================================
+# Structured HITL — Gate Mode, Run State, Human Decision (plan section 2)
+# =============================================================================
+
+# Gate Mode policy per gate (plan 2.3.1): not every gate must pause.
+GATE_MODE_STRICT_MANUAL = "strict_manual"        # always require a human approve
+GATE_MODE_CONFIDENCE = "confidence_based"        # pause only on low confidence / warnings
+GATE_MODE_AUTO_SAFE = "auto_approve_safe"        # auto-approve when all validation passes AND risk low
+
+# Retry reason taxonomy (plan 2.3.3) — to detect an agent repeating the same error.
+RETRY_REASONS = (
+    "schema_invalid", "ac_not_measurable", "coverage_gap",
+    "build_fail", "quality_low", "other",
+)
+
+MAX_RETRY_PER_STEP = 3
+
+
+class StepState(BaseModel):
+    """Per-step state inside a factory run (plan 2.4 / 2.7)."""
+    step: str = Field(..., description="po | ux | dev | qa")
+    status: str = Field(default="pending", description="pending|running|waiting_human|approved|rejected|failed|needs_human_resolution")
+    agent_output: dict[str, Any] = Field(default_factory=dict, description="Raw output the agent produced")
+    approved_output: dict[str, Any] | None = Field(default=None, description="Human-approved/edited output — what the next agent receives")
+    version: int = Field(default=0, description="Optimistic-lock version, bumped on each edit")
+    retry_count: int = Field(default=0)
+    last_retry_reason: str = Field(default="")
+    gate_evaluation: QualityGateEvaluation | None = Field(default=None)
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class FactoryRunState(BaseModel):
+    """Global run state shared by /build and /audit (plan 2.7 / 1.3)."""
+    run_id: str
+    project_id: str = Field(default="")
+    feature_request: str = Field(default="")
+    current_step: str = Field(default="po", description="po | ux | dev | qa | done")
+    status: str = Field(
+        default="running",
+        description="running|waiting_human|approved|rejected|failed|completed|needs_human_resolution",
+    )
+    steps: dict[str, StepState] = Field(default_factory=dict)
+    audit_event_ids: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class HumanEdit(BaseModel):
+    """Field-level edit using JSON Patch (RFC 6902), not a text diff (plan 2.3.4)."""
+    base_version: int
+    patch_format: str = Field(default="json_patch")
+    patch: list[dict[str, Any]] = Field(default_factory=list, description="RFC 6902 operations")
+    edited_output: dict[str, Any] = Field(default_factory=dict, description="Result after applying the patch")
+
+
+class HumanDecisionRequest(BaseModel):
+    """Idempotent HITL decision (plan 2.8)."""
+    run_id: str
+    step_id: str
+    decision_id: str = Field(..., description="Idempotency key — duplicate is ignored, not re-processed")
+    base_output_version: int = Field(default=0, description="Optimistic lock — stale version is rejected")
+    action: str = Field(..., description="approve | reject | edit_approve")
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
 # Re-export everything
 __all__ = [
     # Original
@@ -242,11 +355,14 @@ __all__ = [
     "IntentAgentInput", "IntentAgentOutput",
     "POAgentInput", "POAgentOutput", "UserStory",
     "UXAgentInput", "UXAgentOutput", "ScreenSpec",
-    "DEVAgentInput", "DEVAgentOutput", "ChangedFile",
-    "QAAgentInput", "QAAgentOutput", "QATestCase", "ACCoverageRow",
+    "DEVAgentInput", "DEVAgentOutput", "ChangedFile", "SandboxReport",
+    "QAAgentInput", "QAAgentOutput", "QATestCase", "ACCoverageRow", "TestRunReport",
     # Quality Gate
     "GateViolation", "GateCheck", "QualityGateMetrics", "QualityGateEvaluation",
-    
+    # Structured HITL / Run State
+    "StepState", "FactoryRunState", "HumanEdit", "HumanDecisionRequest",
+    "GATE_MODE_STRICT_MANUAL", "GATE_MODE_CONFIDENCE", "GATE_MODE_AUTO_SAFE",
+    "RETRY_REASONS", "MAX_RETRY_PER_STEP",
     # Context Pipeline
     "A2AHandoff",
 ]

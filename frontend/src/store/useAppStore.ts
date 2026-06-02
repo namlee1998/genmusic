@@ -4,9 +4,6 @@ import type {
   DocumentItem,
   FolderItem,
   ProjectItem,
-  TaskItem,
-  TaskStatus,
-  UnknownResolution,
 } from '@/services/api';
 
 export interface DocPreviewCacheItem {

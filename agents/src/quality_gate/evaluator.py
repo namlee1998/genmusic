@@ -252,6 +252,30 @@ def _compute_ac_coverage(
     return round((covered_count / total) * 100, 1) if total > 0 else 0.0
 
 
+def _compute_plan_metrics(test_cases: list[dict], type_counts: dict[str, int]) -> dict:
+    """Compute the hard quality metrics required by the v4 plan."""
+    total = len(test_cases)
+    bad_cases = type_counts.get("negative", 0) + type_counts.get("edge", 0)
+    bad_case_ratio_pct = round((bad_cases / total) * 100, 1) if total else 0.0
+    titles = [
+        str(tc.get("title") or tc.get("name") or "").strip().lower()
+        for tc in test_cases
+    ]
+    titles = [title for title in titles if title]
+    duplicate_count = len(titles) - len(set(titles))
+    duplicate_rate_pct = round((duplicate_count / len(titles)) * 100, 1) if titles else 0.0
+    scope_violations = sum(
+        1
+        for tc in test_cases
+        if tc.get("scope_violation") is True or tc.get("scopeViolation") is True
+    )
+    return {
+        "bad_case_ratio_pct": bad_case_ratio_pct,
+        "duplicate_rate_pct": duplicate_rate_pct,
+        "scope_violations": scope_violations,
+    }
+
+
 def _compute_score(
     rules: dict,
     type_counts: dict[str, int],
@@ -370,6 +394,7 @@ async def evaluate_quality_gate(
     type_counts = _count_test_types(test_cases)
     total_tc = len(test_cases)
     ac_coverage_pct = _compute_ac_coverage(ac_coverage_matrix, acceptance_criteria)
+    plan_metrics = _compute_plan_metrics(test_cases, type_counts)
 
     # --- 3. Run async gate checks ---
     gate_checks = await _run_gate_checks(
@@ -428,6 +453,33 @@ async def evaluate_quality_gate(
             rule="max_blockers",
             expected=f"<= {max_blockers} blockers",
             actual=f"{blocker_count} blockers",
+            severity="BLOCKER",
+        ))
+
+    min_bad_case_ratio = rules.get("min_bad_case_ratio_pct", 0)
+    if plan_metrics["bad_case_ratio_pct"] < min_bad_case_ratio:
+        violations.append(GateViolation(
+            rule="min_bad_case_ratio_pct",
+            expected=f">= {min_bad_case_ratio}% negative and edge cases",
+            actual=f"{plan_metrics['bad_case_ratio_pct']}%",
+            severity="BLOCKER",
+        ))
+
+    max_duplicate_rate = rules.get("max_duplicate_rate_pct", 100)
+    if plan_metrics["duplicate_rate_pct"] > max_duplicate_rate:
+        violations.append(GateViolation(
+            rule="max_duplicate_rate_pct",
+            expected=f"<= {max_duplicate_rate}% duplicate test titles",
+            actual=f"{plan_metrics['duplicate_rate_pct']}%",
+            severity="BLOCKER",
+        ))
+
+    max_scope_violations = rules.get("max_scope_violations", 0)
+    if plan_metrics["scope_violations"] > max_scope_violations:
+        violations.append(GateViolation(
+            rule="max_scope_violations",
+            expected=f"<= {max_scope_violations} scope violations",
+            actual=str(plan_metrics["scope_violations"]),
             severity="BLOCKER",
         ))
 
@@ -501,6 +553,7 @@ async def evaluate_quality_gate(
             "min_security_required": rules["min_security_cases"],
             "min_ac_coverage_required": rules["min_ac_coverage_pct"],
             "min_approvers_required": rules.get("min_approvers", 1),
+            **plan_metrics,
         },
         gate_checks=gate_checks,
         summary="\n".join(summary_lines),

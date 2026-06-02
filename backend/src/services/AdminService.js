@@ -332,9 +332,15 @@ class AdminService {
     // Compatibility mapping
     const mappedUsageRows = usageRows.map(r => ({
       ...r,
-      user_id: r.userId, project_id: r.projectId, task_id: r.taskId, agent_type: r.agentType,
-      token_input: r.tokenInput, token_output: r.tokenOutput, token_total: r.tokenTotal,
-      credits_charged: r.creditsCharged, executed_at: r.executedAt
+      user_id: r.userId ?? r.user_id,
+      project_id: r.projectId ?? r.project_id,
+      task_id: r.taskId ?? r.task_id,
+      agent_type: r.agentType ?? r.agent_type,
+      token_input: r.tokenInput ?? r.token_input,
+      token_output: r.tokenOutput ?? r.token_output,
+      token_total: r.tokenTotal ?? r.token_total,
+      credits_charged: r.creditsCharged ?? r.credits_charged,
+      executed_at: r.executedAt ?? r.executed_at,
     }));
     
     const usageByTask = latestUsageByTask(mappedUsageRows);
@@ -349,10 +355,10 @@ class AdminService {
 
       taskRows = taskRowsResult.map(r => ({
         ...r,
-        project_id: r.projectId,
-        updated_at: r.updatedAt,
-        created_at: r.createdAt,
-        source_run_id: r.sourceRunId,
+        project_id: r.projectId ?? r.project_id,
+        updated_at: r.updatedAt ?? r.updated_at,
+        created_at: r.createdAt ?? r.created_at,
+        source_run_id: r.sourceRunId ?? r.source_run_id,
       }));
     }
 
@@ -383,7 +389,7 @@ class AdminService {
     const activeUsers = new Set();
     let credits = 0;
 
-    for (const row of usageRows) {
+    for (const row of mappedUsageRows) {
       if (!runsByAgent[row.agent_type]) {
         runsByAgent[row.agent_type] = {
           agentType: row.agent_type,

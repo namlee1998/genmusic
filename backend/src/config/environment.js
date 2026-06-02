@@ -22,7 +22,7 @@ const config = {
     normalizeBaseUrl(process.env.SUPABASE_AUTH_REDIRECT_URL, defaultAuthRedirectUrl),
 
   // AI Agents
-  AGENTS_BASE_URL: process.env.AGENTS_BASE_URL || 'http://localhost:8000',
+  AGENTS_BASE_URL: process.env.AGENTS_BASE_URL || 'http://127.0.0.1:8001',
   FRONTEND_URL: frontendUrl,
 
   // Upload limits

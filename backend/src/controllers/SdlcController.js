@@ -5,7 +5,7 @@ class SdlcController {
 
   async runIntentAgent(req, res, next) {
     try {
-      const { project_id, feature_request, feedback_prompt } = req.body;
+      const { project_id, feature_request, feedback_prompt, backlog_id } = req.body;
       if (!project_id) return res.status(400).json({ status: 'error', message: 'project_id is required' });
       if (!feature_request || !feature_request.title) {
         return res.status(400).json({ status: 'error', message: 'feature_request.title is required' });
@@ -15,6 +15,7 @@ class SdlcController {
         projectId: project_id,
         featureRequest: feature_request,
         feedbackPrompt: feedback_prompt || '',
+        backlogId: backlog_id || null,
         user: req.user,
       });
 
@@ -26,13 +27,20 @@ class SdlcController {
 
   async runPOAgent(req, res, next) {
     try {
-      const { source_task_id, feedback_prompt } = req.body;
-      if (!source_task_id) return res.status(400).json({ status: 'error', message: 'source_task_id is required' });
+      const { project_id, source_task_id, feature_request, feedback_prompt, backlog_id } = req.body;
+      if (!source_task_id && (!project_id || !feature_request?.title)) {
+        return res.status(400).json({
+          status: 'error',
+          message: 'Provide source_task_id for legacy flow or project_id with feature_request.title for the v4 PO-first flow',
+        });
+      }
 
       const task = await SdlcWorkflowService.runPOAgent({
-        projectId: req.body.project_id,
+        projectId: project_id,
         sourceTaskId: source_task_id,
+        featureRequest: feature_request,
         feedbackPrompt: feedback_prompt || '',
+        backlogId: backlog_id || null,
         user: req.user,
       });
 
@@ -115,6 +123,41 @@ class SdlcController {
     } catch (err) { next(err); }
   }
 
+  // ─── Structured HITL decision (plan section 2.3 / 2.8) ────────────────────
+
+  async submitStructuredDecision(req, res, next) {
+    try {
+      const { task_id } = req.params;
+      const { decision_id, base_output_version, action, payload, comment } = req.body;
+
+      const result = await SdlcWorkflowService.submitStructuredDecision({
+        taskId: task_id,
+        decisionId: decision_id,
+        baseOutputVersion: base_output_version,
+        action,
+        payload: payload || {},
+        comment: comment || '',
+        user: req.user,
+      });
+
+      return res.json({
+        status: 'success',
+        data: {
+          task_id: result.task.id,
+          action: result.hitlDecision.action,
+          decision: result.hitlDecision.decision,
+          decision_id: result.hitlDecision.decisionId,
+          output_version: result.task.outputVersion,
+          idempotent_replay: result.idempotentReplay || false,
+          escalated: result.escalated || false,
+          validation: result.validation || null,
+          rerun_task_id: result.rerunTask?.id || null,
+          rerun_task_type: result.rerunTask?.type || null,
+        },
+      });
+    } catch (err) { next(err); }
+  }
+
   // ─── Status & Data ───────────────────────────────────────────────────────
 
   async getTaskStatus(req, res, next) {
@@ -133,8 +176,17 @@ class SdlcController {
           gate: task.gate,
           next_agent: task.nextAgent,
           result: task.result,
+          error: task.error || null,
+          gate_evaluation: task.gateEvaluation || null,
           artifacts: task.artifacts || [],
           hitl_decision: task.hitlDecision || null,
+          // Structured HITL fields (plan 2.4 / 2.7 / 2.8)
+          output_version: task.outputVersion ?? 0,
+          retry_count: task.retryCount ?? 0,
+          last_retry_reason: task.lastRetryReason || null,
+          gate_mode: task.gateMode || null,
+          agent_output: task.agentOutput || null,
+          approved_output: task.approvedOutput || null,
           created_at: task.createdAt,
           updated_at: task.updatedAt,
         },
@@ -233,11 +285,51 @@ class SdlcController {
     } catch (err) { next(err); }
   }
 
+  async submitReleaseDecision(req, res, next) {
+    try {
+      const { project_id } = req.params;
+      const { decision_id, decision, comment } = req.body;
+      const result = await SdlcWorkflowService.submitReleaseDecision({
+        projectId: project_id,
+        decisionId: decision_id,
+        decision,
+        comment: comment || '',
+        user: req.user,
+      });
+      return res.json({
+        status: 'success',
+        data: {
+          decision: result.hitlDecision.decision,
+          action: result.hitlDecision.action,
+          comment: result.hitlDecision.comment,
+          release_status: result.hitlDecision.payload?.release_status || null,
+          idempotent_replay: result.idempotentReplay || false,
+        },
+      });
+    } catch (err) { next(err); }
+  }
+
   async getAuditTrail(req, res, next) {
     try {
       const { project_id } = req.params;
       const trail = await SdlcWorkflowService.getAuditTrail(project_id, req.user);
       return res.json({ status: 'success', data: trail });
+    } catch (err) { next(err); }
+  }
+
+  async getWorkflowMetrics(req, res, next) {
+    try {
+      const { project_id } = req.params;
+      const metrics = await SdlcWorkflowService.getWorkflowMetrics(project_id, req.user);
+      return res.json({ status: 'success', data: metrics });
+    } catch (err) { next(err); }
+  }
+
+  async getProjectArtifacts(req, res, next) {
+    try {
+      const { project_id } = req.params;
+      const result = await SdlcWorkflowService.getProjectArtifacts(project_id, req.user);
+      return res.json({ status: 'success', data: result });
     } catch (err) { next(err); }
   }
 

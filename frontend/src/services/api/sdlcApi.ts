@@ -3,6 +3,12 @@ import { getStoredAuthSession } from './authStorage';
 
 const BASE = '/sdlc';
 
+export const getApiErrorMessage = (error: unknown, fallback: string) => {
+  if (typeof error !== 'object' || error === null) return fallback;
+  const candidate = error as { response?: { data?: { message?: string } }; message?: string };
+  return candidate.response?.data?.message || candidate.message || fallback;
+};
+
 export interface FeatureRequest {
   title: string;
   description?: string;
@@ -19,14 +25,18 @@ export interface GateDecisionPayload {
 
 // ── IntentGate ────────────────────────────────────────────────────────────
 
-export const runIntentAgent = (projectId: string, featureRequest: FeatureRequest) =>
-  api.post(`${BASE}/run-intent-agent`, { project_id: projectId, feature_request: featureRequest })
+export const runIntentAgent = (projectId: string, featureRequest: FeatureRequest, backlogId?: string) =>
+  api.post(`${BASE}/run-intent-agent`, { project_id: projectId, feature_request: featureRequest, backlog_id: backlogId })
     .then((r) => r.data);
 
 // ── Run Agents ────────────────────────────────────────────────────────────
 
 export const runPOAgent = (projectId: string, sourceTaskId: string, feedbackPrompt = '') =>
   api.post(`${BASE}/run-po-agent`, { project_id: projectId, source_task_id: sourceTaskId, feedback_prompt: feedbackPrompt })
+    .then((r) => r.data);
+
+export const startPOAgent = (projectId: string, featureRequest: FeatureRequest, backlogId?: string) =>
+  api.post(`${BASE}/run-po-agent`, { project_id: projectId, feature_request: featureRequest, backlog_id: backlogId })
     .then((r) => r.data);
 
 export const runUXAgent = (sourceTaskId: string, feedbackPrompt = '') =>
@@ -46,6 +56,25 @@ export const runQAAgent = (sourceTaskId: string, feedbackPrompt = '') =>
 export const submitGateDecision = (taskId: string, payload: GateDecisionPayload) =>
   api.post(`${BASE}/tasks/${taskId}/gate-decision`, payload).then((r) => r.data);
 
+// Structured HITL decision (plan section 2.3 / 2.8) — idempotent, optimistic-locked.
+export interface StructuredDecisionBody {
+  decision_id: string;
+  base_output_version: number;
+  action: 'approve' | 'reject' | 'edit_approve';
+  comment?: string;
+  payload?: {
+    retry_reason?: string;
+    patch?: unknown[];
+    edited_output?: Record<string, unknown>;
+    target_fields?: string[];
+    blocking_issues?: Array<{ severity: string; issue: string; expected_fix: string }>;
+    acceptance_checks?: string[];
+  };
+}
+
+export const submitStructuredDecision = (taskId: string, body: StructuredDecisionBody) =>
+  api.post(`${BASE}/tasks/${taskId}/decision`, body).then((r) => r.data);
+
 // ── Status ────────────────────────────────────────────────────────────────
 
 export const getSdlcTaskStatus = (taskId: string) =>
@@ -57,8 +86,19 @@ export const getWorkflowStatus = (projectId: string) =>
 export const getFinalReviewPacket = (projectId: string) =>
   api.get(`${BASE}/final-review-packet/${projectId}`).then((r) => r.data.data);
 
+export const submitReleaseDecision = (
+  projectId: string,
+  body: { decision_id: string; decision: 'APPROVE' | 'REJECT'; comment?: string },
+) => api.post(`${BASE}/projects/${projectId}/release-decision`, body).then((r) => r.data);
+
 export const getAuditTrail = (projectId: string) =>
   api.get(`${BASE}/audit-trail/${projectId}`).then((r) => r.data.data);
+
+export const getWorkflowMetrics = (projectId: string) =>
+  api.get(`${BASE}/projects/${projectId}/metrics`).then((r) => r.data.data);
+
+export const getProjectArtifacts = (projectId: string) =>
+  api.get(`${BASE}/projects/${projectId}/artifacts`).then((r) => r.data.data);
 
 // ── Backlog ───────────────────────────────────────────────────────────────
 
@@ -118,7 +158,7 @@ export const subscribeTaskSSE = (
               if (currentEvent === 'progress') handlers.onProgress?.(data);
               else if (currentEvent === 'completed') handlers.onCompleted?.(data);
               else if (currentEvent === 'error') handlers.onError?.(data);
-            } catch (_) {}
+            } catch { /* Ignore malformed SSE frames and continue streaming. */ }
             currentEvent = null;
           }
         }

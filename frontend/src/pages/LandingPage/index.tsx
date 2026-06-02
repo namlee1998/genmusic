@@ -10,7 +10,6 @@ import {
   Bot,
   Zap,
   Shield,
-  Lightbulb,
   ClipboardList,
   PenTool,
   Terminal,
@@ -193,7 +192,7 @@ Implement a fully functional Kanban board to manage feature backlogs within a pr
           animate="visible"
           className="mt-20 inline-flex flex-col sm:flex-row items-center gap-y-4 sm:gap-y-0 bg-surface-container-lowest border border-outline-variant/30 rounded-lg py-5 px-6 shadow-md"
         >
-          <StatItem value="5 Specialized" label="Agents" />
+          <StatItem value="4 Specialized" label="Workers" />
           <StatItem value="100% Audit" label="Trail" />
           <StatItem value="Zero Context" label="Loss" />
           <StatItem value="HITL" label="Controlled" />
@@ -210,7 +209,7 @@ Implement a fully functional Kanban board to manage feature backlogs within a pr
             viewport={{ once: true, margin: '-80px' }}
             className="text-center space-y-4"
           >
-            <span className="text-secondary font-label text-xs uppercase tracking-widest">LangGraph Flow</span>
+            <span className="text-secondary font-label text-xs uppercase tracking-widest">AIDLC Flow</span>
             <h2 className="text-3xl md:text-4xl font-bold font-headline text-on-surface">Supervisor-Worker Pipeline</h2>
             <p className="text-on-surface-variant max-w-xl mx-auto text-sm">
               Visualize the autonomous flow of software creation from intent to verified production code, governed by human checkpoints.
@@ -221,25 +220,10 @@ Implement a fully functional Kanban board to manage feature backlogs within a pr
           <div className="relative">
             <div className="hidden xl:block absolute top-8 left-[12%] right-[12%] h-[1px] bg-outline-variant/30" />
 
-            <div className="grid grid-cols-1 xl:grid-cols-9 gap-4 items-start">
-              <motion.div className="col-span-1" variants={fadeUp} initial="hidden" whileInView="visible" viewport={{ once: true }}>
-                <PipelineStep
-                  step="01. Intent"
-                  icon={Lightbulb}
-                  title="Intent Agent"
-                  desc="Parses raw user requests to extract core business logic."
-                  color="bg-primary"
-                  isLast={false}
-                />
-              </motion.div>
-
-              <div className="hidden xl:flex col-span-1 items-center justify-center pt-6">
-                <ChevronRight className="w-5 h-5 text-outline/35" />
-              </div>
-
+            <div className="grid grid-cols-1 xl:grid-cols-7 gap-4 items-start">
               <motion.div className="col-span-1" variants={fadeUp} initial="hidden" whileInView="visible" viewport={{ once: true }} transition={{ delay: 0.05 }}>
                 <PipelineStep
-                  step="02. Product"
+                  step="01. Product"
                   icon={ClipboardList}
                   title="PO Agent"
                   desc="Drafts detailed PRDs and Acceptance Criteria."
@@ -254,7 +238,7 @@ Implement a fully functional Kanban board to manage feature backlogs within a pr
 
               <motion.div className="col-span-1" variants={fadeUp} initial="hidden" whileInView="visible" viewport={{ once: true }} transition={{ delay: 0.1 }}>
                 <PipelineStep
-                  step="03. Design"
+                  step="02. Design"
                   icon={PenTool}
                   title="UX Agent"
                   desc="Generates user flows and wireframe specifications."
@@ -269,7 +253,7 @@ Implement a fully functional Kanban board to manage feature backlogs within a pr
 
               <motion.div className="col-span-1" variants={fadeUp} initial="hidden" whileInView="visible" viewport={{ once: true }} transition={{ delay: 0.15 }}>
                 <PipelineStep
-                  step="04. Dev"
+                  step="03. Dev"
                   icon={Terminal}
                   title="DEV Agent"
                   desc="Writes code, database schemas, and API routes."
@@ -284,7 +268,7 @@ Implement a fully functional Kanban board to manage feature backlogs within a pr
 
               <motion.div className="col-span-1" variants={fadeUp} initial="hidden" whileInView="visible" viewport={{ once: true }} transition={{ delay: 0.2 }}>
                 <PipelineStep
-                  step="05. QA"
+                  step="04. QA"
                   icon={ShieldCheck}
                   title="QA Agent"
                   desc="Validates coverage and generates test suites."

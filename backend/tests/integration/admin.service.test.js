@@ -1,12 +1,14 @@
 const mockGetLatestSnapshots = jest.fn();
-const mockFrom = jest.fn();
+const mockUsageFindMany = jest.fn();
+const mockTaskFindMany = jest.fn();
 
 jest.mock('../../src/services/DashboardService', () => ({
   getLatestSnapshots: mockGetLatestSnapshots,
 }));
 
 jest.mock('../../src/config/database', () => ({
-  from: mockFrom,
+  usageLog: { findMany: mockUsageFindMany },
+  task: { findMany: mockTaskFindMany },
 }));
 
 jest.mock('../../src/config/environment', () => ({
@@ -44,8 +46,7 @@ describe('AdminService stats', () => {
   });
 
   test('returns snapshots plus live metrics and falls invalid windows back to 7d', async () => {
-    mockFrom
-      .mockReturnValueOnce(queryResult([
+    mockUsageFindMany.mockResolvedValueOnce([
         {
           user_id: 'user-1',
           project_id: 'project-1',
@@ -79,8 +80,8 @@ describe('AdminService stats', () => {
           token_total: 0,
           credits_charged: 0,
         },
-      ]))
-      .mockReturnValueOnce(queryResult([
+      ]);
+    mockTaskFindMany.mockResolvedValueOnce([
         {
           id: 'task-fast',
           project_id: 'project-1',
@@ -112,7 +113,7 @@ describe('AdminService stats', () => {
           observability: { latency_ms: 300, trace_url: 'https://trace.test/slow', model: 'model-b' },
           source_run_id: 'run-1',
         },
-      ]));
+      ]);
 
     const result = await AdminService.getStats('bad-window');
 
@@ -163,8 +164,7 @@ describe('AdminService stats', () => {
   });
 
   test('paginates recent failures and traces with clamped params', async () => {
-    mockFrom
-      .mockReturnValueOnce(queryResult([
+    mockUsageFindMany.mockResolvedValueOnce([
         {
           user_id: 'user-1',
           project_id: 'project-1',
@@ -201,8 +201,8 @@ describe('AdminService stats', () => {
           credits_charged: 0,
           executed_at: '2026-05-12T03:00:00.000Z',
         },
-      ]))
-      .mockReturnValueOnce(queryResult([
+      ]);
+    mockTaskFindMany.mockResolvedValueOnce([
         {
           id: 'task-a',
           project_id: 'project-1',
@@ -236,7 +236,7 @@ describe('AdminService stats', () => {
           observability: { trace_url: 'https://trace.test/c' },
           source_run_id: null,
         },
-      ]));
+      ]);
 
     const result = await AdminService.getStats('7d', {
       failuresLimit: '2',

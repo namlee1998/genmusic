@@ -13,6 +13,8 @@ import { useQuotaStore } from '@/store/useQuotaStore';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import { useSdlcStore } from '@/store/useSdlcStore';
 import SdlcDashboard from '@/pages/SdlcDashboard';
+import AuditPage from '@/pages/SdlcDashboard/AuditPage';
+import OutputsPage from '@/pages/SdlcDashboard/OutputsPage';
 
 // ---------------------------------------------------------------------------
 // Invitations bell
@@ -409,17 +411,25 @@ export const AppShell: React.FC = () => {
     fetchTree,
     setCurrentProject,
     upsertProject,
+    removeProject,
     isCreateProjectDialogOpen,
     setCreateProjectDialogOpen,
   } = useAppStore();
   const location = useLocation();
   const isProfileRoute = location.pathname === '/profile';
   const isProjectSettingsRoute = location.pathname.startsWith('/projects/') && location.pathname.endsWith('/settings');
-  const isUnknownAppRoute = location.pathname.startsWith('/sdlc/') && location.pathname !== '/sdlc/' && location.pathname !== '/sdlc';
+  const isAuditRoute = location.pathname === '/sdlc/audit' || location.pathname === '/sdlc/audit/';
+  const isOutputsRoute = location.pathname === '/sdlc/outputs' || location.pathname === '/sdlc/outputs/';
+  const isUnknownAppRoute = location.pathname.startsWith('/sdlc/')
+    && location.pathname !== '/sdlc/' && location.pathname !== '/sdlc'
+    && !isAuditRoute && !isOutputsRoute;
 
   const [panelCollapsed, setPanelCollapsed] = useState(() => {
     return localStorage.getItem('project-panel-collapsed') === 'true';
   });
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
+  const [pendingDeleteProjectId, setPendingDeleteProjectId] = useState<string | null>(null);
+  const [projectActionMessage, setProjectActionMessage] = useState<string | null>(null);
 
   const navigate = useNavigate();
 
@@ -441,6 +451,34 @@ export const AppShell: React.FC = () => {
     // errors propagate up to CreateProjectDialog which displays them inline
   }
 
+  useEffect(() => {
+    if (!projectActionMessage) return;
+    const timeout = window.setTimeout(() => setProjectActionMessage(null), 3500);
+    return () => window.clearTimeout(timeout);
+  }, [projectActionMessage]);
+
+  async function handleDeleteProject(projectId: string) {
+    const project = projects.find((item) => item.project_id === projectId);
+
+    setDeletingProjectId(projectId);
+    try {
+      await api.deleteProject(projectId);
+      removeProject(projectId);
+      if (currentProjectId === projectId) {
+        const fallbackId = projects.find((item) => item.project_id !== projectId)?.project_id || null;
+        setCurrentProject(fallbackId);
+      }
+      setPendingDeleteProjectId(null);
+      setProjectActionMessage(`Deleted "${project?.name || 'project'}".`);
+    } catch (error) {
+      const message = (error as { response?: { data?: { message?: string } }; message?: string })
+        .response?.data?.message || (error as Error).message || 'Could not delete project.';
+      setProjectActionMessage(message);
+    } finally {
+      setDeletingProjectId(null);
+    }
+  }
+
   const panelProjects = projects.map((p) => ({ id: p.project_id, name: p.name, role: p.role }));
 
   return (
@@ -454,10 +492,12 @@ export const AppShell: React.FC = () => {
           activeProjectId={currentProjectId}
           onSelectProject={setCurrentProject}
           onCreateProject={() => setCreateProjectDialogOpen(true)}
+          onDeleteProject={setPendingDeleteProjectId}
           onOpenSettings={(id) => {
             setCurrentProject(id);
             navigate(`/projects/${id}/settings`);
           }}
+          deletingProjectId={deletingProjectId}
           collapsed={panelCollapsed}
           onToggleCollapse={handleToggleCollapse}
         />
@@ -470,6 +510,14 @@ export const AppShell: React.FC = () => {
               <ProjectSettings />
             ) : isUnknownAppRoute ? (
               <NotFoundPage mode="panel" />
+            ) : isAuditRoute ? (
+              <div className="flex flex-col h-full bg-slate-950">
+                <AuditPage />
+              </div>
+            ) : isOutputsRoute ? (
+              <div className="flex flex-col h-full bg-slate-950">
+                <OutputsPage />
+              </div>
             ) : (
               <div className="flex flex-col h-full bg-slate-950">
                 <SdlcDashboard />
@@ -484,6 +532,41 @@ export const AppShell: React.FC = () => {
           onCancel={() => setCreateProjectDialogOpen(false)}
           onSubmit={handleCreateProject}
         />
+      )}
+
+      {projectActionMessage && (
+        <div className="fixed bottom-5 right-5 z-[1000] rounded-lg border border-outline-variant bg-surface-container-lowest px-4 py-3 text-xs font-semibold text-on-surface shadow-xl">
+          {projectActionMessage}
+        </div>
+      )}
+
+      {pendingDeleteProjectId && (
+        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-md rounded-xl border border-outline-variant bg-surface-container-lowest p-5 shadow-2xl">
+            <h2 className="text-base font-bold text-on-surface">Delete project?</h2>
+            <p className="mt-2 text-sm text-on-surface-variant">
+              This permanently deletes <strong className="text-on-surface">{projects.find((item) => item.project_id === pendingDeleteProjectId)?.name || 'this project'}</strong> and its workflow data.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-outline-variant px-3 py-2 text-xs font-semibold text-on-surface-variant hover:bg-surface-variant"
+                onClick={() => setPendingDeleteProjectId(null)}
+                disabled={deletingProjectId !== null}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-error px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                onClick={() => void handleDeleteProject(pendingDeleteProjectId)}
+                disabled={deletingProjectId !== null}
+              >
+                {deletingProjectId ? 'Deleting...' : 'Delete project'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

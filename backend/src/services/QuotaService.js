@@ -13,6 +13,7 @@ class QuotaService {
    * New users who have never been assigned a plan get Free automatically.
    */
   async getOrProvisionSubscription(userId) {
+    await Plan.ensureDefaults();
     let sub = await UserSubscription.findByUserId(userId);
     if (!sub) {
       const plan = await Plan.findById(DEFAULT_PLAN_ID);

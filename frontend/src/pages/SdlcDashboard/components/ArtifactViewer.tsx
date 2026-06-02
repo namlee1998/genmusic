@@ -13,6 +13,7 @@ const TYPE_ICONS: Record<string, string> = {
   ux_spec: '🎨', user_flow: '🔀', wireframe_spec: '🖼️', component_inventory: '🧩',
   implementation_plan: '🗺️', mock_code_diff: '💻', changed_files: '📂', risk_assessment: '⚠️',
   test_cases: '🧪', qa_report: '📊', ac_coverage_matrix: '📋',
+  a2a_handoff: '↗',
 };
 
 const PHASE_COLORS: Record<string, string> = {
@@ -30,7 +31,7 @@ export default function ArtifactViewer({ artifacts, selected, onSelect }: Props)
 
   const syntaxHighlight = (json: string) => {
     json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
+    return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g, function (match) {
         let cls = 'number';
         if (/^"/.test(match)) {
             if (/:$/.test(match)) cls = 'key';
@@ -57,7 +58,7 @@ export default function ArtifactViewer({ artifacts, selected, onSelect }: Props)
               // Optimistic save (in real app, call API here)
               if (art.contentText) art.contentText = editContent;
               if (art.contentJson) {
-                try { art.contentJson = JSON.parse(editContent); } catch(e) {}
+                try { art.contentJson = JSON.parse(editContent); } catch { /* Keep the original JSON when editing is invalid. */ }
               }
               setIsEditing(false);
             }} className="px-3 py-1.5 text-xs font-semibold text-on-primary bg-primary hover:opacity-90 rounded transition-all shadow-[0_0_10px_rgba(99,102,241,0.2)]">Lưu & Approve Gate</button>

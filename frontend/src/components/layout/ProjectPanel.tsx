@@ -11,7 +11,9 @@ interface ProjectPanelProps {
   activeProjectId: string | null;
   onSelectProject: (id: string) => void;
   onCreateProject: () => void;
+  onDeleteProject?: (id: string) => void;
   onOpenSettings?: (id: string) => void;
+  deletingProjectId?: string | null;
   collapsed: boolean;
   onToggleCollapse: () => void;
 }
@@ -33,7 +35,9 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
   activeProjectId,
   onSelectProject,
   onCreateProject,
+  onDeleteProject,
   onOpenSettings,
+  deletingProjectId = null,
   collapsed,
   onToggleCollapse,
 }) => {
@@ -127,6 +131,22 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
                   className="shrink-0 text-on-surface-variant hover:text-primary transition-colors ml-1"
                 >
                   <span className="material-symbols-outlined text-[15px]">settings</span>
+                </button>
+              )}
+              {project.role === 'owner' && typeof onDeleteProject === 'function' && (
+                <button
+                  type="button"
+                  title="Delete project"
+                  disabled={deletingProjectId === project.id}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDeleteProject(project.id);
+                  }}
+                  className="shrink-0 text-on-surface-variant hover:text-error transition-colors disabled:opacity-50"
+                >
+                  <span className={`material-symbols-outlined text-[15px] ${deletingProjectId === project.id ? 'animate-spin' : ''}`}>
+                    {deletingProjectId === project.id ? 'progress_activity' : 'delete'}
+                  </span>
                 </button>
               )}
             </div>

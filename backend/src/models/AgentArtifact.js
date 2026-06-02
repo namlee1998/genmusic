@@ -1,5 +1,20 @@
 const prisma = require('../config/database');
 
+function serializeJson(value) {
+  if (value === null || value === undefined || typeof value === 'string') return value ?? null;
+  return JSON.stringify(value);
+}
+
+function parseJson(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch (_) {
+    return null;
+  }
+}
+
 class AgentArtifactModel {
   static async bulkUpsert(records) {
     if (!records || records.length === 0) return [];
@@ -11,7 +26,7 @@ class AgentArtifactModel {
       artifactType: data.artifactType || data.artifact_type,
       artifactKey: data.artifactKey || data.artifact_key,
       title: data.title ?? null,
-      contentJson: (data.contentJson || data.content_json) ?? null,
+      contentJson: serializeJson((data.contentJson || data.content_json) ?? null),
       contentText: (data.contentText || data.content_text) ?? null,
       ordinal: data.ordinal ?? index,
       sourceArtifactId: (data.sourceArtifactId || data.source_artifact_id) ?? null,
@@ -68,6 +83,17 @@ class AgentArtifactModel {
     return (data || []).map((row) => this._map(row));
   }
 
+  static async findByProjectId(projectId) {
+    const data = await prisma.agentArtifact.findMany({
+      where: { projectId },
+      orderBy: [
+        { createdAt: 'asc' },
+        { ordinal: 'asc' }
+      ]
+    });
+    return (data || []).map((row) => this._map(row));
+  }
+
   static async findPartialByOffset(taskId, offset = 0) {
     const allArtifacts = await this.findByTaskId(taskId);
     return {
@@ -92,7 +118,7 @@ class AgentArtifactModel {
       artifactType: row.artifactType,
       artifactKey: row.artifactKey,
       title: row.title,
-      contentJson: row.contentJson,
+      contentJson: parseJson(row.contentJson),
       contentText: row.contentText,
       ordinal: row.ordinal,
       sourceArtifactId: row.sourceArtifactId,
