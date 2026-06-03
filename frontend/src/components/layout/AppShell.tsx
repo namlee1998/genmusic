@@ -206,10 +206,10 @@ function AppTopBar() {
 
   const displayName =
     profile?.full_name ||
-    user?.user_metadata?.company_name ||
+    (user?.user_metadata?.company_name as string) ||
     user?.email?.split('@')[0] ||
     'Admin Console';
-  const roleName = profile?.job_title || user?.user_metadata?.job_title || 'QA Engineer';
+  const roleName = (profile?.job_title || user?.user_metadata?.job_title || 'QA Engineer') as string;
   const avatarUrl =
     profile?.avatar_url ||
     `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=0D8ABC&color=fff`;

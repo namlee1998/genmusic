@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import SdlcDashboard from '@/pages/SdlcDashboard';
 import { useAppStore } from '@/store/useAppStore';
 import { useSdlcStore } from '@/store/useSdlcStore';
@@ -108,30 +109,44 @@ describe('SdlcDashboard Component', () => {
       setProjectId: vi.fn(),
     });
 
-    render(<SdlcDashboard />);
+    render(
+      <MemoryRouter>
+        <SdlcDashboard />
+      </MemoryRouter>
+    );
     expect(screen.getByText('Welcome to Autonomous Factory')).toBeInTheDocument();
   });
 
-  it('renders tab switchers when a project is selected', async () => {
-    render(<SdlcDashboard />);
+  it('renders sub-navigation when a project is selected', async () => {
+    render(
+      <MemoryRouter>
+        <SdlcDashboard />
+      </MemoryRouter>
+    );
 
-    expect(screen.getByText('📋 Backlog Board')).toBeInTheDocument();
-    expect(screen.getByText('⚙️ Pipeline Inspector')).toBeInTheDocument();
-    expect(screen.getByText('📦 Final Release Packet')).toBeInTheDocument();
+    expect(screen.getByText('Build a feature with four AI workers')).toBeInTheDocument();
+    expect(screen.getByText('Build')).toBeInTheDocument();
+    expect(screen.getByText('Audit')).toBeInTheDocument();
+    expect(screen.getByText('Outputs')).toBeInTheDocument();
   });
 
-  it('allows switching views', () => {
-    render(<SdlcDashboard />);
+  it('renders the Build tab as active by default', () => {
+    render(
+      <MemoryRouter>
+        <SdlcDashboard />
+      </MemoryRouter>
+    );
 
-    const pipelineBtn = screen.getByText('⚙️ Pipeline Inspector');
-    fireEvent.click(pipelineBtn);
-
-    // After switching to Pipeline view, pipeline content should be visible
-    expect(pipelineBtn).toHaveClass('bg-primary');
+    const buildBtn = screen.getByText('Build');
+    expect(buildBtn).toHaveClass('is-active');
   });
 
   it('calls getWorkflowStatus and getAuditTrail on mount', async () => {
-    render(<SdlcDashboard />);
+    render(
+      <MemoryRouter>
+        <SdlcDashboard />
+      </MemoryRouter>
+    );
 
     await waitFor(() => {
       expect(sdlcApi.getWorkflowStatus).toHaveBeenCalledWith('project-123');

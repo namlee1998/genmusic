@@ -82,6 +82,8 @@ export interface AuditEvent {
   gate?: string;
   decision?: string;
   comment?: string | null;
+  phase?: string | null;
+  artifact_version?: string | null;
   // Granular state-machine detail (plan TIP-002 / Scenario D).
   stateFrom?: string | null;
   stateTo?: string | null;
