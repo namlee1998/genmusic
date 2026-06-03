@@ -8,7 +8,7 @@ Tài liệu này ghi nhận trạng thái hiện tại, các chức năng đã h
 
 - **Ngôn ngữ & Framework:** React (Vite + TypeScript)
 - **Quản lý State:** Zustand
-- **Đa ngôn ngữ (i18n):** `react-i18next` (hỗ trợ Tiếng Anh và Tiếng Việt)
+- **Đa ngôn ngữ (i18n):** `react-i18next` (Hiện tại mới chỉ hỗ trợ Tiếng Anh, chưa có Tiếng Việt hoàn chỉnh)
 - **Styling:** Tailwind CSS + Vanilla CSS (Custom styling cho các Dashboard phức tạp)
 - **Độ sạch của Code (Code Quality):**
   - **Lỗi TypeScript:** 0 lỗi (Đã sửa đổi toàn bộ các lỗi ép kiểu Supabase metadata, React imports, và các props không khớp).
@@ -98,7 +98,7 @@ Bảng điều khiển trung tâm quản lý toàn bộ vòng đời phát tri�
 - [ ] **Tích hợp thực tế với Backend API:** Thay thế các hàm mock của Release to Production và Audit Trail bằng các API endpoints thực tế khi Backend hoàn thành phát triển.
 - [ ] **Bổ sung kiểm thử End-to-End (E2E):** Thiết lập Playwright test suite để tự động hóa toàn bộ luồng tạo dự án, kiểm thử kéo thả Kanban, chạy Agent và duyệt Quality Gate.
 - [ ] **Mở rộng Dashboard Analytics:** Bổ sung giao diện phân tích hiệu suất và biểu đồ thời gian/chi phí vận hành thực tế của mỗi Agent.
-- [ ] **Hỗ trợ đầy đủ ngôn ngữ tiếng Anh (English i18n Support):** Hoàn thiện dịch thuật tiếng Anh thông qua thư viện `react-i18next` cho toàn bộ các trang giao diện Dashboard, đảm bảo hiển thị đồng bộ khi đổi ngôn ngữ.
+- [ ] **Hỗ trợ ngôn ngữ Tiếng Việt (Vietnamese i18n Support):** Bổ sung đầy đủ các key dịch thuật và nội dung tiếng Việt trong file `vi/translation.json` để hệ thống hỗ trợ song ngữ hoàn chỉnh (hiện tại mới chỉ hỗ trợ Tiếng Anh).
 - [ ] **Hoàn thiện tính năng chuyển đổi giao diện Sáng/Tối (Light/Dark Mode):** Đồng bộ các biến CSS và phối màu cho các component mới thêm để đảm bảo hiển thị chuẩn xác ở cả chế độ sáng và tối (tránh lỗi lệch màu sắc).
 
 
