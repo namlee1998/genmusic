@@ -98,5 +98,7 @@ Bảng điều khiển trung tâm quản lý toàn bộ vòng đời phát tri�
 - [ ] **Tích hợp thực tế với Backend API:** Thay thế các hàm mock của Release to Production và Audit Trail bằng các API endpoints thực tế khi Backend hoàn thành phát triển.
 - [ ] **Bổ sung kiểm thử End-to-End (E2E):** Thiết lập Playwright test suite để tự động hóa toàn bộ luồng tạo dự án, kiểm thử kéo thả Kanban, chạy Agent và duyệt Quality Gate.
 - [ ] **Mở rộng Dashboard Analytics:** Bổ sung giao diện phân tích hiệu suất và biểu đồ thời gian/chi phí vận hành thực tế của mỗi Agent.
+- [ ] **Hỗ trợ đầy đủ ngôn ngữ tiếng Anh (English i18n Support):** Hoàn thiện dịch thuật tiếng Anh thông qua thư viện `react-i18next` cho toàn bộ các trang giao diện Dashboard, đảm bảo hiển thị đồng bộ khi đổi ngôn ngữ.
+- [ ] **Hoàn thiện tính năng chuyển đổi giao diện Sáng/Tối (Light/Dark Mode):** Đồng bộ các biến CSS và phối màu cho các component mới thêm để đảm bảo hiển thị chuẩn xác ở cả chế độ sáng và tối (tránh lỗi lệch màu sắc).
 
 
