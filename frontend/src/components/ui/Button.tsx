@@ -26,7 +26,7 @@ const variantClasses: Record<ButtonVariant, string> = {
     'w-full flex items-center px-3 py-2 hover:bg-surface-container-highest text-left transition-colors disabled:opacity-50',
   utility: 'px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all disabled:opacity-50',
   outline:
-    'flex items-center justify-center border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl transition-all disabled:opacity-50',
+    'flex items-center justify-center border border-outline-variant bg-surface-container-lowest text-on-surface hover:bg-surface-container-low rounded-xl transition-all disabled:opacity-50',
 };
 
 export const Button: React.FC<ButtonProps> = ({

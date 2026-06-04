@@ -48,7 +48,7 @@ export function AdminLogin() {
               onChange={(e) => setEmail(e.target.value)}
               required
               placeholder="admin@aidlc.ai"
-              className="w-full h-10 px-3 bg-[#050505] border border-outline-variant rounded text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:border-secondary focus:ring-1 focus:ring-secondary/40 outline-none transition-colors"
+              className="w-full h-10 px-3 bg-input border border-outline-variant rounded text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:border-secondary focus:ring-1 focus:ring-secondary/40 outline-none transition-colors"
             />
           </div>
           <div>
@@ -59,7 +59,7 @@ export function AdminLogin() {
               onChange={(e) => setPassword(e.target.value)}
               required
               placeholder="••••••••"
-              className="w-full h-10 px-3 bg-[#050505] border border-outline-variant rounded text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:border-secondary focus:ring-1 focus:ring-secondary/40 outline-none transition-colors"
+              className="w-full h-10 px-3 bg-input border border-outline-variant rounded text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:border-secondary focus:ring-1 focus:ring-secondary/40 outline-none transition-colors"
             />
           </div>
           

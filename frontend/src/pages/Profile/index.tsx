@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Input } from '@/components/ui/Input';
+import { useTranslation } from 'react-i18next';
 import {
   createProfile,
   deleteProfile,
@@ -49,8 +50,8 @@ const toPayload = (form: ProfileForm): ProfilePayload => ({
   bio: form.bio,
 });
 
-const getFriendlyError = (err: unknown) => {
-  let message = 'Không thể lưu thông tin hồ sơ';
+const getFriendlyError = (err: unknown, fallback: string) => {
+  let message = fallback;
   if (err instanceof Error) {
     message = err.message;
   }
@@ -66,6 +67,7 @@ const getFriendlyError = (err: unknown) => {
 };
 
 export function ProfilePage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [form, setForm] = useState<ProfileForm>(emptyForm);
@@ -78,8 +80,8 @@ export function ProfilePage() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const displayName = useMemo(() => {
-    return form.full_name.trim() || profile?.email?.split('@')[0] || 'Tài khoản của tôi';
-  }, [form.full_name, profile?.email]);
+    return form.full_name.trim() || profile?.email?.split('@')[0] || t('profile.myProfile');
+  }, [form.full_name, profile?.email, t]);
 
   useEffect(() => {
     let mounted = true;
@@ -93,7 +95,7 @@ export function ProfilePage() {
         setProfile(nextProfile);
         setForm(toForm(nextProfile));
       } catch (err: unknown) {
-        if (mounted) setError(getFriendlyError(err));
+        if (mounted) setError(getFriendlyError(err, t('profile.saveFailed')));
       } finally {
         if (mounted) setLoading(false);
       }
@@ -103,7 +105,7 @@ export function ProfilePage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [t]);
 
   const updateField = (field: keyof ProfileForm, value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -114,7 +116,7 @@ export function ProfilePage() {
     if (!form.age.trim()) return null;
     const age = Number(form.age);
     if (!Number.isInteger(age) || age < 0 || age > 150) {
-      return 'Tuổi phải là số nguyên từ 0 đến 150.';
+      return t('profile.ageValidation');
     }
     return null;
   };
@@ -136,10 +138,10 @@ export function ProfilePage() {
         : await createProfile(payload);
       setProfile(nextProfile);
       setForm(toForm(nextProfile));
-      setNotice('Đã lưu thông tin hồ sơ.');
+      setNotice(t('profile.saved'));
       window.dispatchEvent(new CustomEvent('profile-updated', { detail: nextProfile }));
     } catch (err: unknown) {
-      setError(getFriendlyError(err));
+      setError(getFriendlyError(err, t('profile.saveFailed')));
     } finally {
       setSaving(false);
     }
@@ -153,10 +155,10 @@ export function ProfilePage() {
       const nextProfile = await getProfile();
       setProfile(nextProfile);
       setForm(emptyForm);
-      setNotice('Đã xóa thông tin hồ sơ mở rộng.');
+      setNotice(t('profile.deleted'));
       window.dispatchEvent(new CustomEvent('profile-updated', { detail: nextProfile }));
     } catch (err: unknown) {
-      setError(getFriendlyError(err));
+      setError(getFriendlyError(err, t('profile.saveFailed')));
     } finally {
       setResetting(false);
     }
@@ -168,7 +170,7 @@ export function ProfilePage() {
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      setError('Avatar phải là file ảnh.');
+      setError(t('profile.avatarMustBeImage'));
       return;
     }
 
@@ -178,10 +180,10 @@ export function ProfilePage() {
       const nextProfile = await uploadProfileAvatar(file);
       setProfile(nextProfile);
       setForm(toForm(nextProfile));
-      setNotice('Đã cập nhật ảnh đại diện.');
+      setNotice(t('profile.avatarUpdated'));
       window.dispatchEvent(new CustomEvent('profile-updated', { detail: nextProfile }));
     } catch (err: unknown) {
-      setError(getFriendlyError(err));
+      setError(getFriendlyError(err, t('profile.saveFailed')));
     } finally {
       setUploadingAvatar(false);
     }
@@ -200,7 +202,7 @@ export function ProfilePage() {
               className="inline-flex items-center gap-2 rounded-xl border border-outline-variant/30 bg-surface-container-low px-3 py-2 text-sm font-semibold text-on-surface-variant transition-colors hover:bg-surface-container hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
               <span className="material-symbols-outlined text-[18px]">arrow_back</span>
-              Về trang chính
+              {t('profile.backMain')}
             </button>
           </div>
 
@@ -208,7 +210,7 @@ export function ProfilePage() {
             <div className="flex min-w-0 items-center gap-4">
               <label
                 className="group relative h-24 w-24 shrink-0 cursor-pointer overflow-hidden rounded-full border border-outline-variant/30 bg-surface-container-high shadow-sm focus-within:ring-2 focus-within:ring-primary/40"
-                title="Đổi ảnh đại diện"
+                title={t('profile.changeAvatar')}
               >
               {avatarSrc ? (
                 <img
@@ -226,7 +228,7 @@ export function ProfilePage() {
                     {uploadingAvatar ? 'progress_activity' : 'photo_camera'}
                   </span>
                   <span className="mt-1 text-xs font-bold">
-                    {uploadingAvatar ? 'Đang tải...' : 'Đổi ảnh'}
+                    {uploadingAvatar ? t('profile.uploading') : t('profile.changeAvatarText')}
                   </span>
                 </div>
                 <input
@@ -243,10 +245,10 @@ export function ProfilePage() {
                   {displayName}
                 </h1>
                 <p className="mt-1 truncate text-sm text-on-surface-variant">
-                  {profile?.email || 'Thông tin tài khoản hiện tại'}
+                  {profile?.email || t('profile.currentDetails')}
                 </p>
                 <p className="mt-2 truncate text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
-                  {form.job_title.trim() || 'Chưa cập nhật chức danh'}
+                  {form.job_title.trim() || t('profile.noJobTitle')}
                 </p>
               </div>
             </div>
@@ -259,7 +261,7 @@ export function ProfilePage() {
                 disabled={loading || saving || resetting || uploadingAvatar}
               >
                 <span className="material-symbols-outlined text-[18px]">delete</span>
-                {resetting ? 'Đang xóa...' : 'Xóa hồ sơ'}
+                {resetting ? t('profile.deleting') : t('profile.deleteBtn')}
               </Button>
               <Button
                 type="submit"
@@ -268,7 +270,7 @@ export function ProfilePage() {
                 disabled={loading || saving || resetting || uploadingAvatar}
               >
                 <span className="material-symbols-outlined text-[18px]">save</span>
-                {saving ? 'Đang lưu...' : 'Lưu hồ sơ'}
+                {saving ? t('profile.saving') : t('profile.saveBtn')}
               </Button>
             </div>
           </div>
@@ -288,18 +290,18 @@ export function ProfilePage() {
         <form id="profile-form" onSubmit={handleSave} className="flex flex-col gap-6">
           <div className="rounded-lg border border-outline-variant/20 bg-surface-container-lowest p-5">
             <h2 className="mb-4 text-sm font-bold uppercase tracking-wide text-on-surface-variant">
-              Thông tin cá nhân
+              {t('profile.personalInfo')}
             </h2>
             <div className="grid gap-5 md:grid-cols-2">
               <Input
-                label="Họ và tên"
+                label={t('profile.fullName')}
                 value={form.full_name}
                 onChange={(event) => updateField('full_name', event.target.value)}
                 disabled={loading}
-                placeholder="Nguyễn Văn A"
+                placeholder={t('profile.fullNamePlaceholder')}
               />
               <Input
-                label="Tuổi"
+                label={t('profile.age')}
                 type="number"
                 min={0}
                 max={150}
@@ -309,7 +311,7 @@ export function ProfilePage() {
                 placeholder="25"
               />
               <Input
-                label="Chức danh"
+                label={t('profile.jobTitle')}
                 value={form.job_title}
                 onChange={(event) => updateField('job_title', event.target.value)}
                 disabled={loading}
@@ -320,29 +322,29 @@ export function ProfilePage() {
 
           <div className="rounded-lg border border-outline-variant/20 bg-surface-container-lowest p-5">
             <h2 className="mb-4 text-sm font-bold uppercase tracking-wide text-on-surface-variant">
-              Liên hệ & giới thiệu
+              {t('profile.contactBio')}
             </h2>
             <div className="grid gap-5 md:grid-cols-2">
               <Input
-                label="Số điện thoại"
+                label={t('profile.phone')}
                 value={form.phone}
                 onChange={(event) => updateField('phone', event.target.value)}
                 disabled={loading}
                 placeholder="0900000000"
               />
               <Input
-                label="Địa chỉ"
+                label={t('profile.address')}
                 value={form.address}
                 onChange={(event) => updateField('address', event.target.value)}
                 disabled={loading}
-                placeholder="Thành phố Hồ Chí Minh"
+                placeholder={t('profile.addressPlaceholder')}
               />
               <div className="md:col-span-2">
                 <label
                   htmlFor="profile-bio"
-                  className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300"
+                  className="mb-1.5 block text-sm font-medium text-on-surface"
                 >
-                  Giới thiệu
+                  {t('profile.bio')}
                 </label>
                 <textarea
                   id="profile-bio"
@@ -350,8 +352,8 @@ export function ProfilePage() {
                   onChange={(event) => updateField('bio', event.target.value)}
                   disabled={loading}
                   rows={5}
-                  className="w-full resize-none rounded-md border border-slate-300 bg-white px-3 py-2 text-sm transition-colors duration-200 placeholder:text-slate-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-blue-500"
-                  placeholder="Vai trò, kinh nghiệm hoặc ghi chú liên hệ..."
+                  className="input-field w-full resize-none px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                  placeholder={t('profile.bioPlaceholder')}
                 />
               </div>
             </div>
@@ -362,10 +364,10 @@ export function ProfilePage() {
       <ConfirmDialog
         open={showResetConfirm}
         danger
-        title="Xóa thông tin hồ sơ?"
-        description="Thao tác này chỉ xóa thông tin mở rộng và ảnh đại diện, không xóa tài khoản đăng nhập của bạn."
-        confirmLabel={resetting ? 'Đang xóa...' : 'Xóa hồ sơ'}
-        cancelLabel="Giữ lại"
+        title={t('profile.confirmDeleteTitle')}
+        description={t('profile.confirmDeleteDesc')}
+        confirmLabel={resetting ? t('profile.deleting') : t('profile.deleteBtn')}
+        cancelLabel={t('profile.keepBtn')}
         onCancel={() => setShowResetConfirm(false)}
         onConfirm={() => {
           setShowResetConfirm(false);

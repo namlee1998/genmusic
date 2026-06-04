@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAppStore } from '@/store';
 import { listMyInvitations, acceptInvitation, type ProjectInvitationItem } from '@/services/api';
 
 export function InvitationsBell() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [invitations, setInvitations] = useState<ProjectInvitationItem[]>([]);
@@ -37,11 +39,11 @@ export function InvitationsBell() {
       await fetchTree();
       setCurrentProject(inv.project_id);
       await load();
-      setMessage(`Đã tham gia ${accepted.project_name || inv.project_name || 'project'}`);
+      setMessage(t('layout.bellJoinedProject', { name: accepted.project_name || inv.project_name || 'project' }));
       setOpen(false);
       navigate('/app');
     } catch {
-      setMessage('Không thể chấp nhận lời mời');
+      setMessage(t('layout.bellAcceptFailed'));
     } finally {
       setAccepting(null);
     }
@@ -74,13 +76,13 @@ export function InvitationsBell() {
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-10 z-50 w-80 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-outline-variant/20">
-              <span className="text-sm font-bold text-on-surface">Lời mời tham gia</span>
+              <span className="text-sm font-bold text-on-surface">{t('layout.bellTitle')}</span>
               <button onClick={() => setOpen(false)} className="text-on-surface-variant hover:text-on-surface">
                 <span className="material-symbols-outlined text-[16px]">close</span>
               </button>
             </div>
             {invitations.length === 0 ? (
-              <p className="px-4 py-6 text-center text-xs text-on-surface-variant">Không có lời mời nào.</p>
+              <p className="px-4 py-6 text-center text-xs text-on-surface-variant">{t('layout.bellNoInvitations')}</p>
             ) : (
               <ul className="max-h-72 overflow-y-auto divide-y divide-outline-variant/20">
                 {invitations.map((inv) => (
@@ -89,14 +91,14 @@ export function InvitationsBell() {
                       <p className="text-xs font-semibold text-on-surface truncate">
                         {inv.project_name || `Project ${inv.project_id.slice(0, 8)}`}
                       </p>
-                      <p className="text-[10px] text-on-surface-variant">Vai trò: <span className="uppercase">{inv.role}</span></p>
+                      <p className="text-[10px] text-on-surface-variant">{t('layout.bellRole')} <span className="uppercase">{inv.role}</span></p>
                     </div>
                     <button
                       disabled={accepting === inv.invitation_id}
                       onClick={() => void handleAccept(inv)}
                       className="shrink-0 rounded-lg bg-primary px-2 py-1 text-[10px] font-bold text-on-primary disabled:opacity-50"
                     >
-                      {accepting === inv.invitation_id ? '...' : 'Chấp nhận'}
+                      {accepting === inv.invitation_id ? t('layout.bellAccepting') : t('layout.bellAcceptBtn')}
                     </button>
                   </li>
                 ))}

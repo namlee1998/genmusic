@@ -10,8 +10,8 @@ const UpgradePlanPage = lazy(() => import('@/pages/UpgradePlan').then(module => 
 const AdminApp = lazy(() => import('@/pages/Admin').then(module => ({ default: module.AdminApp })));
 
 const PageLoader = () => (
-  <div className="min-h-screen flex items-center justify-center bg-slate-950">
-    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500"></div>
+  <div className="min-h-screen flex items-center justify-center bg-background">
+    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
   </div>
 );
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -19,8 +19,8 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 
   if (!isInitialized) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
       </div>
     );
   }

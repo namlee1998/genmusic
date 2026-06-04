@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { AuditEvent } from '@/store/useSdlcStore';
 
 const EVENT_ICONS: Record<string, string> = {
@@ -17,19 +18,20 @@ const DECISION_COLORS: Record<string, string> = {
   REQUEST_CHANGES: '#f59e0b',
 };
 
-const DECISION_LABELS: Record<string, string> = {
-  APPROVE: 'Phê duyệt (Approve)',
-  REJECT: 'Từ chối (Reject)',
-  REQUEST_CHANGES: 'Yêu cầu Rework',
-};
-
 interface Props {
   events: AuditEvent[];
 }
 
 export default function AuditTimeline({ events }: Props) {
+  const { t } = useTranslation();
   const [actorFilter, setActorFilter] = useState<'ALL' | 'SYSTEM' | 'AGENT' | 'HUMAN'>('ALL');
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'agent_run' | 'agent_complete' | 'hitl_decision'>('ALL');
+
+  const DECISION_LABELS: Record<string, string> = useMemo(() => ({
+    APPROVE: t('audit.decisionApprove'),
+    REJECT: t('audit.decisionReject'),
+    REQUEST_CHANGES: t('audit.decisionRework'),
+  }), [t]);
 
   // Xử lý và tính toán thêm metadata (Phase & Version) cho các event (Task 3.1)
   const enrichedEvents = useMemo(() => {
@@ -116,8 +118,8 @@ export default function AuditTimeline({ events }: Props) {
     return (
       <div className="audit-empty py-12 flex flex-col items-center justify-center text-on-surface-variant">
         <div className="audit-empty__icon text-4xl mb-3">📜</div>
-        <p className="text-sm font-semibold">Chưa có lịch sử duyệt (Audit Trail)</p>
-        <p className="text-xs opacity-70 mt-1">Chạy Agent hoặc thực hiện kiểm duyệt để xem timeline.</p>
+        <p className="text-sm font-semibold">{t('audit.emptyTitle')}</p>
+        <p className="text-xs opacity-70 mt-1">{t('audit.emptyDesc')}</p>
       </div>
     );
   }
@@ -128,7 +130,7 @@ export default function AuditTimeline({ events }: Props) {
       <div className="audit-filters flex flex-wrap gap-4 items-center justify-between border-b border-outline-variant/20 pb-3 mb-4">
         <div className="flex flex-wrap gap-2 items-center">
           <span className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant flex items-center gap-1">
-            <span className="material-symbols-outlined text-xs">filter_alt</span> Lọc theo vai trò:
+            <span className="material-symbols-outlined text-xs">filter_alt</span> {t('audit.filterRole')}
           </span>
           {(['ALL', 'HUMAN', 'AGENT', 'SYSTEM'] as const).map((filter) => (
             <button
@@ -140,14 +142,14 @@ export default function AuditTimeline({ events }: Props) {
                   : 'bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant'
               }`}
             >
-              {filter === 'ALL' ? 'Tất cả' : filter}
+              {filter === 'ALL' ? t('audit.all') : filter}
             </button>
           ))}
         </div>
 
         <div className="flex flex-wrap gap-2 items-center">
           <span className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant flex items-center gap-1">
-            <span className="material-symbols-outlined text-xs">category</span> Loại sự kiện:
+            <span className="material-symbols-outlined text-xs">category</span> {t('audit.eventType')}
           </span>
           {(['ALL', 'agent_run', 'agent_complete', 'hitl_decision'] as const).map((filter) => (
             <button
@@ -160,12 +162,12 @@ export default function AuditTimeline({ events }: Props) {
               }`}
             >
               {filter === 'ALL'
-                ? 'Tất cả'
+                ? t('audit.all')
                 : filter === 'agent_run'
-                ? 'Run Agent'
+                ? t('agent.run')
                 : filter === 'agent_complete'
-                ? 'Complete'
-                : 'HITL Gate'}
+                ? t('agent.completed')
+                : t('audit.hitlGate')}
             </button>
           ))}
         </div>
@@ -175,7 +177,7 @@ export default function AuditTimeline({ events }: Props) {
       <div className="audit-timeline flex-1 overflow-y-auto pr-1 flex flex-col gap-4 custom-scrollbar max-h-[500px]">
         {filteredEvents.length === 0 ? (
           <div className="text-center py-10 text-xs text-on-surface-variant">
-            Không tìm thấy sự kiện nào khớp với bộ lọc.
+            {t('audit.noEvents')}
           </div>
         ) : (
           filteredEvents.map((ev, i) => (
@@ -224,7 +226,7 @@ export default function AuditTimeline({ events }: Props) {
                   {ev.type === 'hitl_decision' ? (
                     <div className="flex flex-col gap-1">
                       <div className="flex items-center gap-1.5">
-                        <span>Đã kiểm duyệt chất lượng:</span>
+                        <span>{t('audit.qualityReviewed')}</span>
                         <span
                           className="font-bold px-1.5 py-0.5 rounded text-[10px]"
                           style={{
@@ -254,7 +256,7 @@ export default function AuditTimeline({ events }: Props) {
                 {ev.type === 'a2a_handoff' && (ev.fromAgent || ev.toAgent) && (
                   <div className="audit-event__handoff text-xs text-on-surface-variant">
                     <code className="bg-surface-container-highest px-1 py-0.5 rounded">{ev.fromAgent}</code> → <code className="bg-surface-container-highest px-1 py-0.5 rounded">{ev.toAgent}</code>
-                    {ev.attempt != null && <span className="px-1.5 py-0.5 rounded text-[8px] bg-surface-container-highest ml-1.5">attempt {ev.attempt}</span>}
+                    {ev.attempt != null && <span className="px-1.5 py-0.5 rounded text-[8px] bg-surface-container-highest ml-1.5">{t('audit.attempt')} {ev.attempt}</span>}
                   </div>
                 )}
 
@@ -262,12 +264,12 @@ export default function AuditTimeline({ events }: Props) {
                 <div className="audit-event__tags flex flex-wrap gap-1.5 mt-1">
                   {ev.versionTag && <span className="px-1.5 py-0.5 rounded text-[8px] bg-surface-container-highest border border-outline-variant/30 text-on-surface-variant font-mono">{ev.versionTag}</span>}
                   {ev.type !== 'a2a_handoff' && ev.attempt != null && ev.attempt > 1 && (
-                    <span className="px-1.5 py-0.5 rounded text-[8px] bg-surface-container-highest border border-outline-variant/30 text-on-surface-variant font-mono">attempt {ev.attempt}</span>
+                    <span className="px-1.5 py-0.5 rounded text-[8px] bg-surface-container-highest border border-outline-variant/30 text-on-surface-variant font-mono">{t('audit.attempt')} {ev.attempt}</span>
                   )}
                   {ev.retryReason && <span className="px-1.5 py-0.5 rounded text-[8px] bg-yellow-500/10 border border-yellow-500/20 text-yellow-500 font-mono">{ev.retryReason}</span>}
                   {!!ev.blockingIssueCount && (
                     <span className="px-1.5 py-0.5 rounded text-[8px] bg-red-500/10 border border-red-500/20 text-red-500 font-mono">
-                      {ev.blockingIssueCount} blocking issue{ev.blockingIssueCount === 1 ? '' : 's'}
+                      {ev.blockingIssueCount} {ev.blockingIssueCount === 1 ? t('audit.blockingIssues') : t('audit.blockingIssuesPlural')}
                     </span>
                   )}
                   {ev.severity && (

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useTheme } from '@/theme';
 import { ProjectPanel } from './ProjectPanel';
@@ -20,6 +21,7 @@ import OutputsPage from '@/pages/SdlcDashboard/OutputsPage';
 // Invitations bell
 // ---------------------------------------------------------------------------
 function InvitationsBell() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [invitations, setInvitations] = useState<ProjectInvitationItem[]>([]);
@@ -52,11 +54,11 @@ function InvitationsBell() {
       await fetchTree();
       setCurrentProject(inv.project_id);
       await load();
-      setMessage(`Đã tham gia ${accepted.project_name || inv.project_name || 'project'}`);
+      setMessage(t('layout.bellJoinedProject', { name: accepted.project_name || inv.project_name || 'project' }));
       setOpen(false);
       navigate('/app');
     } catch {
-      setMessage('Không thể chấp nhận lời mời');
+      setMessage(t('layout.bellAcceptFailed'));
     } finally {
       setAccepting(null);
     }
@@ -89,13 +91,13 @@ function InvitationsBell() {
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-10 z-50 w-80 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-outline-variant/20">
-              <span className="text-sm font-bold text-on-surface">Lời mời tham gia</span>
+              <span className="text-sm font-bold text-on-surface">{t('layout.bellTitle')}</span>
               <button onClick={() => setOpen(false)} className="text-on-surface-variant hover:text-on-surface">
                 <span className="material-symbols-outlined text-[16px]">close</span>
               </button>
             </div>
             {invitations.length === 0 ? (
-              <p className="px-4 py-6 text-center text-xs text-on-surface-variant">Không có lời mời nào.</p>
+              <p className="px-4 py-6 text-center text-xs text-on-surface-variant">{t('layout.bellNoInvitations')}</p>
             ) : (
               <ul className="max-h-72 overflow-y-auto divide-y divide-outline-variant/20">
                 {invitations.map((inv) => (
@@ -104,14 +106,14 @@ function InvitationsBell() {
                       <p className="text-xs font-semibold text-on-surface truncate">
                         {inv.project_name || `Project ${inv.project_id.slice(0, 8)}`}
                       </p>
-                      <p className="text-[10px] text-on-surface-variant">Vai trò: <span className="uppercase">{inv.role}</span></p>
+                      <p className="text-[10px] text-on-surface-variant">{t('layout.bellRole')} <span className="uppercase">{inv.role}</span></p>
                     </div>
                     <button
                       disabled={accepting === inv.invitation_id}
                       onClick={() => void handleAccept(inv)}
                       className="shrink-0 rounded-lg bg-primary px-2 py-1 text-[10px] font-bold text-on-primary disabled:opacity-50"
                     >
-                      {accepting === inv.invitation_id ? '...' : 'Chấp nhận'}
+                      {accepting === inv.invitation_id ? t('layout.bellAccepting') : t('layout.bellAcceptBtn')}
                     </button>
                   </li>
                 ))}
@@ -128,6 +130,7 @@ function InvitationsBell() {
 // Quota badge
 // ---------------------------------------------------------------------------
 function QuotaBadge() {
+  const { t } = useTranslation();
   const { summary, isBlocked, isNearLimit } = useQuotaStore();
   const navigate = useNavigate();
 
@@ -148,7 +151,7 @@ function QuotaBadge() {
   return (
     <button
       onClick={() => navigate('/upgrade')}
-      title="Xem & nâng cấp plan"
+      title={t('layout.quotaViewUpgrade')}
       className={`flex items-center gap-2 rounded-xl border px-2.5 py-1.5 text-xs font-semibold transition-colors hover:opacity-80 ${color}`}
     >
       <span className="material-symbols-outlined text-[14px]">toll</span>
@@ -164,6 +167,7 @@ function QuotaBadge() {
 // Top bar (standalone, in-flow — not fixed)
 // ---------------------------------------------------------------------------
 function AppTopBar() {
+  const { t } = useTranslation();
   const { resolvedMode, toggleMode } = useTheme();
   const { user, signOut } = useAuthStore();
   const navigate = useNavigate();
@@ -208,8 +212,8 @@ function AppTopBar() {
     profile?.full_name ||
     (user?.user_metadata?.company_name as string) ||
     user?.email?.split('@')[0] ||
-    'Admin Console';
-  const roleName = (profile?.job_title || user?.user_metadata?.job_title || 'QA Engineer') as string;
+    t('layout.welcomeAdmin');
+  const roleName = (profile?.job_title || user?.user_metadata?.job_title || t('layout.welcomeGuest')) as string;
   const avatarUrl =
     profile?.avatar_url ||
     `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=0D8ABC&color=fff`;
@@ -228,7 +232,7 @@ function AppTopBar() {
           </span>
           <input
             type="text"
-            placeholder="Search projects & assets..."
+            placeholder={t('layout.searchPlaceholder')}
             className="w-full pl-9 pr-4 py-1.5 bg-surface-container-lowest border border-outline-variant rounded text-xs focus:border-secondary focus:outline-none focus:ring-1 focus:ring-secondary/40 placeholder:text-on-surface-variant/40"
           />
         </div>
@@ -239,10 +243,10 @@ function AppTopBar() {
           onClick={() => setFeatureRequestFormOpen(true)}
           disabled={!currentProjectId}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-primary hover:bg-primary/95 text-on-primary text-xs font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_10px_rgba(99,102,241,0.2)]"
-          title={!currentProjectId ? "Vui lòng chọn một dự án từ Sidebar trước" : ""}
+          title={!currentProjectId ? t('layout.chooseProjectFirst') : ""}
         >
           <span>🚀</span>
-          <span>New Feature Request</span>
+          <span>{t('layout.newFeatureRequest')}</span>
         </button>
         <div className="w-px h-5 bg-outline-variant/30 mx-1" />
         <LanguageSwitcher />
@@ -259,7 +263,7 @@ function AppTopBar() {
         <InvitationsBell />
         <button
           onClick={handleSignOut}
-          title="Đăng xuất"
+          title={t('layout.signOut')}
           className="w-8 h-8 rounded border border-outline-variant bg-surface-container-low flex items-center justify-center text-on-surface-variant hover:text-red-500 transition-colors"
         >
           <span className="material-symbols-outlined text-[18px]">logout</span>
@@ -269,7 +273,7 @@ function AppTopBar() {
           type="button"
           onClick={() => navigate('/profile')}
           className="flex items-center gap-2 rounded px-2 py-1 text-left transition-colors hover:bg-surface-variant"
-          title="Hồ sơ cá nhân"
+          title={t('layout.myProfile')}
         >
           <div className="text-right">
             <p className="text-xs font-semibold leading-none">{displayName}</p>
@@ -300,6 +304,7 @@ function CreateProjectDialog({
   onCancel: () => void;
   onSubmit: (name: string) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [value, setValue] = useState('New Project');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -315,7 +320,7 @@ function CreateProjectDialog({
       const msg =
         (err as { response?: { data?: { message?: string } } })?.response?.data?.message ??
         (err as Error)?.message ??
-        'Tạo dự án thất bại';
+        t('layout.createProjectFailed');
       setError(msg);
     } finally {
       setSubmitting(false);
@@ -325,8 +330,8 @@ function CreateProjectDialog({
   return (
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center px-4">
       <div className="w-full max-w-sm rounded border border-outline-variant bg-surface-container-lowest shadow-2xl p-5">
-        <h4 className="text-sm font-semibold text-on-surface mb-3">Tạo dự án mới</h4>
-        <label className="block text-[11px] text-on-surface-variant mb-1 font-label-mono uppercase tracking-wider">Tên dự án</label>
+        <h4 className="text-sm font-semibold text-on-surface mb-3">{t('layout.createProjectTitle')}</h4>
+        <label className="block text-[11px] text-on-surface-variant mb-1 font-label-mono uppercase tracking-wider">{t('layout.projectNameLabel')}</label>
         <input
           autoFocus
           value={value}
@@ -336,7 +341,7 @@ function CreateProjectDialog({
             if (e.key === 'Enter') void handleSubmit();
           }}
           className="w-full rounded border border-outline-variant px-3 py-2 text-xs bg-surface-container-low text-on-surface placeholder:text-on-surface-variant/40 focus:border-secondary outline-none transition-colors"
-          placeholder="Nhập tên dự án..."
+          placeholder={t('layout.projectNamePlaceholder')}
         />
         {error && (
           <p className="mt-3 rounded border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">
@@ -349,14 +354,14 @@ function CreateProjectDialog({
             disabled={submitting}
             className="px-3 py-1.5 rounded text-xs font-semibold bg-surface-container-high border border-outline-variant text-on-surface hover:bg-surface-variant disabled:opacity-50 transition-colors"
           >
-            Hủy
+            {t('layout.cancel')}
           </button>
           <button
             onClick={handleSubmit}
             disabled={submitting || !value.trim()}
             className="px-3 py-1.5 rounded text-xs font-semibold bg-primary text-on-primary hover:opacity-90 disabled:opacity-50 transition-all shadow-[0_0_10px_rgba(99,102,241,0.2)]"
           >
-            {submitting ? 'Đang tạo...' : 'Tạo dự án'}
+            {submitting ? t('layout.creating') : t('layout.createProjectBtn')}
           </button>
         </div>
       </div>
@@ -368,6 +373,7 @@ function CreateProjectDialog({
 // AppShell
 // ---------------------------------------------------------------------------
 function QuotaWarningBanner() {
+  const { t } = useTranslation();
   const { summary, isBlocked, isNearLimit } = useQuotaStore();
   const navigate = useNavigate();
 
@@ -384,8 +390,8 @@ function QuotaWarningBanner() {
           {isBlocked ? 'block' : 'warning'}
         </span>
         {isBlocked
-          ? `Bạn đã dùng hết ${summary.creditsTotal} credits. Không thể chạy thêm agent cho đến khi nâng cấp.`
-          : `Bạn đã dùng ${summary.creditsUsed}/${summary.creditsTotal} credits (${Math.round((summary.creditsUsed / summary.creditsTotal) * 100)}%). Sắp hết quota.`
+          ? t('layout.quotaWarningBlocked', { total: summary.creditsTotal })
+          : t('layout.quotaWarningNearLimit', { used: summary.creditsUsed, total: summary.creditsTotal, pct: Math.round((summary.creditsUsed / summary.creditsTotal) * 100) })
         }
       </div>
       <button
@@ -396,13 +402,14 @@ function QuotaWarningBanner() {
             : 'bg-yellow-500 text-white border-yellow-500'
         }`}
       >
-        Nâng cấp ngay
+        {t('layout.upgradeNow')}
       </button>
     </div>
   );
 }
 
 export const AppShell: React.FC = () => {
+  const { t } = useTranslation();
   const api = useApiActions();
   const {
     projects,
@@ -469,10 +476,10 @@ export const AppShell: React.FC = () => {
         setCurrentProject(fallbackId);
       }
       setPendingDeleteProjectId(null);
-      setProjectActionMessage(`Deleted "${project?.name || 'project'}".`);
+      setProjectActionMessage(t('layout.projectActionDeleted', { name: project?.name || 'project' }));
     } catch (error) {
       const message = (error as { response?: { data?: { message?: string } }; message?: string })
-        .response?.data?.message || (error as Error).message || 'Could not delete project.';
+        .response?.data?.message || (error as Error).message || t('layout.projectActionDeleteFailed');
       setProjectActionMessage(message);
     } finally {
       setDeletingProjectId(null);
@@ -511,15 +518,15 @@ export const AppShell: React.FC = () => {
             ) : isUnknownAppRoute ? (
               <NotFoundPage mode="panel" />
             ) : isAuditRoute ? (
-              <div className="flex flex-col h-full bg-slate-950">
+              <div className="flex flex-col h-full bg-background">
                 <AuditPage />
               </div>
             ) : isOutputsRoute ? (
-              <div className="flex flex-col h-full bg-slate-950">
+              <div className="flex flex-col h-full bg-background">
                 <OutputsPage />
               </div>
             ) : (
-              <div className="flex flex-col h-full bg-slate-950">
+              <div className="flex flex-col h-full bg-background">
                 <SdlcDashboard />
               </div>
             )}
@@ -543,9 +550,9 @@ export const AppShell: React.FC = () => {
       {pendingDeleteProjectId && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/60 px-4">
           <div className="w-full max-w-md rounded-xl border border-outline-variant bg-surface-container-lowest p-5 shadow-2xl">
-            <h2 className="text-base font-bold text-on-surface">Delete project?</h2>
+            <h2 className="text-base font-bold text-on-surface">{t('layout.deleteProjectConfirm')}</h2>
             <p className="mt-2 text-sm text-on-surface-variant">
-              This permanently deletes <strong className="text-on-surface">{projects.find((item) => item.project_id === pendingDeleteProjectId)?.name || 'this project'}</strong> and its workflow data.
+              {t('layout.deleteProjectDesc', { name: projects.find((item) => item.project_id === pendingDeleteProjectId)?.name || 'this project' })}
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button
@@ -554,7 +561,7 @@ export const AppShell: React.FC = () => {
                 onClick={() => setPendingDeleteProjectId(null)}
                 disabled={deletingProjectId !== null}
               >
-                Cancel
+                {t('layout.cancel')}
               </button>
               <button
                 type="button"
@@ -562,7 +569,7 @@ export const AppShell: React.FC = () => {
                 onClick={() => void handleDeleteProject(pendingDeleteProjectId)}
                 disabled={deletingProjectId !== null}
               >
-                {deletingProjectId ? 'Deleting...' : 'Delete project'}
+                {deletingProjectId ? t('layout.deleting') : t('layout.confirmDeleteBtn')}
               </button>
             </div>
           </div>

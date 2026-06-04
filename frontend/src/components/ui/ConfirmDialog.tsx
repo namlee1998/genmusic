@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -15,12 +16,15 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   open,
   title,
   description,
-  confirmLabel = 'Xác nhận',
-  cancelLabel = 'Huỷ',
+  confirmLabel,
+  cancelLabel,
   danger = false,
   onConfirm,
   onCancel,
 }) => {
+  const { t } = useTranslation();
+  const actualConfirmLabel = confirmLabel || t('common.confirm');
+  const actualCancelLabel = cancelLabel || t('common.cancel');
   const confirmRef = useRef<HTMLButtonElement>(null);
 
   // Focus confirm button when dialog opens; close on Escape
@@ -65,7 +69,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             onClick={onCancel}
             className="px-4 py-2 text-xs font-semibold text-on-surface-variant hover:text-on-surface hover:bg-surface-container rounded-lg transition-colors"
           >
-            {cancelLabel}
+            {actualCancelLabel}
           </button>
           <button
             ref={confirmRef}
@@ -76,7 +80,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
                 : 'bg-primary text-on-primary hover:bg-primary/90'
             }`}
           >
-            {confirmLabel}
+            {actualConfirmLabel}
           </button>
         </div>
       </div>

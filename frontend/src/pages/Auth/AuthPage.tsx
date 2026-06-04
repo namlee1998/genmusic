@@ -4,6 +4,7 @@ import { useAuthActions } from '@/hooks/useAuthActions';
 import { PASSWORD_RECOVERY_FLOW_KEY, useAuthStore } from '@/store/useAuthStore';
 import { CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 
 type AuthMode =
   | 'signin'
@@ -13,7 +14,7 @@ type AuthMode =
   | 'reset-sent'
   | 'update-password';
 
-const getFriendlyAuthError = (err: unknown, fallback: string) => {
+const getFriendlyAuthError = (err: unknown, fallback: string, t: (key: string) => string) => {
   let raw = fallback;
   if (err instanceof Error) {
     raw = err.message;
@@ -29,25 +30,26 @@ const getFriendlyAuthError = (err: unknown, fallback: string) => {
   const normalized = String(raw).toLowerCase();
 
   if (normalized.includes('invalid login credentials')) {
-    return 'Email hoặc mật khẩu chưa đúng. Vui lòng thử lại.';
+    return t('auth.invalidCredentials');
   }
   if (normalized.includes('email not confirmed') || normalized.includes('confirm')) {
-    return 'Tài khoản chưa xác thực email. Vui lòng kiểm tra hộp thư và xác thực trước khi đăng nhập.';
+    return t('auth.emailNotConfirmed');
   }
   if (normalized.includes('network') || normalized.includes('failed to fetch')) {
-    return 'Không thể kết nối máy chủ. Vui lòng kiểm tra mạng và thử lại.';
+    return t('auth.connectionError');
   }
   if (normalized.includes('expired') || normalized.includes('invalid token')) {
-    return 'Liên kết đã hết hạn hoặc không hợp lệ. Vui lòng yêu cầu lại.';
+    return t('auth.linkExpired');
   }
   if (normalized.includes('password should be')) {
-    return 'Mật khẩu chưa đáp ứng chính sách bảo mật. Vui lòng thử mật khẩu mạnh hơn.';
+    return t('auth.passwordPolicy');
   }
 
   return raw;
 };
 
 export function AuthPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const authActions = useAuthActions();
   const { session, setSession, signOut } = useAuthStore();
@@ -76,7 +78,7 @@ export function AuthPage() {
     const isRecoveryFlow = sessionStorage.getItem(PASSWORD_RECOVERY_FLOW_KEY) === '1';
     if (isRecoveryFlow) {
       setMode('update-password');
-      setNotice('Bạn đang ở chế độ khôi phục mật khẩu. Hãy đặt mật khẩu mới để tiếp tục.');
+      setNotice(t('auth.recoveryMode'));
     }
   }
 
@@ -118,7 +120,7 @@ export function AuthPage() {
         navigate('/sdlc');
       }
     } catch (err: unknown) {
-      setError(getFriendlyAuthError(err, 'Authentication failed'));
+      setError(getFriendlyAuthError(err, 'Authentication failed', t));
     } finally {
       setLoading(false);
     }
@@ -139,7 +141,7 @@ export function AuthPage() {
       });
       setMode('reset-sent');
     } catch (err: unknown) {
-      setError(getFriendlyAuthError(err, 'Không thể gửi email khôi phục mật khẩu'));
+      setError(getFriendlyAuthError(err, t('auth.recoveryFailed'), t));
     } finally {
       setLoading(false);
     }
@@ -152,12 +154,12 @@ export function AuthPage() {
     setNotice(null);
 
     if (!newPassword || newPassword.length < 8) {
-      setError('Mật khẩu mới cần ít nhất 8 ký tự.');
+      setError(t('auth.passwordMinLength'));
       setLoading(false);
       return;
     }
     if (newPassword !== confirmPassword) {
-      setError('Mật khẩu xác nhận không khớp.');
+      setError(t('auth.passwordMismatch'));
       setLoading(false);
       return;
     }
@@ -167,12 +169,12 @@ export function AuthPage() {
       await signOut();
       sessionStorage.removeItem(PASSWORD_RECOVERY_FLOW_KEY);
       setMode('signin');
-      setNotice('Mật khẩu đã được cập nhật. Bạn có thể đăng nhập bằng mật khẩu mới.');
+      setNotice(t('auth.passwordUpdated'));
       setNewPassword('');
       setConfirmPassword('');
       setPassword('');
     } catch (err: unknown) {
-      setError(getFriendlyAuthError(err, 'Không thể cập nhật mật khẩu'));
+      setError(getFriendlyAuthError(err, t('auth.updateFailed'), t));
     } finally {
       setLoading(false);
     }
@@ -200,15 +202,15 @@ export function AuthPage() {
             <CheckCircle2 size={32} />
           </div>
           <h2 className="text-xl font-bold text-white">
-            {isResetSent ? 'Check your inbox' : 'Registration Successful'}
+            {isResetSent ? t('auth.checkInbox') : t('auth.registrationSuccess')}
           </h2>
           <p className="text-xs text-on-surface-variant/80">
             {isResetSent
-              ? 'We sent a password recovery link. Please open your email and follow the instructions.'
-              : 'Please check your email to verify your account before signing in.'}
+              ? t('auth.resetSentDesc')
+              : t('auth.verifyBeforeSignIn')}
           </p>
           <button className="w-full h-11 bg-primary hover:opacity-90 text-on-primary text-xs font-semibold rounded shadow-[0_0_10px_rgba(99,102,241,0.2)] transition-all" onClick={() => setMode('signin')}>
-            Back to Sign In
+            {t('auth.backSignIn')}
           </button>
         </motion.div>
       </div>
@@ -236,21 +238,21 @@ export function AuthPage() {
             </div>
 
             <h2 className="text-[32px] font-bold tracking-tight text-white mb-2 leading-tight">
-              {mode === 'signin' && 'Welcome back'}
-              {mode === 'signup' && 'Create an account'}
-              {mode === 'forgot-password' && 'Reset password'}
-              {mode === 'update-password' && 'Set new password'}
+              {mode === 'signin' && t('auth.welcomeBack')}
+              {mode === 'signup' && t('auth.createAccount')}
+              {mode === 'forgot-password' && t('auth.resetPassword')}
+              {mode === 'update-password' && t('auth.setNewPassword')}
             </h2>
 
             {(mode === 'signin' || mode === 'signup') && (
               <p className="text-xs text-on-surface-variant mb-8">
-                {mode === 'signin' ? 'Sign in to access the Autonomous Software Factory' : 'Sign up to access the Autonomous Software Factory'}
+                {mode === 'signin' ? t('auth.signinDesc') : t('auth.signupDesc')}
               </p>
             )}
 
             {mode === 'forgot-password' && (
               <p className="text-xs text-on-surface-variant mb-8">
-                Enter your account email and we will send you a recovery link.
+                {t('auth.forgotDesc')}
               </p>
             )}
           </motion.div>
@@ -259,7 +261,7 @@ export function AuthPage() {
             {(mode === 'signin' || mode === 'signup') && (
               <form onSubmit={handleEmailAuth} className="space-y-5">
                 <div>
-                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase font-label-mono tracking-wider">Email address</label>
+                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase font-label-mono tracking-wider">{t('auth.emailLabel')}</label>
                   <input
                     type="email"
                     required
@@ -267,13 +269,13 @@ export function AuthPage() {
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="you@aidlc.ai"
                     autoComplete="email"
-                    className="w-full h-10 px-3 bg-[#050505] border border-outline-variant rounded text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:border-secondary focus:ring-1 focus:ring-secondary/40 outline-none transition-colors"
+                    className="w-full h-10 px-3 bg-input border border-outline-variant rounded text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:border-secondary focus:ring-1 focus:ring-secondary/40 outline-none transition-colors"
                   />
                 </div>
 
                 <div className="relative group">
                   <div className="flex justify-between items-center mb-1.5">
-                    <label className="block text-xs font-semibold text-on-surface-variant uppercase font-label-mono tracking-wider">Password</label>
+                    <label className="block text-xs font-semibold text-on-surface-variant uppercase font-label-mono tracking-wider">{t('auth.passwordLabel')}</label>
                   </div>
                   <input
                     type={showPassword ? 'text' : 'password'}
@@ -282,7 +284,7 @@ export function AuthPage() {
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
                     autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-                    className="w-full h-10 pl-3 pr-10 bg-[#050505] border border-outline-variant rounded text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:border-secondary focus:ring-1 focus:ring-secondary/40 outline-none transition-colors"
+                    className="w-full h-10 pl-3 pr-10 bg-input border border-outline-variant rounded text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:border-secondary focus:ring-1 focus:ring-secondary/40 outline-none transition-colors"
                   />
                   <button
                     type="button"
@@ -309,7 +311,7 @@ export function AuthPage() {
                   className="w-full h-11 text-xs font-semibold bg-primary hover:opacity-95 text-on-primary rounded shadow-[0_0_10px_rgba(99,102,241,0.2)] transition-all"
                   disabled={loading}
                 >
-                  {loading ? 'Processing...' : mode === 'signin' ? 'Sign in' : 'Create account'}
+                  {loading ? t('auth.processing') : mode === 'signin' ? t('auth.signInBtn') : t('auth.createAccountBtn')}
                 </button>
               </form>
             )}
@@ -317,7 +319,7 @@ export function AuthPage() {
             {mode === 'forgot-password' && (
               <form onSubmit={handleForgotPassword} className="space-y-5">
                 <div>
-                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase font-label-mono tracking-wider">Account Email</label>
+                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase font-label-mono tracking-wider">{t('auth.accountEmailLabel')}</label>
                   <input
                     type="email"
                     required
@@ -325,7 +327,7 @@ export function AuthPage() {
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="you@aidlc.ai"
                     autoComplete="email"
-                    className="w-full h-10 px-3 bg-[#050505] border border-outline-variant rounded text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:border-secondary focus:ring-1 focus:ring-secondary/40 outline-none transition-colors"
+                    className="w-full h-10 px-3 bg-input border border-outline-variant rounded text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:border-secondary focus:ring-1 focus:ring-secondary/40 outline-none transition-colors"
                   />
                 </div>
                 {error && (
@@ -338,14 +340,14 @@ export function AuthPage() {
                   className="w-full h-11 text-xs font-semibold bg-primary hover:opacity-95 text-on-primary rounded shadow-[0_0_10px_rgba(99,102,241,0.2)] transition-all"
                   disabled={loading}
                 >
-                  {loading ? 'Sending...' : 'Send reset link'}
+                  {loading ? t('auth.sending') : t('auth.sendResetLink')}
                 </button>
                 <button
                   type="button"
                   className="w-full text-xs text-on-surface-variant hover:text-white transition-colors mt-4"
                   onClick={() => setMode('signin')}
                 >
-                  Back to sign in
+                  {t('auth.backSignInBtn')}
                 </button>
               </form>
             )}
@@ -353,7 +355,7 @@ export function AuthPage() {
             {mode === 'update-password' && (
               <form onSubmit={handleUpdatePassword} className="space-y-5">
                  <div className="relative group">
-                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase font-label-mono tracking-wider">New Password</label>
+                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase font-label-mono tracking-wider">{t('auth.newPasswordLabel')}</label>
                   <input
                     type={showNewPassword ? 'text' : 'password'}
                     required
@@ -361,7 +363,7 @@ export function AuthPage() {
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="••••••••"
                     autoComplete="new-password"
-                    className="w-full h-10 pl-3 pr-10 bg-[#050505] border border-outline-variant rounded text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:border-secondary focus:ring-1 focus:ring-secondary/40 outline-none transition-colors"
+                    className="w-full h-10 pl-3 pr-10 bg-input border border-outline-variant rounded text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:border-secondary focus:ring-1 focus:ring-secondary/40 outline-none transition-colors"
                   />
                   <button
                     type="button"
@@ -372,7 +374,7 @@ export function AuthPage() {
                   </button>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase font-label-mono tracking-wider">Confirm New Password</label>
+                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5 uppercase font-label-mono tracking-wider">{t('auth.confirmNewPasswordLabel')}</label>
                   <input
                     type={showNewPassword ? 'text' : 'password'}
                     required
@@ -380,7 +382,7 @@ export function AuthPage() {
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="••••••••"
                     autoComplete="new-password"
-                    className="w-full h-10 px-3 bg-[#050505] border border-outline-variant rounded text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:border-secondary focus:ring-1 focus:ring-secondary/40 outline-none transition-colors"
+                    className="w-full h-10 px-3 bg-input border border-outline-variant rounded text-xs text-on-surface placeholder:text-on-surface-variant/40 focus:border-secondary focus:ring-1 focus:ring-secondary/40 outline-none transition-colors"
                   />
                 </div>
                 {error && (
@@ -393,14 +395,14 @@ export function AuthPage() {
                   className="w-full h-11 text-xs font-semibold bg-primary hover:opacity-95 text-on-primary rounded shadow-[0_0_10px_rgba(99,102,241,0.2)] transition-all"
                   disabled={loading}
                 >
-                  {loading ? 'Updating...' : 'Update password'}
+                  {loading ? t('auth.updating') : t('auth.setNewPassword')}
                 </button>
                 <button
                   type="button"
                   className="w-full text-xs text-on-surface-variant hover:text-white transition-colors mt-4"
                   onClick={resetToSignIn}
                 >
-                  Cancel and return to sign in
+                  {t('auth.cancelBackSignIn')}
                 </button>
               </form>
             )}
@@ -414,7 +416,7 @@ export function AuthPage() {
                   setPassword('dev123');
                 }}
               >
-                <p className="text-[9px] font-label-mono text-on-surface-variant/80 tracking-wider mb-2.5 uppercase">Demo Account - Click to Autofill</p>
+                <p className="text-[9px] font-label-mono text-on-surface-variant/80 tracking-wider mb-2.5 uppercase">{t('auth.autofill')}</p>
                 <div className="flex items-center gap-3">
                   <span className="px-2 py-1 rounded border border-primary/30 bg-primary/10 text-[9px] font-label-mono text-primary uppercase">DEVELOPER</span>
                   <span className="text-xs font-mono text-on-surface-variant group-hover:text-white transition-colors">dev@aidlc.ai - dev123</span>
@@ -432,7 +434,7 @@ export function AuthPage() {
                   }}
                   className="text-xs font-medium text-on-surface-variant hover:text-white transition-colors"
                 >
-                  {mode === 'signin' ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
+                  {mode === 'signin' ? t('auth.noAccount') : t('auth.haveAccount')}
                 </button>
 
                 {mode === 'signin' && (
@@ -445,7 +447,7 @@ export function AuthPage() {
                     }}
                     className="text-xs font-medium text-secondary hover:underline transition-colors"
                   >
-                    Forgot password?
+                    {t('auth.forgotPasswordLink')}
                   </button>
                 )}
               </div>

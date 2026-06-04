@@ -8,7 +8,7 @@ Tài liệu này ghi nhận trạng thái hiện tại, các chức năng đã h
 
 - **Ngôn ngữ & Framework:** React (Vite + TypeScript)
 - **Quản lý State:** Zustand
-- **Đa ngôn ngữ (i18n):** `react-i18next` (Hiện tại mới chỉ hỗ trợ Tiếng Anh, chưa có Tiếng Việt hoàn chỉnh)
+- **Đa ngôn ngữ (i18n):** `react-i18next` (Đã hỗ trợ song ngữ Tiếng Anh và Tiếng Việt hoàn chỉnh, chuyển đổi linh hoạt qua dropdown)
 - **Styling:** Tailwind CSS + Vanilla CSS (Custom styling cho các Dashboard phức tạp)
 - **Độ sạch của Code (Code Quality):**
   - **Lỗi TypeScript:** 0 lỗi (Đã sửa đổi toàn bộ các lỗi ép kiểu Supabase metadata, React imports, và các props không khớp).
@@ -90,6 +90,14 @@ Bảng điều khiển trung tâm quản lý toàn bộ vòng đời phát tri�
 5. **Bảo trì & Mở rộng Unit Tests:** Viết bổ sung các ca kiểm thử mới và cập nhật các unit test của `SdlcDashboard` phù hợp với cấu trúc điều hướng mới (sử dụng Router/useNavigate), đạt tỷ lệ pass 100% trên toàn bộ hệ thống (25/25 tests).
 6. **Tạo Mock Backend Server Express**: Xây dựng máy chủ giả lập Node/Express (`npm run mock` trên cổng 3000) giả lập toàn bộ API của SDLC, Auth, Backlog, Quota và stream log thời gian thực qua Server-Sent Events (SSE), hỗ trợ chạy offline toàn bộ ứng dụng.
 7. **Tích hợp công cụ phân tích tĩnh Fallow**: Tích hợp Fallow dọn dẹp các tệp tin rác cũ, theo dõi sức khỏe mã nguồn ở chế độ watch mode (`npm run fallow:watch`) và loại trừ các tệp báo cáo khỏi git bằng `.gitignore`.
+8. **Bản địa hóa toàn diện (i18n) & Redesign Bộ chuyển đổi Ngôn ngữ**:
+   - Tách biệt toàn bộ các chuỗi giao diện (tiếng Anh & tiếng Việt) từ tất cả các component, trang và hooks sang các tệp tài nguyên JSON (`translation.json`).
+   - Thiết kế lại `LanguageSwitcher` từ nút bấm đơn giản thành dropdown menu tùy chỉnh hiện đại, tích hợp icon động, hover states cao cấp và logic đóng khi click ngoài vùng chọn.
+   - Cấu hình Mock i18next động trong kiểm thử (`tests/setup.ts`) giúp tự động giải quyết các khẳng định ngôn ngữ khác nhau giữa các test case của Dashboard, Auth, và Profile mà không làm lỗi luồng chạy test.
+9. **Đồng bộ hóa & Hoàn thiện Chế độ Sáng/Tối (Light/Dark Theme Support)**:
+   - Loại bỏ triệt để các màu nền đen/tối cứng (`bg-[#050505]`, `bg-[#0d0e13]`) và các lớp CSS thô (`slate-*`, `gray-*`) gây lỗi hiển thị trong chế độ sáng.
+   - Cấu hình bổ sung các biến tùy chỉnh mới (`--color-input`, `--color-code-bg`, `--color-code-toolbar`) và thiết lập lớp tiện ích `.input-field` giúp tái sử dụng và bảo trì đồng bộ.
+   - Tối ưu hóa ErrorBoundary hỗ trợ đầy đủ thiết kế thích ứng (Responsive & Adaptive Grid Overlay) hiển thị chuẩn xác ở cả hai giao diện sáng và tối.
 
 ---
 
@@ -98,7 +106,7 @@ Bảng điều khiển trung tâm quản lý toàn bộ vòng đời phát tri�
 - [ ] **Tích hợp thực tế với Backend API:** Thay thế các hàm mock của Release to Production và Audit Trail bằng các API endpoints thực tế khi Backend hoàn thành phát triển.
 - [ ] **Bổ sung kiểm thử End-to-End (E2E):** Thiết lập Playwright test suite để tự động hóa toàn bộ luồng tạo dự án, kiểm thử kéo thả Kanban, chạy Agent và duyệt Quality Gate.
 - [ ] **Mở rộng Dashboard Analytics:** Bổ sung giao diện phân tích hiệu suất và biểu đồ thời gian/chi phí vận hành thực tế của mỗi Agent.
-- [ ] **Hỗ trợ ngôn ngữ Tiếng Việt (Vietnamese i18n Support):** Bổ sung đầy đủ các key dịch thuật và nội dung tiếng Việt trong file `vi/translation.json` để hệ thống hỗ trợ song ngữ hoàn chỉnh (hiện tại mới chỉ hỗ trợ Tiếng Anh).
-- [ ] **Hoàn thiện tính năng chuyển đổi giao diện Sáng/Tối (Light/Dark Mode):** Đồng bộ các biến CSS và phối màu cho các component mới thêm để đảm bảo hiển thị chuẩn xác ở cả chế độ sáng và tối (tránh lỗi lệch màu sắc).
+- [x] **Hỗ trợ ngôn ngữ Tiếng Việt (Vietnamese i18n Support):** Bổ sung đầy đủ các key dịch thuật và nội dung tiếng Việt trong file `vi/translation.json` để hệ thống hỗ trợ song ngữ hoàn chỉnh.
+- [x] **Hoàn thiện tính năng chuyển đổi giao diện Sáng/Tối (Light/Dark Mode):** Đồng bộ các biến CSS và phối màu cho các component mới thêm để đảm bảo hiển thị chuẩn xác ở cả chế độ sáng và tối (tránh lỗi lệch màu sắc).
 
 

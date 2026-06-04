@@ -1,8 +1,10 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useQuotaStore } from '@/store/useQuotaStore';
 
 export function QuotaBadge() {
+  const { t } = useTranslation();
   const { summary, isBlocked, isNearLimit } = useQuotaStore();
   const navigate = useNavigate();
 
@@ -23,7 +25,7 @@ export function QuotaBadge() {
   return (
     <button
       onClick={() => navigate('/upgrade')}
-      title="Xem & nâng cấp plan"
+      title={t('layout.quotaViewUpgrade')}
       className={`flex items-center gap-2 rounded-xl border px-2.5 py-1.5 text-xs font-semibold transition-colors hover:opacity-80 ${color}`}
     >
       <span className="material-symbols-outlined text-[14px]">toll</span>

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAppStore } from '@/store';
 import { getBacklogs, FeatureRequest } from '@/services/api/sdlcApi';
 import { motion } from 'framer-motion';
@@ -21,6 +22,7 @@ export default function KanbanBoard({
   onStartPO: (feature: FeatureRequest, backlogId: string) => Promise<void> | void;
   onCreateFeature: () => void;
 }) {
+  const { t } = useTranslation();
   const { currentProjectId } = useAppStore();
   const [backlogs, setBacklogs] = useState<BacklogItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -73,16 +75,16 @@ export default function KanbanBoard({
   ];
 
   if (!currentProjectId) {
-    return <div className="p-8 text-center text-on-surface-variant">Vui lòng chọn một dự án để xem Kanban.</div>;
+    return <div className="p-8 text-center text-on-surface-variant">{t('kanban.selectProject')}</div>;
   }
 
   return (
     <div className="h-full w-full flex flex-col overflow-hidden bg-transparent">
       <div className="flex items-center justify-between gap-4 px-6 py-5 shrink-0">
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-primary">Workspace</p>
-          <h2 className="mt-1 text-xl font-bold text-on-surface font-headline">Feature Backlog</h2>
-          <p className="mt-1 text-xs text-on-surface-variant">Create a request, then start the autonomous delivery pipeline.</p>
+          <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-primary">{t('kanban.workspace')}</p>
+          <h2 className="mt-1 text-xl font-bold text-on-surface font-headline">{t('kanban.title')}</h2>
+          <p className="mt-1 text-xs text-on-surface-variant">{t('kanban.desc')}</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -90,11 +92,11 @@ export default function KanbanBoard({
             className="flex items-center gap-2 rounded-lg bg-primary px-3.5 py-2.5 text-xs font-bold text-on-primary shadow-[0_8px_24px_rgba(99,102,241,0.18)] transition-all hover:-translate-y-0.5 hover:opacity-95"
           >
             <CirclePlus size={15} />
-            New Feature Request
+            {t('kanban.newRequest')}
           </button>
           <button
             onClick={fetchBacklogs}
-            title="Refresh backlog"
+            title={t('kanban.refresh')}
             className="flex h-9 w-9 items-center justify-center rounded-lg border border-outline-variant bg-surface-container-low text-on-surface-variant transition-colors hover:bg-surface-variant hover:text-on-surface"
           >
             <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
@@ -107,8 +109,8 @@ export default function KanbanBoard({
           <div className="flex items-center gap-3">
             <Sparkles size={17} className="shrink-0 text-primary" />
             <div>
-              <p className="font-semibold">Start by creating your first Feature Request</p>
-              <p className="mt-0.5 text-xs text-on-surface-variant">It will appear in To Do, ready for PO Agent.</p>
+              <p className="font-semibold">{t('kanban.startFirst')}</p>
+              <p className="mt-0.5 text-xs text-on-surface-variant">{t('kanban.appearTodo')}</p>
             </div>
           </div>
           <ArrowRight size={16} className="shrink-0 text-primary" />
@@ -119,8 +121,8 @@ export default function KanbanBoard({
         <div className="mx-6 mb-4 flex items-center gap-3 rounded-xl border border-emerald-400/35 bg-emerald-400/10 px-4 py-3 text-sm text-on-surface">
           <Sparkles size={17} className="shrink-0 text-emerald-300" />
           <div>
-            <p className="font-semibold">Ready to start the pipeline</p>
-            <p className="mt-0.5 text-xs text-on-surface-variant">Click Start PO Agent on a card in the To Do column.</p>
+            <p className="font-semibold">{t('kanban.readyStart')}</p>
+            <p className="mt-0.5 text-xs text-on-surface-variant">{t('kanban.clickStart')}</p>
           </div>
         </div>
       )}
@@ -144,7 +146,7 @@ export default function KanbanBoard({
               <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3 custom-scrollbar">
                 {items.length === 0 ? (
                   <div className="text-center py-12 text-xs text-on-surface-variant/40">
-                    Chưa có thẻ nào
+                    {t('kanban.noCards')}
                   </div>
                 ) : (
                   items.map((item) => (

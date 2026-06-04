@@ -57,7 +57,7 @@ function ExpandedRow({
   if (!detail) {
     return (
       <tr>
-        <td colSpan={5} className="px-6 py-4 bg-[#050505] border-b border-outline-variant/30">
+        <td colSpan={5} className="px-6 py-4 bg-surface-container-lowest border-b border-outline-variant/30">
           <p className="text-xs text-on-surface-variant/60">Loading...</p>
         </td>
       </tr>
@@ -70,7 +70,7 @@ function ExpandedRow({
 
   return (
     <tr>
-      <td colSpan={5} className="bg-[#050505] border-b border-outline-variant/40 px-6 py-4">
+      <td colSpan={5} className="bg-surface-container-lowest border-b border-outline-variant/40 px-6 py-4">
         <div className="flex gap-6 flex-wrap">
 
           {/* Subscription info */}

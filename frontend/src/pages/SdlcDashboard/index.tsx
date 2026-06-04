@@ -6,6 +6,7 @@ import { FileText, History, Plus, Workflow } from 'lucide-react';
 import { useSdlcStore } from '@/store/useSdlcStore';
 import * as sdlcApi from '@/services/api/sdlcApi';
 import { useAppStore } from '@/store/useAppStore';
+import { useTranslation } from 'react-i18next';
 import StageInspector from './components/StageInspector';
 import HumanGatePanel, { type StructuredDecision } from './components/HumanGatePanel';
 import FeatureRequestForm from './components/FeatureRequestForm';
@@ -16,6 +17,7 @@ import McpActivityPanel from './components/McpActivityPanel';
 type Phase = 'po' | 'ux' | 'dev' | 'qa';
 
 export default function SdlcDashboard() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { currentProjectId, treeLoaded, fetchTree } = useAppStore();
   const {
@@ -64,11 +66,11 @@ export default function SdlcDashboard() {
       const trail = await sdlcApi.getAuditTrail(projectId);
       setAuditEvents(trail.events);
     } catch {
-      setError('Could not load the delivery workflow.');
+      setError(t('dashboard.loadError'));
     } finally {
       setWorkflowLoading(false);
     }
-  }, [projectId, setAuditEvents, setError, setWorkflowLoading, setWorkflowStatus]);
+  }, [projectId, setAuditEvents, setError, setWorkflowLoading, setWorkflowStatus, t]);
 
   useEffect(() => {
     void refreshStatus();
@@ -96,11 +98,11 @@ export default function SdlcDashboard() {
       },
       onError: (data) => {
         setSseActive(false);
-        setError((data.message as string) || 'Agent execution failed.');
+        setError((data.message as string) || t('dashboard.executionFailed'));
       },
     });
     setSseAbort(abort);
-  }, [appendSseLog, refreshStatus, setActiveTask, setError, setSseActive, sseAbort]);
+  }, [appendSseLog, refreshStatus, setActiveTask, setError, setSseActive, sseAbort, t]);
 
   const startPO = async (request: sdlcApi.FeatureRequest) => {
     if (!projectId) return;
@@ -113,7 +115,7 @@ export default function SdlcDashboard() {
       await refreshStatus();
     } catch (requestError) {
       setSubmittedRequest(null);
-      setError(sdlcApi.getApiErrorMessage(requestError, 'Could not send the feature request to PO Agent.'));
+      setError(sdlcApi.getApiErrorMessage(requestError, t('dashboard.sendFailed')));
     }
   };
 
@@ -144,11 +146,11 @@ export default function SdlcDashboard() {
       setDismissedGateTaskId(null);
       setGateTaskId(taskId);
     } catch (requestError) {
-      setError(sdlcApi.getApiErrorMessage(requestError, 'Could not open the human review output.'));
+      setError(sdlcApi.getApiErrorMessage(requestError, t('dashboard.openGateFailed')));
     } finally {
       autoOpeningGateTaskId.current = null;
     }
-  }, [setError]);
+  }, [setError, t]);
 
   const closeGate = () => {
     setDismissedGateTaskId(gateTaskId);
@@ -207,22 +209,22 @@ export default function SdlcDashboard() {
     <main className="sdlc-dashboard">
       <header className="delivery-header">
         <div>
-          <p className="delivery-header__eyebrow"><Workflow size={14} /> AIDLC delivery workspace</p>
-          <h1>Build a feature with four AI workers</h1>
-          <p>Submit once to PO. Workers continue automatically and pause only when human direction is needed.</p>
+          <p className="delivery-header__eyebrow"><Workflow size={14} /> {t('dashboard.workspace')}</p>
+          <h1>{t('dashboard.title')}</h1>
+          <p>{t('dashboard.subtitle')}</p>
         </div>
         <div className="delivery-subnav">
           <button className="delivery-subnav__btn is-active">
-            <Workflow size={15} /> Build
+            <Workflow size={15} /> {t('dashboard.build')}
           </button>
           <button className="delivery-subnav__btn" onClick={() => navigate('/sdlc/audit')}>
-            <History size={15} /> Audit
+            <History size={15} /> {t('dashboard.audit')}
           </button>
           <button className="delivery-subnav__btn" onClick={() => navigate('/sdlc/outputs')}>
-            <FileText size={15} /> Outputs
+            <FileText size={15} /> {t('dashboard.outputs')}
           </button>
           <button className="delivery-header__cta" onClick={() => setFeatureRequestFormOpen(true)}>
-            <Plus size={16} /> New feature request
+            <Plus size={16} /> {t('dashboard.newRequest')}
           </button>
         </div>
       </header>

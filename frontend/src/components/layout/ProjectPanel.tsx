@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 
 export interface Project {
   id: string;
@@ -41,6 +42,8 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
   collapsed,
   onToggleCollapse,
 }) => {
+  const { t } = useTranslation();
+
   return (
     <div
       className={`
@@ -55,12 +58,12 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
       >
         {!collapsed && (
           <span className="text-[11px] font-label-mono text-on-surface-variant uppercase tracking-widest px-1">
-            Projects
+            {t('layout.projectsTitle')}
           </span>
         )}
         <button
           onClick={onCreateProject}
-          title="Tạo dự án mới"
+          title={t('layout.createProject')}
           className="w-7 h-7 rounded flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-variant transition-colors"
         >
           <span className="material-symbols-outlined text-[18px]">add</span>
@@ -72,7 +75,7 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
         {!collapsed && (
           <div className="px-2 mb-1">
             <span className="text-[9px] font-label-mono text-on-surface-variant/60 uppercase tracking-widest">
-              Workspace
+              {t('layout.workspace')}
             </span>
           </div>
         )}
@@ -123,7 +126,7 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
               {typeof onOpenSettings === 'function' && (
                 <button
                   type="button"
-                  title="Cài đặt dự án"
+                  title={t('layout.projectSettings')}
                   onClick={(event) => {
                     event.stopPropagation();
                     onOpenSettings(project.id);
@@ -136,7 +139,7 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
               {project.role === 'owner' && typeof onDeleteProject === 'function' && (
                 <button
                   type="button"
-                  title="Delete project"
+                  title={t('layout.deleteProjectConfirm')}
                   disabled={deletingProjectId === project.id}
                   onClick={(event) => {
                     event.stopPropagation();
@@ -155,7 +158,7 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
 
         {!collapsed && projects.length === 0 && (
           <div className="py-6 px-2 text-center text-[11px] text-on-surface-variant/60">
-            Chưa có dự án
+            {t('layout.noProjects')}
           </div>
         )}
 
@@ -167,7 +170,7 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
               className="w-full flex items-center gap-2 px-3 py-2 rounded text-xs text-on-surface-variant hover:text-primary hover:bg-surface-variant transition-colors"
             >
               <span className="material-symbols-outlined text-[14px]">add</span>
-              <span>Tạo dự án mới</span>
+              <span>{t('layout.createProject')}</span>
             </button>
           </>
         )}
@@ -177,7 +180,7 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
       <div className="border-t border-outline-variant p-2 shrink-0">
         <button
           onClick={onToggleCollapse}
-          title={collapsed ? 'Mở rộng' : 'Thu gọn'}
+          title={collapsed ? t('layout.expand') : t('layout.collapse')}
           className={`
             w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs
             text-on-surface-variant hover:bg-surface-variant transition-colors
@@ -187,7 +190,7 @@ export const ProjectPanel: React.FC<ProjectPanelProps> = ({
           <span className="material-symbols-outlined text-[16px]">
             {collapsed ? 'chevron_right' : 'chevron_left'}
           </span>
-          {!collapsed && <span>Thu gọn</span>}
+          {!collapsed && <span>{t('layout.collapse')}</span>}
         </button>
       </div>
     </div>
