@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useTheme } from '@/theme';
 import { useAppStore } from '@/store';
@@ -11,6 +12,7 @@ import { QuotaBadge } from './QuotaBadge';
 import { InvitationsBell } from './InvitationsBell';
 
 export function AppTopBar() {
+  const { t } = useTranslation();
   const { resolvedMode, toggleMode } = useTheme();
   const { user, signOut } = useAuthStore();
   const navigate = useNavigate();
@@ -55,8 +57,8 @@ export function AppTopBar() {
     profile?.full_name ||
     (user?.user_metadata?.company_name as string | undefined) ||
     user?.email?.split('@')[0] ||
-    'Admin Console';
-  const roleName = profile?.job_title || (user?.user_metadata?.job_title as string | undefined) || 'QA Engineer';
+    t('layout.welcomeAdmin');
+  const roleName = profile?.job_title || (user?.user_metadata?.job_title as string | undefined) || t('layout.welcomeGuest');
   const avatarUrl =
     profile?.avatar_url ||
     `https://ui-avatars.com/api/?name=${encodeURIComponent(String(displayName))}&background=0D8ABC&color=fff`;
@@ -75,7 +77,7 @@ export function AppTopBar() {
           </span>
           <input
             type="text"
-            placeholder="Search projects & assets..."
+            placeholder={t('layout.searchPlaceholder')}
             className="w-full pl-9 pr-4 py-1.5 bg-surface-container-lowest border border-outline-variant rounded text-xs focus:border-secondary focus:outline-none focus:ring-1 focus:ring-secondary/40 placeholder:text-on-surface-variant/40"
           />
         </div>
@@ -86,10 +88,10 @@ export function AppTopBar() {
           onClick={() => setFeatureRequestFormOpen(true)}
           disabled={!currentProjectId}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-primary hover:bg-primary/95 text-on-primary text-xs font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_10px_rgba(99,102,241,0.2)]"
-          title={!currentProjectId ? "Vui lòng chọn một dự án từ Sidebar trước" : ""}
+          title={!currentProjectId ? t('layout.chooseProjectFirst') : ""}
         >
           <span>🚀</span>
-          <span>New Feature Request</span>
+          <span>{t('layout.newFeatureRequest')}</span>
         </button>
         <div className="w-px h-5 bg-outline-variant/30 mx-1" />
         <LanguageSwitcher />
@@ -106,7 +108,7 @@ export function AppTopBar() {
         <InvitationsBell />
         <button
           onClick={handleSignOut}
-          title="Đăng xuất"
+          title={t('layout.signOut')}
           className="w-8 h-8 rounded border border-outline-variant bg-surface-container-low flex items-center justify-center text-on-surface-variant hover:text-red-500 transition-colors"
         >
           <span className="material-symbols-outlined text-[18px]">logout</span>
@@ -116,7 +118,7 @@ export function AppTopBar() {
           type="button"
           onClick={() => navigate('/profile')}
           className="flex items-center gap-2 rounded px-2 py-1 text-left transition-colors hover:bg-surface-variant"
-          title="Hồ sơ cá nhân"
+          title={t('layout.myProfile')}
         >
           <div className="text-right">
             <p className="text-xs font-semibold leading-none">{displayName}</p>

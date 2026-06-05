@@ -4,6 +4,7 @@ import * as api from '@/services/api';
 import type { ProjectInvitationItem, ProjectMemberItem, ProjectRole } from '@/services/api';
 import { useAppStore } from '@/store';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { useTranslation } from 'react-i18next';
 
 const MUTABLE_INVITE_ROLES: Exclude<ProjectRole, 'owner'>[] = ['admin', 'editor', 'viewer'];
 const ROLE_LABELS: Record<ProjectRole, string> = {
@@ -37,6 +38,7 @@ function MemberDisplay({ member }: { member: ProjectMemberItem }) {
 }
 
 export const ProjectSettings: React.FC = () => {
+  const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
   const {
@@ -57,9 +59,9 @@ export const ProjectSettings: React.FC = () => {
   const canAdmin = userRole === 'owner' || userRole === 'admin';
   const canOwner = userRole === 'owner';
   const canEditContent = userRole === 'owner' || userRole === 'admin' || userRole === 'editor';
-  const manageMembersDisabledReason = canAdmin ? undefined : 'Chỉ Owner hoặc Admin có thể quản lý thành viên';
-  const editProjectDisabledReason = canAdmin ? undefined : 'Chỉ Owner hoặc Admin có thể đổi tên project';
-  const deleteProjectDisabledReason = canOwner ? undefined : 'Chỉ Owner có thể xóa project';
+  const manageMembersDisabledReason = canAdmin ? undefined : t('settings.memberLimit');
+  const editProjectDisabledReason = canAdmin ? undefined : t('settings.renameLimit');
+  const deleteProjectDisabledReason = canOwner ? undefined : t('settings.deleteLimit');
 
   const [tab, setTab] = useState<'info' | 'access'>('info');
   const [name, setName] = useState(project?.name ?? '');
@@ -79,11 +81,18 @@ export const ProjectSettings: React.FC = () => {
 
   const tabs = useMemo(
     () => [
-      ['info', 'Thông tin'],
-      ['access', 'Quyền truy cập'],
+      ['info', t('settings.infoTab')],
+      ['access', t('settings.accessTab')],
     ] as const,
-    [],
+    [t],
   );
+
+  const roleDescriptions = useMemo<Record<ProjectRole, string>>(() => ({
+    owner: t('settings.roleOwner'),
+    admin: t('settings.roleAdmin'),
+    editor: t('settings.roleEditor'),
+    viewer: t('settings.roleViewer'),
+  }), [t]);
 
   const memberEmails = useMemo(
     () => new Set(members.map((member) => member.email?.toLowerCase()).filter(Boolean)),
@@ -135,7 +144,7 @@ export const ProjectSettings: React.FC = () => {
       setInvitations(inviteRows);
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { message?: string } } };
-      setError(axiosErr?.response?.data?.message ?? (err instanceof Error ? err.message : 'Lỗi tải dữ liệu'));
+      setError(axiosErr?.response?.data?.message ?? (err instanceof Error ? err.message : t('settings.loadFailed')));
     } finally {
       setLoading(false);
     }
@@ -157,7 +166,7 @@ export const ProjectSettings: React.FC = () => {
       upsertProject(res.data);
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { message?: string } } };
-      setError(axiosErr?.response?.data?.message ?? (err instanceof Error ? err.message : 'Lỗi đổi tên'));
+      setError(axiosErr?.response?.data?.message ?? (err instanceof Error ? err.message : t('settings.renameFailed')));
     } finally {
       setSaving(false);
     }
@@ -173,7 +182,7 @@ export const ProjectSettings: React.FC = () => {
       navigate('/app');
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { message?: string } } };
-      setError(axiosErr?.response?.data?.message ?? (err instanceof Error ? err.message : 'Lỗi xóa project'));
+      setError(axiosErr?.response?.data?.message ?? (err instanceof Error ? err.message : t('settings.deleteFailed')));
     }
   };
 
@@ -186,7 +195,7 @@ export const ProjectSettings: React.FC = () => {
       await refresh();
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { message?: string } } };
-      setError(axiosErr?.response?.data?.message ?? (err instanceof Error ? err.message : 'Lỗi gửi lời mời'));
+      setError(axiosErr?.response?.data?.message ?? (err instanceof Error ? err.message : t('settings.inviteFailed')));
     }
   };
 
@@ -197,7 +206,7 @@ export const ProjectSettings: React.FC = () => {
       await refresh();
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { message?: string } } };
-      setError(axiosErr?.response?.data?.message ?? (err instanceof Error ? err.message : 'Lỗi cập nhật vai trò'));
+      setError(axiosErr?.response?.data?.message ?? (err instanceof Error ? err.message : t('settings.updateRoleFailed')));
     }
   };
 
@@ -208,24 +217,24 @@ export const ProjectSettings: React.FC = () => {
       await refresh();
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { message?: string } } };
-      setError(axiosErr?.response?.data?.message ?? (err instanceof Error ? err.message : 'Lỗi xóa thành viên'));
+      setError(axiosErr?.response?.data?.message ?? (err instanceof Error ? err.message : t('settings.deleteMemberFailed')));
     }
   };
 
   const confirmTitle = !confirmAction
     ? ''
     : confirmAction.type === 'delete-project'
-      ? 'Xóa project?'
+      ? t('settings.deleteProjectConfirm')
       : confirmAction.type === 'remove-member'
-        ? 'Xóa thành viên?'
-        : 'Thu hồi lời mời?';
+        ? t('settings.deleteMemberConfirm')
+        : t('settings.revokeInviteConfirm');
   const confirmDescription = !confirmAction
     ? ''
     : confirmAction.type === 'delete-project'
-      ? `Project "${project?.name || 'này'}" và toàn bộ dữ liệu bên trong sẽ bị xóa.`
+      ? t('settings.deleteProjectDesc').replace('{name}', project?.name || '')
       : confirmAction.type === 'remove-member'
-        ? `${confirmAction.member.full_name || confirmAction.member.email || confirmAction.member.user_id} sẽ không còn truy cập project này.`
-        : `Lời mời gửi tới ${confirmAction.invitation.email} sẽ không còn hiệu lực.`;
+        ? t('settings.deleteMemberDesc').replace('{name}', confirmAction.member.full_name || confirmAction.member.email || confirmAction.member.user_id)
+        : t('settings.revokeInviteDesc').replace('{email}', confirmAction.invitation.email);
   const handleConfirm = () => {
     const action = confirmAction;
     setConfirmAction(null);
@@ -242,7 +251,7 @@ export const ProjectSettings: React.FC = () => {
       await refresh();
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { message?: string } } };
-      setError(axiosErr?.response?.data?.message ?? (err instanceof Error ? err.message : 'Lỗi thu hồi lời mời'));
+      setError(axiosErr?.response?.data?.message ?? (err instanceof Error ? err.message : t('settings.revokeInviteFailed')));
     }
   };
 
@@ -258,30 +267,30 @@ export const ProjectSettings: React.FC = () => {
               className="inline-flex items-center gap-2 rounded-xl border border-outline-variant/30 bg-surface-container-low px-3 py-2 text-sm font-semibold text-on-surface-variant transition-colors hover:bg-surface-container hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
               <span className="material-symbols-outlined text-[18px]">arrow_back</span>
-              Về trang chính
+              {t('settings.backMain')}
             </button>
           </div>
           <div>
             <h1 className="font-headline text-xl font-bold text-on-surface">{project?.name ?? 'Project'}</h1>
             <div className="mt-1 flex flex-wrap items-center gap-2">
-              <span className="text-xs text-on-surface-variant">Vai trò của bạn:</span>
+              <span className="text-xs text-on-surface-variant">{t('settings.yourRole')}</span>
               {userRole ? (
                 <span className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase ${ROLE_BADGE_CLASSES[userRole]}`}>
                   {ROLE_LABELS[userRole]}
                 </span>
               ) : (
-                <span className="text-xs font-semibold text-on-surface-variant">Đang tải...</span>
+                <span className="text-xs font-semibold text-on-surface-variant">{t('settings.loading')}</span>
               )}
             </div>
             {userRole && (
-              <p className="mt-1 text-xs text-on-surface-variant">{ROLE_DESCRIPTIONS[userRole]}</p>
+              <p className="mt-1 text-xs text-on-surface-variant">{roleDescriptions[userRole]}</p>
             )}
           </div>
         </div>
 
         {treeLoaded && !documentsLoading && !project && (
           <div className="rounded-lg border border-outline-variant/30 bg-surface-container-low px-4 py-3 text-sm text-on-surface-variant">
-            Không tìm thấy project này hoặc bạn không có quyền truy cập.
+            {t('settings.noProjectPermission')}
           </div>
         )}
 
@@ -312,7 +321,7 @@ export const ProjectSettings: React.FC = () => {
         {/* Info tab */}
         {tab === 'info' && (
           <section className="max-w-xl space-y-4">
-            <label className="block text-xs font-semibold text-on-surface-variant">Tên project</label>
+            <label className="block text-xs font-semibold text-on-surface-variant">{t('settings.projectName')}</label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -328,7 +337,7 @@ export const ProjectSettings: React.FC = () => {
                 onClick={saveName}
                 className="rounded-lg bg-primary px-3 py-2 text-xs font-bold text-on-primary disabled:opacity-50"
               >
-                {saving ? 'Đang lưu...' : 'Lưu'}
+                {saving ? t('settings.saving') : t('settings.saveBtn')}
               </button>
               <button
                 disabled={!canOwner}
@@ -336,7 +345,7 @@ export const ProjectSettings: React.FC = () => {
                 onClick={() => setConfirmAction({ type: 'delete-project' })}
                 className="rounded-lg bg-error px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
               >
-                Xóa project
+                {t('settings.deleteProjectBtn')}
               </button>
             </div>
           </section>
@@ -347,17 +356,18 @@ export const ProjectSettings: React.FC = () => {
           <section className="space-y-6">
             {!canAdmin && (
               <div className="rounded-lg border border-outline-variant/30 bg-surface-container-low px-4 py-3 text-xs text-on-surface-variant">
-                Bạn đang xem danh sách thành viên ở chế độ chỉ đọc. {canEditContent ? 'Editor có thể chỉnh tài liệu và chạy workflow, nhưng không thể mời hoặc phân quyền.' : 'Viewer chỉ có quyền xem project này.'}
+                {t('settings.readOnlyWarning')}{' '}
+                {canEditContent ? t('settings.editorWarning') : t('settings.viewerWarning')}
               </div>
             )}
             <div className="space-y-1">
               <div className="flex items-center justify-between">
-                <h2 className="text-sm font-bold text-on-surface">Thành viên</h2>
-                <span className="text-xs text-on-surface-variant">{members.length} người</span>
+                <h2 className="text-sm font-bold text-on-surface">{t('settings.membersTitle')}</h2>
+                <span className="text-xs text-on-surface-variant">{members.length} {t('settings.people')}</span>
               </div>
-              {loading && <p className="text-xs text-on-surface-variant">Đang tải...</p>}
+              {loading && <p className="text-xs text-on-surface-variant">{t('settings.loading')}</p>}
               {!loading && members.length === 0 && (
-                <p className="text-xs text-on-surface-variant">Chưa có thành viên.</p>
+                <p className="text-xs text-on-surface-variant">{t('settings.noMembers')}</p>
               )}
               {members.map((member) => (
                 <div key={member.user_id} className="flex items-center gap-3 border-b border-outline-variant/20 py-3">
@@ -379,7 +389,7 @@ export const ProjectSettings: React.FC = () => {
                     onClick={() => setConfirmAction({ type: 'remove-member', member })}
                     className="rounded px-2 py-1 text-xs text-error disabled:opacity-40"
                   >
-                    Xóa
+                    {t('settings.removeBtn')}
                   </button>
                 </div>
               ))}
@@ -388,8 +398,8 @@ export const ProjectSettings: React.FC = () => {
             {canAdmin && (
               <div className="space-y-3 border-t border-outline-variant/20 pt-5">
                 <div>
-                  <h2 className="text-sm font-bold text-on-surface">Lời mời đang chờ</h2>
-                  <p className="text-xs text-on-surface-variant">Chỉ hiển thị tài khoản chưa chấp nhận lời mời.</p>
+                  <h2 className="text-sm font-bold text-on-surface">{t('settings.pendingInvitations')}</h2>
+                  <p className="text-xs text-on-surface-variant">{t('settings.pendingDesc')}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <input
@@ -411,10 +421,10 @@ export const ProjectSettings: React.FC = () => {
                     onClick={invite}
                     className="rounded-lg bg-primary px-3 py-2 text-xs font-bold text-on-primary disabled:opacity-50"
                   >
-                    Mời
+                    {t('settings.inviteBtn')}
                   </button>
                 </div>
-                {loading && <p className="text-xs text-on-surface-variant">Đang tải...</p>}
+                {loading && <p className="text-xs text-on-surface-variant">{t('settings.loading')}</p>}
                 {!loading && pendingInvitations.length === 0 && (
                   <p className="text-xs text-on-surface-variant">Không có lời mời đang chờ.</p>
                 )}
@@ -427,7 +437,7 @@ export const ProjectSettings: React.FC = () => {
                       onClick={() => setConfirmAction({ type: 'revoke-invitation', invitation: inv })}
                       className="text-xs text-error hover:underline"
                     >
-                      Thu hồi
+                      {t('settings.revokeBtn')}
                     </button>
                   </div>
                 ))}
@@ -440,7 +450,7 @@ export const ProjectSettings: React.FC = () => {
         open={!!confirmAction}
         title={confirmTitle}
         description={confirmDescription}
-        confirmLabel={confirmAction?.type === 'revoke-invitation' ? 'Thu hồi' : 'Xóa'}
+        confirmLabel={confirmAction?.type === 'revoke-invitation' ? t('settings.revokeBtn') : t('settings.removeBtn')}
         danger
         onConfirm={handleConfirm}
         onCancel={() => setConfirmAction(null)}

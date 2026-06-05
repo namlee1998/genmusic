@@ -88,7 +88,7 @@ export function AdminFunnel() {
                     </span>
                   </div>
                 </div>
-                <div className="h-5 bg-[#050505] rounded overflow-hidden border border-outline-variant/30">
+                <div className="h-5 bg-surface-container-lowest rounded overflow-hidden border border-outline-variant/30">
                   <div
                     className={`h-full rounded transition-all duration-500 ${BAR_COLORS[i % BAR_COLORS.length]}`}
                     style={{ width: `${(step.count / maxCount) * 100}%` }}

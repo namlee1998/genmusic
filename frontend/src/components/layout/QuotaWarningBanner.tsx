@@ -1,8 +1,10 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useQuotaStore } from '@/store/useQuotaStore';
 
 export function QuotaWarningBanner() {
+  const { t } = useTranslation();
   const { summary, isBlocked, isNearLimit } = useQuotaStore();
   const navigate = useNavigate();
 
@@ -19,8 +21,8 @@ export function QuotaWarningBanner() {
           {isBlocked ? 'block' : 'warning'}
         </span>
         {isBlocked
-          ? `Bạn đã dùng hết ${summary.creditsTotal} credits. Không thể chạy thêm agent cho đến khi nâng cấp.`
-          : `Bạn đã dùng ${summary.creditsUsed}/${summary.creditsTotal} credits (${Math.round((summary.creditsUsed / summary.creditsTotal) * 100)}%). Sắp hết quota.`
+          ? t('layout.quotaWarningBlocked', { total: summary.creditsTotal })
+          : t('layout.quotaWarningNearLimit', { used: summary.creditsUsed, total: summary.creditsTotal, pct: Math.round((summary.creditsUsed / summary.creditsTotal) * 100) })
         }
       </div>
       <button
@@ -31,7 +33,7 @@ export function QuotaWarningBanner() {
             : 'bg-yellow-500 text-white border-yellow-500'
         }`}
       >
-        Nâng cấp ngay
+        {t('layout.upgradeNow')}
       </button>
     </div>
   );

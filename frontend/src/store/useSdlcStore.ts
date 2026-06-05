@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { TaskStatus } from '@/services/api';
+import * as sdlcApi from '@/services/api/sdlcApi';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -85,6 +86,8 @@ export interface AuditEvent {
   gate?: string;
   decision?: string;
   comment?: string | null;
+  phase?: string | null;
+  artifact_version?: string | null;
   // Granular state-machine detail (plan TIP-002 / Scenario D).
   stateFrom?: string | null;
   stateTo?: string | null;
@@ -142,6 +145,19 @@ export interface WorkflowMetrics {
   agent_policy: Record<string, { max_attempts: number; timeout_seconds: number }>;
 }
 
+export type PipelineStatus =
+  | 'idle'
+  | 'cloning'
+  | 'analyzing'
+  | 'po_running'
+  | 'ux_running'
+  | 'dev_running'
+  | 'sandbox_testing'
+  | 'qa_running'
+  | 'awaiting_approval'
+  | 'qa_complete'
+  | 'failed';
+
 interface SdlcState {
   // ── Active project ────────────────────────────────────────────────────
   projectId: string | null;
@@ -169,6 +185,15 @@ interface SdlcState {
   // ── Error ─────────────────────────────────────────────────────────────
   error: SdlcError | null;
 
+  // ── New Pipeline States ────────────────────────────────────────────────
+  repoUrl: string;
+  pipelineStatus: PipelineStatus;
+  currentStep: number;
+  approvals: sdlcApi.ApprovalItem[];
+  qaResult: sdlcApi.QAResult | null;
+  repoInfo: sdlcApi.RepoAnalysis | null;
+  isLoading: boolean;
+
   // ── Actions ───────────────────────────────────────────────────────────
   setProjectId: (id: string | null) => void;
   setWorkflowStatus: (ws: WorkflowStatus) => void;
@@ -184,10 +209,15 @@ interface SdlcState {
   setFeatureRequestFormOpen: (isOpen: boolean) => void;
   setError: (err: string | SdlcError | null) => void;
   clearTask: () => void;
+
+  // ── New Actions ───────────────────────────────────────────────────────
+  submitRepo: (url: string) => Promise<void>;
+  pollStatus: () => Promise<void>;
+  approveItem: (id: string, action: 'approve' | 'reject', comment?: string) => Promise<void>;
 }
 
-export const useSdlcStore = create<SdlcState>((set) => ({
-  projectId: localStorage.getItem('sdlc_projectId'),
+export const useSdlcStore = create<SdlcState>((set, get) => ({
+  projectId: localStorage.getItem('sdlc_projectId') || 'default-project',
   workflowStatus: null,
   workflowLoading: false,
   activeTaskId: null,
@@ -201,6 +231,15 @@ export const useSdlcStore = create<SdlcState>((set) => ({
   phaseTransitions: [],
   isFeatureRequestFormOpen: false,
   error: null,
+
+  // New states
+  repoUrl: '',
+  pipelineStatus: 'idle',
+  currentStep: 0,
+  approvals: [],
+  qaResult: null,
+  repoInfo: null,
+  isLoading: false,
 
   setProjectId: (id) => {
     if (id) localStorage.setItem('sdlc_projectId', id);
@@ -220,4 +259,47 @@ export const useSdlcStore = create<SdlcState>((set) => ({
   setFeatureRequestFormOpen: (isOpen) => set({ isFeatureRequestFormOpen: isOpen }),
   setError: (err) => set({ error: err == null ? null : (typeof err === 'string' ? { message: err } : err) }),
   clearTask: () => set({ activeTaskId: null, activePhase: null, taskStatus: null, sseLogs: [], sseActive: false }),
+
+  // New Action implementations
+  submitRepo: async (url) => {
+    const pId = get().projectId || 'default-project';
+    set({ isLoading: true, error: null, repoUrl: url });
+    try {
+      await sdlcApi.startFromRepo(pId, url);
+      set({ pipelineStatus: 'cloning', currentStep: 1 });
+    } catch (err: any) {
+      set({ error: err.message || 'Failed to submit repository' });
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  pollStatus: async () => {
+    const pId = get().projectId || 'default-project';
+    try {
+      const res = await sdlcApi.getPipelineStatus(pId);
+      set({
+        pipelineStatus: res.status as PipelineStatus,
+        currentStep: res.currentStep,
+        approvals: res.approvals,
+        qaResult: res.qaResult || null,
+        repoInfo: res.repoInfo || null
+      });
+    } catch (err: any) {
+      set({ error: err.message || 'Failed to poll status' });
+    }
+  },
+
+  approveItem: async (id, action, comment) => {
+    const pId = get().projectId || 'default-project';
+    set({ isLoading: true });
+    try {
+      await sdlcApi.approveItem(pId, id, action, comment);
+      await get().pollStatus();
+    } catch (err: any) {
+      set({ error: err.message || 'Failed to submit approval decision' });
+    } finally {
+      set({ isLoading: false });
+    }
+  }
 }));

@@ -1,36 +1,82 @@
 # AI Agents Configuration
 
-This document outlines the strict guidelines and configurations for the 4 AI workers in the v4 AIDLC pipeline.
+> **Cập nhật:** Kiến trúc mới sử dụng **Multica + Claude Code CLI** thay cho LangChain/OpenAI SDK.
+> Xem chi tiết: [MULTICA_INTEGRATION_PLAN.md](../project/MULTICA_INTEGRATION_PLAN.md)
+
+---
+
+## Cơ chế hoạt động
+
+Mỗi agent **không** gọi LLM API trực tiếp. Thay vào đó:
+
+```
+Backend tạo Multica issue
+    → Multica daemon claim task
+    → Spawn Claude Code CLI với prompt template
+    → Claude CLI xử lý + output JSON
+    → Backend parse output + tiếp tục pipeline
+```
+
+Claude Code CLI sử dụng **session login** trên máy — không cần API key trong code.
+
+---
 
 ## 1. Product Owner (PO) Agent
-- **Role**: Parses the feature request and converts it into a formal Product Requirements Document (PRD), User Stories, and Acceptance Criteria.
-- **Model**: Claude Sonnet through the LangChain router.
-- **MCP Allow-list**: Confluence search and page write.
-- **Output**: PRD Markdown, User Stories JSON, AC List.
+
+- **Vai trò:** Phân tích repo → tạo PRD, User Stories, Acceptance Criteria
+- **Input:** Repo analysis (tech stack, file count, components)
+- **Execution:** Claude Code CLI qua Multica daemon
+- **Output:** JSON gồm `prd`, `user_stories`, `acceptance_criteria`, `confidence_score`
+- **Prompt file:** `agents/src/agents/po_agent.py` — hàm `build_po_prompt()`
+- **Trigger approval:** `confidence_score < 80`
+
+---
 
 ## 2. UX Designer (UX) Agent
-- **Role**: Reads the PRD and Acceptance Criteria to generate a UX Spec, User Flow, and Mock Wireframes.
-- **Model**: GPT through the LangChain router.
-- **MCP Allow-list**: Penpot wireframe publish.
-- **Output**: UX Specification and Flow diagrams.
+
+- **Vai trò:** Đọc PRD → tạo UX Spec, User Flow, Wireframe description
+- **Input:** PO output (PRD + user stories)
+- **Execution:** Claude Code CLI qua Multica daemon
+- **Output:** JSON gồm `ux_spec`, `user_flows`, `wireframes`, `confidence_score`
+- **Prompt file:** `agents/src/agents/ux_agent.py` — hàm `build_ux_prompt()`
+- **Trigger approval:** `confidence_score < 80`
+
+---
 
 ## 3. Developer (DEV) Agent
-- **Role**: Reads PRD and UX Specs to write code diffs and implementation plans inside an E2B sandbox.
-- **Model**: Claude Agent SDK.
-- **MCP Allow-list**: Repository read/write and test execution.
-- **Guardrails**:
-  - `temperature`: 0.0 (Deterministic output).
-  - `max_tokens`: 8192 (Prevent runaway loops).
-  - `thinking`: `true` (Enabled for advanced reasoning).
+
+- **Vai trò:** Đọc PRD + UX Spec → tạo implementation plan + code diff
+- **Input:** PO output + UX output + repo structure
+- **Execution:** Claude Code CLI qua Multica daemon
+- **Output:** JSON gồm `implementation_plan`, `mock_code_diff` (unified git diff), `risk_level`, `confidence_score`
+- **Prompt file:** `agents/src/agents/dev_agent.py` — hàm `build_dev_prompt()`
+- **Guardrails:**
+  - Output PHẢI là unified git diff format (`diff --git ...`)
+  - Sau DEV → Sandbox Gate (G3): apply patch + chạy tests trong Docker container
+  - Nếu sandbox fail & retries < 2 → DEV Agent chạy lại với error context
+- **Trigger approval:** `confidence_score < 80` hoặc `risk_level = HIGH`
+
+---
 
 ## 4. Quality Assurance (QA) Agent
-- **Role**: Reviews the DEV output and PRD to generate Test Cases, QA Reports, and an Acceptance Criteria Coverage Matrix.
-- **Model**: DeepSeek through the LangChain router.
-- **MCP Allow-list**: Jira and TestRail writes.
-- **Output**: Coverage matrices and Release Recommendation (PASS/HOLD/REWORK).
+
+- **Vai trò:** Review DEV output + sandbox results → tạo QA Report
+- **Input:** PRD + DEV output + sandbox test results
+- **Execution:** Claude Code CLI qua Multica daemon
+- **Output:** JSON gồm `qa_report_md` (markdown), `status`, `coverage_estimate`, `blockers`, `recommendation`
+- **Prompt file:** `agents/src/agents/qa_agent.py` — hàm `build_qa_prompt()`
+- **Final output:** `QA.md` được commit vào target repo qua `GitService.commitQAReport()`
+
+---
 
 ## Pipeline Contract
-- The visible flow is `PO -> UX -> DEV -> QA`.
-- Every approved stage emits an A2A handoff envelope with an `approval_id`.
-- A Human-in-the-Loop gate follows every worker. QA approval is blocked unless the automated quality gate returns `PASS`.
-- The old Intent Agent endpoint remains only as a compatibility adapter for legacy data.
+
+```
+Repo URL → Clone → Analyze → PO → HITL → UX → HITL → DEV → Sandbox Gate → HITL → QA → HITL → QA.md commit
+```
+
+- Mỗi agent chạy **tuần tự** — agent sau cần output từ agent trước
+- **HITL gate:** Nếu `confidence_score < 80` → FE hiện ApprovalQueue card → User approve/reject
+- **Sandbox Gate (G3):** Sau DEV, trước QA — chạy tests trong Docker container isolated
+- Approval được lưu vào database với `approval_id`
+- QA.md cuối cùng được commit vào target repo (branch `agent/qa-<session-id>`)

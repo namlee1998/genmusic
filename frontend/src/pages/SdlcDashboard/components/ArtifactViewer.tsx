@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Artifact } from '@/store/useSdlcStore';
 import ReactMarkdown from 'react-markdown';
 
@@ -22,6 +23,7 @@ const PHASE_COLORS: Record<string, string> = {
 };
 
 export default function ArtifactViewer({ artifacts, selected, onSelect }: Props) {
+  const { t } = useTranslation();
   const [filter, setFilter] = useState<string>('all');
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
@@ -50,10 +52,10 @@ export default function ArtifactViewer({ artifacts, selected, onSelect }: Props)
           <textarea
             value={editContent}
             onChange={(e) => setEditContent(e.target.value)}
-            className="w-full h-full p-4 text-xs font-mono bg-[#050505] border border-outline-variant rounded outline-none focus:border-secondary resize-none"
+            className="w-full h-full p-4 text-xs font-mono bg-code-bg border border-outline-variant rounded outline-none focus:border-secondary resize-none"
           />
-          <div className="flex justify-end gap-2 p-2 bg-[#0d0e13] border-t border-outline-variant">
-            <button onClick={() => setIsEditing(false)} className="px-3 py-1.5 text-xs font-semibold text-on-surface-variant hover:bg-surface-variant rounded transition-colors">Hủy</button>
+          <div className="flex justify-end gap-2 p-2 bg-code-toolbar border-t border-outline-variant">
+            <button onClick={() => setIsEditing(false)} className="px-3 py-1.5 text-xs font-semibold text-on-surface-variant hover:bg-surface-variant rounded transition-colors">{t('common.cancel')}</button>
             <button onClick={() => {
               // Optimistic save (in real app, call API here)
               if (art.contentText) art.contentText = editContent;
@@ -61,7 +63,7 @@ export default function ArtifactViewer({ artifacts, selected, onSelect }: Props)
                 try { art.contentJson = JSON.parse(editContent); } catch { /* Keep the original JSON when editing is invalid. */ }
               }
               setIsEditing(false);
-            }} className="px-3 py-1.5 text-xs font-semibold text-on-primary bg-primary hover:opacity-90 rounded transition-all shadow-[0_0_10px_rgba(99,102,241,0.2)]">Lưu & Approve Gate</button>
+            }} className="px-3 py-1.5 text-xs font-semibold text-on-primary bg-primary hover:opacity-90 rounded transition-all shadow-[0_0_10px_rgba(99,102,241,0.2)]">{t('artifact.saveApprove')}</button>
           </div>
         </div>
       );
@@ -87,14 +89,14 @@ export default function ArtifactViewer({ artifacts, selected, onSelect }: Props)
         <div className="artifact-filter">
           {phases.map((p) => (
             <button key={p} className={`artifact-filter-btn ${filter === p ? 'active' : ''}`}
-              onClick={() => setFilter(p)}>
-              {p === 'all' ? 'All' : p.replace('-agent', '').toUpperCase()}
+               onClick={() => setFilter(p)}>
+              {p === 'all' ? t('artifact.all') : p.replace('-agent', '').toUpperCase()}
             </button>
           ))}
         </div>
 
         {filtered.length === 0 && (
-          <div className="artifact-empty-state">No artifacts yet. Run an agent to generate output.</div>
+          <div className="artifact-empty-state">{t('artifact.noArtifacts')}</div>
         )}
 
         {filtered.map((art) => (
@@ -134,7 +136,7 @@ export default function ArtifactViewer({ artifacts, selected, onSelect }: Props)
                   className="px-3 py-1 rounded text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20 transition-colors flex items-center gap-1"
                 >
                   <span className="material-symbols-outlined text-[14px]">edit</span>
-                  Edit / Groom
+                  {t('artifact.editGroom')}
                 </button>
               )}
             </div>
@@ -145,7 +147,7 @@ export default function ArtifactViewer({ artifacts, selected, onSelect }: Props)
         ) : (
           <div className="artifact-content__placeholder">
             <div className="artifact-placeholder-icon">📄</div>
-            <p>Select an artifact to view its content</p>
+            <p>{t('artifact.placeholder')}</p>
           </div>
         )}
       </div>
