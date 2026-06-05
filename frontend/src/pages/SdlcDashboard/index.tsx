@@ -12,6 +12,9 @@ import FeatureRequestForm from './components/FeatureRequestForm';
 import EmptyProjectState from './components/EmptyProjectState';
 import ReleaseGatePanel from './components/ReleaseGatePanel';
 import McpActivityPanel from './components/McpActivityPanel';
+import DeliveryErrorBanner from './components/DeliveryErrorBanner';
+import WorkflowStatusBanner from './components/WorkflowStatusBanner';
+import ScenarioSwitcher from './components/ScenarioSwitcher';
 
 type Phase = 'po' | 'ux' | 'dev' | 'qa';
 
@@ -63,8 +66,8 @@ export default function SdlcDashboard() {
       setWorkflowStatus(await sdlcApi.getWorkflowStatus(projectId));
       const trail = await sdlcApi.getAuditTrail(projectId);
       setAuditEvents(trail.events);
-    } catch {
-      setError('Could not load the delivery workflow.');
+    } catch (requestError) {
+      setError(sdlcApi.parseApiError(requestError, 'Could not load the delivery workflow.'));
     } finally {
       setWorkflowLoading(false);
     }
@@ -96,7 +99,10 @@ export default function SdlcDashboard() {
       },
       onError: (data) => {
         setSseActive(false);
-        setError((data.message as string) || 'Agent execution failed.');
+        const raw = (data.message as string) || 'Agent execution failed.';
+        // Backend persists task errors as "[CODE] message" (T4); split them out.
+        const match = raw.match(/^\[([A-Z_]+)\]\s*(.*)$/);
+        setError(match ? { message: match[2], code: match[1], phase } : { message: raw });
       },
     });
     setSseAbort(abort);
@@ -113,7 +119,7 @@ export default function SdlcDashboard() {
       await refreshStatus();
     } catch (requestError) {
       setSubmittedRequest(null);
-      setError(sdlcApi.getApiErrorMessage(requestError, 'Could not send the feature request to PO Agent.'));
+      setError(sdlcApi.parseApiError(requestError, 'Could not send the feature request to PO Agent.'));
     }
   };
 
@@ -144,7 +150,7 @@ export default function SdlcDashboard() {
       setDismissedGateTaskId(null);
       setGateTaskId(taskId);
     } catch (requestError) {
-      setError(sdlcApi.getApiErrorMessage(requestError, 'Could not open the human review output.'));
+      setError(sdlcApi.parseApiError(requestError, 'Could not open the human review output.'));
     } finally {
       autoOpeningGateTaskId.current = null;
     }
@@ -227,7 +233,11 @@ export default function SdlcDashboard() {
         </div>
       </header>
 
-      {error && <div className="delivery-error">{error}</div>}
+      <ScenarioSwitcher onChanged={refreshStatus} />
+
+      <DeliveryErrorBanner error={error} onDismiss={() => setError(null)} />
+
+      {workflowStatus && <WorkflowStatusBanner workflowStatus={workflowStatus} />}
 
       <StageInspector
         featureRequest={submittedRequest || workflowStatus?.featureRequest}

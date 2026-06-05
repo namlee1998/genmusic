@@ -112,7 +112,9 @@ class TaskModel {
 
     const data = await prisma.task.findFirst({
       where,
-      orderBy: { createdAt: 'desc' }
+      // T5: deterministic tie-break (id) so two same-type tasks created in the
+      // same millisecond (fast mock reruns) always resolve to the same "latest".
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
     });
     return this._map(data);
   }

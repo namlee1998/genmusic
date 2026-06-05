@@ -7,7 +7,9 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = "file:./dev.db"
+  // I1: env-driven so tests/CI/smoke can target an isolated sqlite file and
+  // never touch dev.db. Local dev sets DATABASE_URL="file:./dev.db" in .env.
+  url      = env("DATABASE_URL")
 }
 
 // ============================================
@@ -126,6 +128,10 @@ model AgentArtifact {
   artifactType     String
   artifactKey      String?
   title            String?
+  // Validation status (T1): VALID | INVALID | PENDING. Default VALID keeps
+  // pre-existing rows non-breaking; new rows are set explicitly after the
+  // role validator (_validateGateOutput) runs.
+  status           String   @default("VALID")
   contentJson      String?  // JSON string
   contentText      String?  // Text
   ordinal          Int      @default(0)

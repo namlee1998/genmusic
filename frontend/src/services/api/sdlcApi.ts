@@ -9,6 +9,29 @@ export const getApiErrorMessage = (error: unknown, fallback: string) => {
   return candidate.response?.data?.message || candidate.message || fallback;
 };
 
+export interface SdlcError {
+  message: string;
+  code?: string | null;
+  phase?: string | null;
+  requestId?: string | null;
+}
+
+/** Parse the backend `{status, code, message, phase, requestId}` error envelope. */
+export const parseApiError = (error: unknown, fallback: string): SdlcError => {
+  if (typeof error !== 'object' || error === null) return { message: fallback };
+  const candidate = error as {
+    response?: { data?: { message?: string; code?: string; phase?: string; requestId?: string }; headers?: Record<string, string> };
+    message?: string;
+  };
+  const data = candidate.response?.data;
+  return {
+    message: data?.message || candidate.message || fallback,
+    code: data?.code ?? null,
+    phase: data?.phase ?? null,
+    requestId: data?.requestId ?? candidate.response?.headers?.['x-request-id'] ?? null,
+  };
+};
+
 export interface FeatureRequest {
   title: string;
   description?: string;
@@ -99,6 +122,20 @@ export const getWorkflowMetrics = (projectId: string) =>
 
 export const getProjectArtifacts = (projectId: string) =>
   api.get(`${BASE}/projects/${projectId}/artifacts`).then((r) => r.data.data);
+
+// ── Dev-only demo scenario selector (MOCK_SCENARIO) ───────────────────────
+
+export interface MockScenarioState {
+  scenario: string;
+  mockEnabled: boolean;
+  available: string[];
+}
+
+export const getMockScenario = (): Promise<MockScenarioState> =>
+  api.get(`${BASE}/dev/mock-scenario`).then((r) => r.data.data);
+
+export const setMockScenario = (scenario: string) =>
+  api.post(`${BASE}/dev/mock-scenario`, { scenario }).then((r) => r.data.data);
 
 // ── Backlog ───────────────────────────────────────────────────────────────
 

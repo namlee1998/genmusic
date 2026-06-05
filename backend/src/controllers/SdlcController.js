@@ -1,5 +1,9 @@
 const SdlcWorkflowService = require('../services/SdlcWorkflowService');
 
+// Demo scenarios exposed by the dev-only scenario selector endpoint.
+const MOCK_SCENARIOS = ['happy_path', 'low_confidence_hold', 'missing_evidence', 'qa_blocker', 'release_reject', 'escalation'];
+const DEFAULT_MOCK_SCENARIO = 'happy_path';
+
 class SdlcController {
   // ─── IntentGate ──────────────────────────────────────────────────────────
 
@@ -317,6 +321,16 @@ class SdlcController {
     } catch (err) { next(err); }
   }
 
+  // T7: thin alias for the audit trail under a UI-friendly name. No new logic —
+  // delegates straight to getAuditTrail (:id is the project id).
+  async getTimeline(req, res, next) {
+    try {
+      const { id } = req.params;
+      const trail = await SdlcWorkflowService.getAuditTrail(id, req.user);
+      return res.json({ status: 'success', data: trail });
+    } catch (err) { next(err); }
+  }
+
   async getWorkflowMetrics(req, res, next) {
     try {
       const { project_id } = req.params;
@@ -331,6 +345,33 @@ class SdlcController {
       const result = await SdlcWorkflowService.getProjectArtifacts(project_id, req.user);
       return res.json({ status: 'success', data: result });
     } catch (err) { next(err); }
+  }
+
+  // ─── Dev-only: demo scenario selector ────────────────────────────────────
+  // Lets the UI flip MOCK_SCENARIO at runtime (the mock builder reads it per
+  // run). Disabled in production. Never persisted — process env only.
+
+  getMockScenario(req, res) {
+    return res.json({
+      status: 'success',
+      data: {
+        scenario: MOCK_SCENARIOS.includes(process.env.MOCK_SCENARIO) ? process.env.MOCK_SCENARIO : DEFAULT_MOCK_SCENARIO,
+        mockEnabled: process.env.USE_MOCK_AGENTS === 'true',
+        available: MOCK_SCENARIOS,
+      },
+    });
+  }
+
+  setMockScenario(req, res) {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(403).json({ status: 'error', code: 'FORBIDDEN', message: 'Scenario switching is disabled in production' });
+    }
+    const { scenario } = req.body || {};
+    if (!MOCK_SCENARIOS.includes(scenario)) {
+      return res.status(400).json({ status: 'error', code: 'BAD_REQUEST', message: `Unknown scenario: ${scenario}` });
+    }
+    process.env.MOCK_SCENARIO = scenario;
+    return res.json({ status: 'success', data: { scenario: process.env.MOCK_SCENARIO } });
   }
 
   // ─── Kanban Backlog ──────────────────────────────────────────────────────

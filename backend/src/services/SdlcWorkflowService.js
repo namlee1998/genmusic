@@ -8,7 +8,9 @@ const QuotaService = require('./QuotaService');
 const QualityGateService = require('./QualityGateService');
 const fs = require('fs/promises');
 const path = require('path');
-const { ApiError } = require('../middleware/errorHandler');
+const { ApiError, ERROR_CODES } = require('../middleware/errorHandler');
+const { assertOutputConforms } = require('./agentContract');
+const logger = require('../config/logger');
 
 const WORKSPACE_DIR = path.join(__dirname, '../../../workspace/projects');
 
@@ -69,7 +71,98 @@ const DEFAULT_GATE_MODE = {
   'qa-agent':  GATE_MODE.STRICT_MANUAL,
 };
 
-const AUTO_APPROVE_CONFIDENCE = 0.8;
+// ---------------------------------------------------------------------------
+// Gate configuration (T2) — single, documented place for the HITL gate knobs.
+// IMPORTANT: do NOT lower AUTO_APPROVE_CONFIDENCE. Existing behaviour/tests
+// depend on the 0.8 threshold; the demo bad-cases are tuned against it.
+// ---------------------------------------------------------------------------
+const GATE_CONFIG = {
+  // Outputs at or above this confidence may auto-approve; below → HOLD (human).
+  AUTO_APPROVE_CONFIDENCE: 0.8,
+  // Validation severity that blocks a handoff and marks the artifact INVALID.
+  BLOCKING_SEVERITY: 'BLOCKER',
+  // Evidence severities that lock the Final Release gate (QA blocker etc.).
+  RELEASE_BLOCKING_SEVERITIES: ['BLOCKER', 'CRITICAL', 'HIGH'],
+};
+
+const AUTO_APPROVE_CONFIDENCE = GATE_CONFIG.AUTO_APPROVE_CONFIDENCE;
+
+// ---------------------------------------------------------------------------
+// Agent output contracts (I5) — the single, explicit, *versioned* source of
+// truth for "what each role must produce". `_validateGateOutput` iterates these
+// rules instead of hand-inlining them, so the handoff contract is visible in
+// one place and a drift test (tests/integration/output-contract.test.js) fails
+// if the shape changes without bumping OUTPUT_CONTRACT_VERSION.
+//
+// Each rule: { rule, severity, check(out, task) -> bool, detail(out)|string,
+//              when?(out) -> bool }  (no Ajv — predicates stay hand-written).
+// ---------------------------------------------------------------------------
+const OUTPUT_CONTRACT_VERSION = 'gate-output.v1';
+
+const _acList = (o) => (Array.isArray(o.acceptance_criteria) ? o.acceptance_criteria : []);
+const _matrix = (o) => (Array.isArray(o.ac_coverage_matrix) ? o.ac_coverage_matrix : []);
+
+const PO_RULES = [
+  { rule: 'prd_present', severity: 'BLOCKER', detail: 'PRD is empty',
+    check: (o) => typeof o.prd === 'string' && o.prd.trim().length > 0 },
+  { rule: 'ac_present', severity: 'BLOCKER', detail: 'No acceptance criteria',
+    check: (o) => _acList(o).length > 0 },
+  { rule: 'ac_measurable', severity: 'WARNING',
+    detail: (o) => `${_acList(o).filter((a) => String(a).trim().length < 12).length} acceptance criteria look too vague to test`,
+    check: (o) => _acList(o).every((a) => String(a).trim().length >= 12) },
+];
+
+const OUTPUT_CONTRACTS = {
+  version: OUTPUT_CONTRACT_VERSION,
+  'intent-agent': PO_RULES,
+  'po-agent': PO_RULES,
+  'ux-agent': [
+    { rule: 'ux_spec_present', severity: 'BLOCKER', detail: 'UX spec is empty',
+      check: (o) => typeof o.ux_spec === 'string' && o.ux_spec.trim().length > 0 },
+    { rule: 'screens_present', severity: 'BLOCKER', detail: 'No screens or wireframes',
+      check: (o) => !!((o.screens && o.screens.length) || (o.wireframe_spec || '').trim()) },
+  ],
+  'dev-agent': [
+    { rule: 'patch_present', severity: 'BLOCKER', detail: 'No code patch produced',
+      check: (o) => (o.patch_diff || o.mock_code_diff || '').trim().length > 0 },
+    { rule: 'patch_format', severity: 'WARNING', detail: 'patch_format is not defined',
+      check: (o) => !!o.patch_format },
+    { rule: 'build_ok', severity: 'BLOCKER', detail: 'Sandbox build did not pass',
+      check: (o) => (o.sandbox_result || {}).build_ok !== false },
+    { rule: 'sandbox_tests', severity: 'BLOCKER', detail: 'Sandbox test execution evidence is missing',
+      check: (o) => (o.sandbox_result || {}).tests_ran === true },
+    { rule: 'self_test_report', severity: 'BLOCKER', detail: 'DEV self-test report is missing',
+      check: (o) => !!o.self_test_report },
+    { rule: 'linked_ac', severity: 'WARNING', detail: 'Patch is not linked to any AC',
+      check: (o) => Array.isArray(o.linked_ac_ids) && o.linked_ac_ids.length > 0 },
+    { rule: 'security_notes', severity: 'BLOCKER', detail: 'High-risk DEV output is missing security notes',
+      when: (o) => !!o.risk_classification?.required_gates?.includes('security'),
+      check: (o) => !!o.security_notes },
+    { rule: 'security_gate', severity: 'BLOCKER', detail: 'Security gate must PASS before DEV handoff',
+      when: (o) => !!o.risk_classification?.required_gates?.includes('security'),
+      check: (o) => o.security_gate?.recommendation === 'PASS' },
+  ],
+  'qa-agent': [
+    { rule: 'coverage_present', severity: 'BLOCKER', detail: 'No AC coverage matrix',
+      check: (o) => _matrix(o).length > 0 },
+    { rule: 'coverage_complete', severity: 'BLOCKER',
+      detail: (o) => `${_matrix(o).filter((r) => r.covered !== true).length} acceptance criteria are not covered`,
+      check: (o) => _matrix(o).every((r) => r.covered === true) },
+    { rule: 'tests_executed', severity: 'BLOCKER', detail: 'Tests were not actually executed',
+      check: (o) => (o.test_run_report || {}).executed === true },
+    { rule: 'tests_passed', severity: 'BLOCKER',
+      detail: (o) => `${(o.test_run_report || {}).failed || 0} test(s) failed`,
+      check: (o) => ((o.test_run_report || {}).failed || 0) === 0 },
+    { rule: 'no_blockers', severity: 'BLOCKER',
+      detail: (o) => `${o.blocker_count || 0} blocker(s) present`,
+      check: (o) => (o.blocker_count || 0) === 0 },
+    { rule: 'release_reason', severity: 'WARNING', detail: 'Release decision has no justification',
+      check: (o) => !!(o.release_reason && o.release_reason.trim()) },
+    { rule: 'quality_gate_pass', severity: 'BLOCKER',
+      detail: (o, task) => `Quality gate is ${(task?.result?.gateRecommendation) || o.gate_evaluation?.recommendation || 'unknown'}, expected PASS`,
+      check: (o, task) => ((task?.result?.gateRecommendation) || o.gate_evaluation?.recommendation) === 'PASS' },
+  ],
+};
 
 const MAX_RETRY_PER_STEP = 3;
 const RETRY_REASONS = ['schema_invalid', 'ac_not_measurable', 'coverage_gap', 'build_fail', 'quality_low', 'other'];
@@ -86,7 +179,98 @@ const AGENT_POLICY = {
 const FINAL_GATE = 'FINAL_GATE';
 const RELEASE_DECISIONS = ['APPROVE', 'REJECT'];
 const MOCK_REVIEW_STAGES = ['po-agent', 'ux-agent', 'dev-agent'];
+// T3: deterministic demo scenarios, selected via env `MOCK_SCENARIO`.
+const MOCK_SCENARIOS = ['happy_path', 'low_confidence_hold', 'missing_evidence', 'qa_blocker', 'release_reject', 'escalation'];
+const DEFAULT_MOCK_SCENARIO = 'happy_path';
 const VAGUE_REVIEW_COMMENTS = new Set(['rework', 'fix', 'bad', 'wrong', 'redo', 'do again', 'lam lai', 'sua lai']);
+
+const MOCK_SCENARIO_PROFILES = {
+  happy_path: {
+    title: 'Happy path release',
+    outcome: 'All worker gates pass and the final release can be approved.',
+    signals: ['high confidence', 'complete evidence', 'QA pass'],
+  },
+  low_confidence_hold: {
+    title: 'Low confidence hold',
+    outcome: 'The configured review stage finishes with low confidence and waits for HITL review.',
+    signals: ['confidence 0.58', 'manual review required', 'no auto-commit'],
+  },
+  missing_evidence: {
+    title: 'Missing DEV evidence',
+    outcome: 'DEV omits sandbox execution evidence, artifacts become INVALID, and QA handoff is blocked.',
+    signals: ['sandbox tests not run', 'self test report missing', 'DEV INVALID'],
+  },
+  qa_blocker: {
+    title: 'QA blocker',
+    outcome: 'QA finds a blocking regression and the release gate stays locked.',
+    signals: ['blocker count 2', 'failed test present', 'release not eligible'],
+  },
+  release_reject: {
+    title: 'Final release reject',
+    outcome: 'All agents pass, then the final human release decision rejects the packet.',
+    signals: ['QA pass', 'release packet ready', 'final gate rejects'],
+  },
+  escalation: {
+    title: 'Max retry escalation',
+    outcome: 'The target review stage remains low confidence after rework and escalates after retry budget.',
+    signals: ['confidence stays 0.58', 'rework cannot recover', 'escalation_required'],
+  },
+};
+
+function resolveMockScenario() {
+  const rawScenario = (process.env.MOCK_SCENARIO || '').toLowerCase();
+  return MOCK_SCENARIOS.includes(rawScenario) ? rawScenario : DEFAULT_MOCK_SCENARIO;
+}
+
+function buildScenarioBrief(scenario, task) {
+  const profile = MOCK_SCENARIO_PROFILES[scenario] || MOCK_SCENARIO_PROFILES[DEFAULT_MOCK_SCENARIO];
+  return {
+    scenario,
+    title: profile.title,
+    stage: task.type,
+    expected_outcome: profile.outcome,
+    demo_signals: profile.signals,
+  };
+}
+
+function applyScenarioNarrative(task, completedData, scenario, feedbackPrompt) {
+  const profile = MOCK_SCENARIO_PROFILES[scenario] || MOCK_SCENARIO_PROFILES[DEFAULT_MOCK_SCENARIO];
+  const stage = task.type.replace('-agent', '').toUpperCase();
+  completedData.summary = `${profile.title}: ${stage} mock output prepared for the demo branch.`;
+  completedData.scenario_brief = buildScenarioBrief(scenario, task);
+  completedData.observability = {
+    ...(completedData.observability || {}),
+    trace_id: `mock-${scenario}-${task.type}`,
+    scenario,
+    feedback_received: Boolean(feedbackPrompt),
+  };
+
+  if (task.type === 'po-agent') {
+    completedData.prd = `# ${profile.title}\n\nScenario intent: ${profile.outcome}\n\n${completedData.prd || ''}`;
+    completedData.scope = `${completedData.scope || ''}\n\nDemo branch: ${profile.title}. Signals: ${profile.signals.join(', ')}.`;
+  }
+
+  if (task.type === 'ux-agent') {
+    completedData.ux_spec = `# ${profile.title}\n\nUX focus for this branch: ${profile.outcome}\n\n${completedData.ux_spec || ''}`;
+    if (Array.isArray(completedData.screens)) {
+      completedData.screens = completedData.screens.map((screen) => ({
+        ...screen,
+        demo_scenario: scenario,
+        demo_signal: profile.signals[0],
+      }));
+    }
+  }
+
+  if (task.type === 'dev-agent') {
+    completedData.implementation_plan = `# ${profile.title}\n\nImplementation evidence expected: ${profile.signals.join(', ')}.\n\n${completedData.implementation_plan || ''}`;
+    completedData.sandbox_report = `${completedData.sandbox_report || ''}\n\nDemo branch: ${profile.title}. Expected outcome: ${profile.outcome}`;
+  }
+
+  if (task.type === 'qa-agent') {
+    completedData.qa_report = `# ${profile.title}\n\nQA branch result: ${profile.outcome}\n\n${completedData.qa_report || ''}`;
+    completedData.release_reason = `${profile.title}: ${profile.outcome}`;
+  }
+}
 
 function classifyFeatureRequest(featureRequest = {}) {
   const text = `${featureRequest.title || ''} ${featureRequest.description || ''}`.toLowerCase();
@@ -521,51 +705,15 @@ class SdlcWorkflowService {
    * and measurable before a human may approve. Returns { ok, violations }.
    */
   _validateGateOutput(task, output) {
-    const violations = [];
     const out = output || {};
-    const need = (cond, rule, detail, severity = 'BLOCKER') => {
-      if (!cond) violations.push({ rule, detail, severity });
-    };
+    const rules = OUTPUT_CONTRACTS[task.type] || [];
+    const violations = [];
 
-    if (task.type === 'po-agent' || task.type === 'intent-agent') {
-      need(typeof out.prd === 'string' && out.prd.trim().length > 0, 'prd_present', 'PRD is empty');
-      const acs = Array.isArray(out.acceptance_criteria) ? out.acceptance_criteria : [];
-      need(acs.length > 0, 'ac_present', 'No acceptance criteria');
-      const vague = acs.filter((a) => String(a).trim().length < 12);
-      need(vague.length === 0, 'ac_measurable', `${vague.length} acceptance criteria look too vague to test`, 'WARNING');
-    }
-
-    if (task.type === 'ux-agent') {
-      need(typeof out.ux_spec === 'string' && out.ux_spec.trim().length > 0, 'ux_spec_present', 'UX spec is empty');
-      need(!!((out.screens && out.screens.length) || (out.wireframe_spec || '').trim()), 'screens_present', 'No screens or wireframes');
-    }
-
-    if (task.type === 'dev-agent') {
-      need((out.patch_diff || out.mock_code_diff || '').trim().length > 0, 'patch_present', 'No code patch produced');
-      need(!!out.patch_format, 'patch_format', 'patch_format is not defined', 'WARNING');
-      const sb = out.sandbox_result || {};
-      need(sb.build_ok !== false, 'build_ok', 'Sandbox build did not pass');
-      need(sb.tests_ran === true, 'sandbox_tests', 'Sandbox test execution evidence is missing');
-      need(!!out.self_test_report, 'self_test_report', 'DEV self-test report is missing');
-      need(Array.isArray(out.linked_ac_ids) && out.linked_ac_ids.length > 0, 'linked_ac', 'Patch is not linked to any AC', 'WARNING');
-      if (out.risk_classification?.required_gates?.includes('security')) {
-        need(!!out.security_notes, 'security_notes', 'High-risk DEV output is missing security notes');
-        need(out.security_gate?.recommendation === 'PASS', 'security_gate', 'Security gate must PASS before DEV handoff');
-      }
-    }
-
-    if (task.type === 'qa-agent') {
-      const matrix = Array.isArray(out.ac_coverage_matrix) ? out.ac_coverage_matrix : [];
-      need(matrix.length > 0, 'coverage_present', 'No AC coverage matrix');
-      const uncovered = matrix.filter((r) => r.covered !== true);
-      need(uncovered.length === 0, 'coverage_complete', `${uncovered.length} acceptance criteria are not covered`);
-      const trr = out.test_run_report || {};
-      need(trr.executed === true, 'tests_executed', 'Tests were not actually executed');
-      need((trr.failed || 0) === 0, 'tests_passed', `${trr.failed || 0} test(s) failed`);
-      need((out.blocker_count || 0) === 0, 'no_blockers', `${out.blocker_count || 0} blocker(s) present`);
-      need(!!(out.release_reason && out.release_reason.trim()), 'release_reason', 'Release decision has no justification', 'WARNING');
-      const rec = (task.result && task.result.gateRecommendation) || out.gate_evaluation?.recommendation;
-      need(rec === 'PASS', 'quality_gate_pass', `Quality gate is ${rec || 'unknown'}, expected PASS`);
+    for (const rule of rules) {
+      if (rule.when && !rule.when(out, task)) continue;
+      if (rule.check(out, task)) continue;
+      const detail = typeof rule.detail === 'function' ? rule.detail(out, task) : rule.detail;
+      violations.push({ rule: rule.rule, detail, severity: rule.severity });
     }
 
     const blockers = violations.filter((v) => v.severity === 'BLOCKER');
@@ -932,6 +1080,11 @@ class SdlcWorkflowService {
           outputVersion: task?.outputVersion ?? d.baseOutputVersion ?? null,
           versionTag: task ? vtag(task) : null,
           severity: mapped.type === 'escalation' ? 'HIGH' : null,
+          // T2: make the gate decision auditable — why it fired and which rule.
+          reason: d.comment || null,
+          ruleHit: d.retryReason
+            || (d.action === 'auto_approve' ? 'confidence_and_validation_passed' : null)
+            || (d.payload?.feedback?.blocking_issues?.[0]?.issue || null),
           // Structured HITL detail (plan section 3): replayable audit record.
           hitlAction: d.action || null,
           retryReason: d.retryReason || null,
@@ -962,7 +1115,30 @@ class SdlcWorkflowService {
       }),
     ].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
-    return { projectId, events };
+    // I3: synthesize a consistent PHASE_TRANSITION chain from the existing
+    // ordered events (no new table, no Workflow model). Each event already
+    // carries stateFrom/stateTo; we fill any missing `from` from the previous
+    // `to` so the chain is continuous. requestId stays null for now (I2 keeps
+    // request correlation in logs/error responses, not in the persisted audit).
+    let prevTo = 'PENDING';
+    const phaseTransitions = events
+      .filter((e) => e.stateTo)
+      .map((e) => {
+        const from = e.stateFrom || prevTo;
+        prevTo = e.stateTo;
+        return {
+          type: 'PHASE_TRANSITION',
+          from,
+          to: e.stateTo,
+          cause: e.action,
+          at: e.timestamp,
+          agent: e.agent || e.fromAgent || null,
+          taskId: e.taskId || null,
+          requestId: null,
+        };
+      });
+
+    return { projectId, events, phaseTransitions };
   }
 
   // =========================================================================
@@ -1090,7 +1266,7 @@ class SdlcWorkflowService {
       throw new ApiError(409, 'Release gate is unavailable until QA quality gate returns PASS');
     }
     const evidence = await this._buildReleaseEvidenceSummary(projectId);
-    if (decision === 'APPROVE' && evidence.open_blockers.some((blocker) => ['BLOCKER', 'CRITICAL', 'HIGH'].includes(blocker.severity))) {
+    if (decision === 'APPROVE' && evidence.open_blockers.some((blocker) => GATE_CONFIG.RELEASE_BLOCKING_SEVERITIES.includes(blocker.severity))) {
       throw new ApiError(409, 'Release approval is blocked until all critical and high-risk evidence issues are resolved');
     }
 
@@ -1258,14 +1434,36 @@ class SdlcWorkflowService {
     ]);
 
     const hitlDecisions = await HitlDecision.findByProjectId(projectId);
+    // T5: pick the most-recent non-final decision per task deterministically
+    // (createdAt, then id). This keeps a rerun from getting stuck on an older
+    // decision and makes parallel reruns derive the same phase every time.
+    const isNewer = (a, b) => {
+      const ta = new Date(a.createdAt).getTime();
+      const tb = new Date(b.createdAt).getTime();
+      if (ta !== tb) return ta > tb;
+      return String(a.id) > String(b.id);
+    };
     const decisionsByTaskId = {};
     for (const d of hitlDecisions) {
-      if (d.gate !== FINAL_GATE) decisionsByTaskId[d.taskId] = d;
+      if (d.gate === FINAL_GATE) continue;
+      const current = decisionsByTaskId[d.taskId];
+      if (!current || isNewer(d, current)) decisionsByTaskId[d.taskId] = d;
     }
-    const releaseDecision = [...hitlDecisions].reverse().find((decision) => decision.gate === FINAL_GATE) || null;
+    const releaseDecision = [...hitlDecisions]
+      .filter((decision) => decision.gate === FINAL_GATE)
+      .sort((a, b) => (isNewer(a, b) ? 1 : -1))
+      .pop() || null;
     const membership = user
       ? await MembershipService.requireProjectRole(user.id, projectId, ['owner', 'admin', 'editor', 'viewer'])
       : null;
+
+    // T1/T6: surface which completed tasks have INVALID artifacts so the UI can
+    // badge the worker card and explain why the phase did not advance.
+    const phaseTasks = [intentTask, poTask, uxTask, devTask, qaTask].filter(Boolean);
+    const invalidByTaskId = {};
+    await Promise.all(phaseTasks.map(async (t) => {
+      invalidByTaskId[t.id] = t.status === 'completed' ? await AgentArtifact.hasInvalid(t.id) : false;
+    }));
 
     const mapPhase = (task) => {
       if (!task) return null;
@@ -1275,6 +1473,13 @@ class SdlcWorkflowService {
         versionStatus: task.versionStatus,
         gate: AGENT_GATES[task.type],
         hitlDecision: decisionsByTaskId[task.id] || null,
+        // T5: derived (no stored column) — true when the step finished but has
+        // not been approved yet, so the frontend can open the review modal.
+        awaitingReview: task.status === 'completed'
+          && task.versionStatus !== 'committed'
+          && decisionsByTaskId[task.id]?.decision !== 'APPROVE',
+        // T1: the output failed role validation (blocking) — no handoff possible.
+        invalid: !!invalidByTaskId[task.id],
         createdAt: task.createdAt,
         updatedAt: task.updatedAt,
       };
@@ -1312,7 +1517,7 @@ class SdlcWorkflowService {
           REJECT: 'rejected',
         }[releaseDecision?.decision] || 'pending',
         evidence: releaseEvidence,
-        approvalBlocked: releaseEvidence.open_blockers.some((blocker) => ['BLOCKER', 'CRITICAL', 'HIGH'].includes(blocker.severity)),
+        approvalBlocked: releaseEvidence.open_blockers.some((blocker) => GATE_CONFIG.RELEASE_BLOCKING_SEVERITIES.includes(blocker.severity)),
       },
       currentPhase: this._deriveCurrentPhase(poTask, uxTask, devTask, qaTask, decisionsByTaskId, releaseDecision),
     };
@@ -1349,6 +1554,10 @@ class SdlcWorkflowService {
     if (task.status !== 'completed') throw new ApiError(400, 'Source task must be completed');
     if (task.versionStatus !== 'committed') {
       throw new ApiError(400, 'Source task must be approved (committed) before running next agent');
+    }
+    // T6: never hand off from an output that the role validator marked INVALID.
+    if (await AgentArtifact.hasInvalid(task.id)) {
+      throw new ApiError(409, `Source ${expectedType} output is INVALID — fix the blocking issues before running the downstream agent`);
     }
     if (NEXT_AGENT[task.type]) {
       const handoffs = await AgentArtifact.findByTaskIdAndType(task.id, 'a2a_handoff');
@@ -1473,6 +1682,127 @@ class SdlcWorkflowService {
   }
 
   /**
+   * I4: the mock implementation of the agent contract `run({task, context}) ->
+   * output`. Pure builder — reads mock-data, applies the role/scenario shaping,
+   * and returns the agent output WITHOUT touching the DB. Both `_runAgent`
+   * (mock branch) and the agent-contract conformance suite call this, so the
+   * mock is held to the same output contract a real agent will be.
+   */
+  async _buildMockOutput(task, context) {
+    const mockDir = path.join(__dirname, '../../../mock-data', task.type);
+    const files = await fs.readdir(mockDir).catch(() => []);
+
+    const completedData = {
+      summary: "Mock execution completed via Hybrid Mock Mode.",
+      token_usage: { input: 1250, output: 450 },
+      observability: { trace_id: "mock-trace-123" }
+    };
+
+    for (const file of files) {
+      if (!file.endsWith('.md') && !file.endsWith('.json')) continue;
+      const key = file.replace(/\.(md|json)$/, '');
+      const ext = path.extname(file);
+      const content = await fs.readFile(path.join(mockDir, file), 'utf8');
+      if (ext === '.json') {
+        // T4: a malformed mock file must surface a clear MOCK_PARSE_ERROR,
+        // not crash the loop or produce a half-built output.
+        try {
+          completedData[key] = JSON.parse(content);
+        } catch (parseErr) {
+          throw new ApiError(
+            500,
+            `Malformed mock JSON in ${task.type}/${file}: ${parseErr.message}`,
+            ERROR_CODES.MOCK_PARSE_ERROR,
+            `${task.type.replace('-agent', '').toUpperCase()}_RUNNING`,
+          );
+        }
+      } else {
+        completedData[key] = content;
+      }
+    }
+    if (['intent-agent', 'po-agent'].includes(task.type) && context.featureRequest) {
+      completedData.feature_request = context.featureRequest;
+    }
+    const feedbackPrompt = context.feedbackPrompt?.trim();
+    const inheritedRisk = firstContextValue(context, 'risk_classification');
+    const riskClassification = task.type === 'po-agent'
+      ? classifyFeatureRequest(context.featureRequest)
+      : (inheritedRisk || { level: 'LOW', tags: [], required_gates: ['schema', 'validation', 'evidence', 'qa'], classifier: 'mock-rule-based.v1' });
+    if (task.type !== 'intent-agent') {
+      completedData.risk_classification = riskClassification;
+      completedData.workflow_policy = {
+        auto_approve_threshold: AUTO_APPROVE_CONFIDENCE,
+        required_gates: riskClassification.required_gates,
+        max_retry_per_step: MAX_RETRY_PER_STEP,
+      };
+    }
+    if (task.type === 'dev-agent') {
+      completedData.patch_diff = completedData.mock_code_diff;
+      completedData.self_test_report = {
+        executed: true,
+        passed: completedData.sandbox_result?.tests_passed || 0,
+        failed: completedData.sandbox_result?.tests_failed || 0,
+        evidence: 'Mock sandbox run: npm test and npm run lint',
+      };
+      const securityRequired = riskClassification.required_gates.includes('security');
+      const securityPassed = !securityRequired || !!feedbackPrompt;
+      completedData.security_notes = securityPassed ? {
+        oauth_state_csrf: 'PASS',
+        pkce: 'PASS',
+        client_secret_frontend: 'PASS - no client secret is exposed',
+        redirect_uri_allow_list: 'PASS',
+        session_cookie: 'PASS - HttpOnly, Secure, SameSite=Lax',
+        account_linking: 'PASS',
+        logout_and_error_paths: 'PASS',
+        audit_logging: 'PASS',
+      } : null;
+      completedData.security_gate = securityPassed ? {
+        recommendation: 'PASS',
+        checklist_version: 'oauth-security.mock.v1',
+        issues: [],
+      } : {
+        recommendation: 'HOLD',
+        checklist_version: 'oauth-security.mock.v1',
+        issues: [{
+          code: 'oauth_state_csrf_missing',
+          severity: 'HIGH',
+          detail: 'Google OAuth callback evidence does not show state validation against the login session.',
+          expected_fix: 'Add state generation and callback validation, rerun sandbox tests, and attach the updated security notes.',
+        }],
+      };
+    }
+    if (task.type === 'qa-agent') {
+      completedData.ac_coverage_matrix = (completedData.ac_coverage_matrix || []).map((row) => ({
+        requirement_id: row.requirement_id || row.ac_id,
+        requirement: row.requirement || row.ac,
+        ux_covered: true,
+        dev_implemented: true,
+        test_exists: (row.test_case_ids || []).length > 0,
+        test_result: row.covered ? 'PASS' : 'FAIL',
+        evidence_ref: `DEV:${task.sourceRunId || 'approved'}:${firstContextValue(context, 'patch_diff') ? 'patch_diff' : 'mock_code_diff'}`,
+        ...row,
+      }));
+      completedData.coverage_summary = {
+        covered: completedData.ac_coverage_matrix.filter((row) => row.covered).length,
+        total: completedData.ac_coverage_matrix.length,
+        percentage: completedData.ac_coverage_matrix.length
+          ? Math.round((completedData.ac_coverage_matrix.filter((row) => row.covered).length / completedData.ac_coverage_matrix.length) * 100)
+          : 0,
+      };
+      completedData.dev_evidence_ref = {
+        task_id: task.sourceRunId,
+        patch_diff_present: !!firstContextValue(context, 'patch_diff'),
+        sandbox_result_present: !!firstContextValue(context, 'sandbox_result'),
+        security_gate: firstContextValue(context, 'security_gate'),
+      };
+    }
+    // T3: scenario-driven mock shaping (confidence + bad-case overrides),
+    // selected via the existing env mechanism (MOCK_SCENARIO / MOCK_LOW_CONFIDENCE_STAGE).
+    this._applyMockScenario(task, completedData, feedbackPrompt);
+    return completedData;
+  }
+
+  /**
    * Core runner — calls AgentService and parses SSE stream, saves artifacts.
    * @private
    */
@@ -1483,127 +1813,23 @@ class SdlcWorkflowService {
     if (process.env.USE_MOCK_AGENTS === 'true') {
       try {
         console.log(`[SDLC] Running in MOCK mode for agent ${task.type}`);
-        const mockDir = path.join(__dirname, '../../../mock-data', task.type);
-        const files = await fs.readdir(mockDir).catch(() => []);
-        
-        const completedData = {
-          summary: "Mock execution completed via Hybrid Mock Mode.",
-          token_usage: { input: 1250, output: 450 },
-          observability: { trace_id: "mock-trace-123" }
-        };
-
-        for (const file of files) {
-          if (!file.endsWith('.md') && !file.endsWith('.json')) continue;
-          const key = file.replace(/\.(md|json)$/, '');
-          const ext = path.extname(file);
-          const content = await fs.readFile(path.join(mockDir, file), 'utf8');
-          completedData[key] = ext === '.json' ? JSON.parse(content) : content;
-        }
-        if (['intent-agent', 'po-agent'].includes(task.type) && context.featureRequest) {
-          completedData.feature_request = context.featureRequest;
-        }
-        const feedbackPrompt = context.feedbackPrompt?.trim();
-        const inheritedRisk = firstContextValue(context, 'risk_classification');
-        const riskClassification = task.type === 'po-agent'
-          ? classifyFeatureRequest(context.featureRequest)
-          : (inheritedRisk || { level: 'LOW', tags: [], required_gates: ['schema', 'validation', 'evidence', 'qa'], classifier: 'mock-rule-based.v1' });
-        if (task.type !== 'intent-agent') {
-          completedData.risk_classification = riskClassification;
-          completedData.workflow_policy = {
-            auto_approve_threshold: AUTO_APPROVE_CONFIDENCE,
-            required_gates: riskClassification.required_gates,
-            max_retry_per_step: MAX_RETRY_PER_STEP,
-          };
-        }
-        if (task.type === 'dev-agent') {
-          completedData.patch_diff = completedData.mock_code_diff;
-          completedData.self_test_report = {
-            executed: true,
-            passed: completedData.sandbox_result?.tests_passed || 0,
-            failed: completedData.sandbox_result?.tests_failed || 0,
-            evidence: 'Mock sandbox run: npm test and npm run lint',
-          };
-          const securityRequired = riskClassification.required_gates.includes('security');
-          const securityPassed = !securityRequired || !!feedbackPrompt;
-          completedData.security_notes = securityPassed ? {
-            oauth_state_csrf: 'PASS',
-            pkce: 'PASS',
-            client_secret_frontend: 'PASS - no client secret is exposed',
-            redirect_uri_allow_list: 'PASS',
-            session_cookie: 'PASS - HttpOnly, Secure, SameSite=Lax',
-            account_linking: 'PASS',
-            logout_and_error_paths: 'PASS',
-            audit_logging: 'PASS',
-          } : null;
-          completedData.security_gate = securityPassed ? {
-            recommendation: 'PASS',
-            checklist_version: 'oauth-security.mock.v1',
-            issues: [],
-          } : {
-            recommendation: 'HOLD',
-            checklist_version: 'oauth-security.mock.v1',
-            issues: [{
-              code: 'oauth_state_csrf_missing',
-              severity: 'HIGH',
-              detail: 'Google OAuth callback evidence does not show state validation against the login session.',
-              expected_fix: 'Add state generation and callback validation, rerun sandbox tests, and attach the updated security notes.',
-            }],
-          };
-        }
-        if (task.type === 'qa-agent') {
-          completedData.ac_coverage_matrix = (completedData.ac_coverage_matrix || []).map((row) => ({
-            requirement_id: row.requirement_id || row.ac_id,
-            requirement: row.requirement || row.ac,
-            ux_covered: true,
-            dev_implemented: true,
-            test_exists: (row.test_case_ids || []).length > 0,
-            test_result: row.covered ? 'PASS' : 'FAIL',
-            evidence_ref: `DEV:${task.sourceRunId || 'approved'}:${firstContextValue(context, 'patch_diff') ? 'patch_diff' : 'mock_code_diff'}`,
-            ...row,
-          }));
-          completedData.coverage_summary = {
-            covered: completedData.ac_coverage_matrix.filter((row) => row.covered).length,
-            total: completedData.ac_coverage_matrix.length,
-            percentage: completedData.ac_coverage_matrix.length
-              ? Math.round((completedData.ac_coverage_matrix.filter((row) => row.covered).length / completedData.ac_coverage_matrix.length) * 100)
-              : 0,
-          };
-          completedData.dev_evidence_ref = {
-            task_id: task.sourceRunId,
-            patch_diff_present: !!firstContextValue(context, 'patch_diff'),
-            sandbox_result_present: !!firstContextValue(context, 'sandbox_result'),
-            security_gate: firstContextValue(context, 'security_gate'),
-          };
-        }
-        const mockLowConfidenceStage = MOCK_REVIEW_STAGES.includes(process.env.MOCK_LOW_CONFIDENCE_STAGE)
-          ? process.env.MOCK_LOW_CONFIDENCE_STAGE
-          : 'dev-agent';
-        if (MOCK_REVIEW_STAGES.includes(task.type)) {
-          completedData.confidence_score = task.type === mockLowConfidenceStage && !feedbackPrompt ? 0.58 : 0.95;
-        }
-        if (MOCK_REVIEW_STAGES.includes(task.type) && feedbackPrompt) {
-          completedData.confidence_score = 0.92;
-          completedData.summary = `Mock ${task.type.replace('-agent', '').toUpperCase()} rework completed after applying reviewer feedback.`;
-          completedData.rework_response = {
-            worker: task.type,
-            feedback_received: feedbackPrompt,
-            changes_applied: [
-              `Revisited the ${task.type.replace('-agent', '').toUpperCase()} output using the reviewer direction.`,
-              'Regenerated the structured output and reran the applicable validation checks.',
-            ],
-            confidence_before: 0.58,
-            confidence_after: 0.92,
-          };
-        }
+        const completedData = await this._buildMockOutput(task, context);
 
         // Simulate processing delay
         await new Promise(r => setTimeout(r, 2000));
-        
+
         await this._saveAgentData(task, completedData, userId);
         return; // Bypass the real agent completely
       } catch (err) {
         console.error(`[SDLC._runAgent] Mock mode failed for task ${task.id}:`, err);
-        // Fallback to real agent if mock fails
+        // T4: a malformed mock file is a demo-config error — fail the task
+        // clearly (with the MOCK_PARSE_ERROR code) instead of silently falling
+        // back to the real agent, which needs API keys and confuses the demo.
+        if (err.code === ERROR_CODES.MOCK_PARSE_ERROR) {
+          await this._markTaskFailed(task, err);
+          return;
+        }
+        // Otherwise fall back to the real agent.
       }
     }
 
@@ -1650,6 +1876,18 @@ class SdlcWorkflowService {
             completedData.feature_request = context.featureRequest;
           }
 
+          // I4: warn (non-fatal) if a real agent output diverges from the
+          // contract the mock satisfies. Surfaces drift the moment a real agent
+          // is wired, without blocking the run.
+          const conformance = assertOutputConforms(task.type, completedData);
+          if (!conformance.ok) {
+            logger.warn('agent output missing contract keys', {
+              taskId: task.id,
+              phase: task.type,
+              missing: conformance.missing,
+            });
+          }
+
           await this._saveAgentData(task, completedData, userId);
         } catch (err) {
           console.error(`[SDLC._runAgent] Failed for task ${task.id}:`, err);
@@ -1666,14 +1904,160 @@ class SdlcWorkflowService {
   }
 
   async _markTaskFailed(task, error) {
-    await Task.update(task.id, { status: 'failed', error: error.message });
+    // T4: keep the structured error code visible in the persisted error so the
+    // SSE error event / UI can render a precise error state.
+    const errMsg = error.code ? `[${error.code}] ${error.message}` : error.message;
+    logger.error('task failed', { taskId: task.id, phase: task.type, code: error.code || null, error: error.message });
+    await Task.update(task.id, { status: 'failed', error: errMsg });
     await FeatureBacklog.updateStatusByTaskId(task.id, 'TODO');
+  }
+
+  /**
+   * T3: shape a mock agent output for a chosen demo scenario. Selected via the
+   * existing env mechanism (`MOCK_SCENARIO`, defaulting to `happy_path`).
+   * All overrides are deterministic so the
+   * preflight smoke test (T9) can assert the expected branch every run.
+   *
+   * Scenarios (each is a full PO→UX→DEV→QA run, the override fires on the
+   * relevant stage only):
+   *   - happy_path         : every stage high-confidence + valid → reaches Final Release.
+   *   - low_confidence_hold : target stage returns 0.58 → HOLD (human review).
+   *   - missing_evidence    : DEV drops sandbox test evidence → BLOCKER → INVALID, no handoff.
+   *   - qa_blocker          : QA reports a blocker + a failed test → QA gate fails, release LOCKED.
+   *   - release_reject      : outputs all pass; the smoke test rejects at the Final gate.
+   *   - escalation          : target stage stays at 0.58 even after feedback → repeated reject → escalation.
+   */
+  _applyMockScenario(task, completedData, feedbackPrompt) {
+    const lowStage = MOCK_REVIEW_STAGES.includes(process.env.MOCK_LOW_CONFIDENCE_STAGE)
+      ? process.env.MOCK_LOW_CONFIDENCE_STAGE
+      : 'dev-agent';
+    const scenario = resolveMockScenario();
+    applyScenarioNarrative(task, completedData, scenario, feedbackPrompt);
+
+    const markRework = () => {
+      completedData.summary = `Mock ${task.type.replace('-agent', '').toUpperCase()} rework completed after applying reviewer feedback.`;
+      completedData.rework_response = {
+        worker: task.type,
+        feedback_received: feedbackPrompt,
+        changes_applied: [
+          `Revisited the ${task.type.replace('-agent', '').toUpperCase()} output using the reviewer direction.`,
+          'Regenerated the structured output and reran the applicable validation checks.',
+        ],
+        confidence_before: 0.58,
+        confidence_after: 0.92,
+      };
+    };
+
+    // Base confidence for the three review stages.
+    if (MOCK_REVIEW_STAGES.includes(task.type)) {
+      completedData.confidence_score = feedbackPrompt ? 0.92 : 0.95;
+      if (feedbackPrompt) markRework();
+    }
+
+    // DEV security passes in scenario mode so each branch isolates its own
+    // variable (confidence / evidence / QA / release).
+    if (task.type === 'dev-agent') {
+      completedData.security_notes = completedData.security_notes || {
+        oauth_state_csrf: 'PASS', pkce: 'PASS', client_secret_frontend: 'PASS',
+        redirect_uri_allow_list: 'PASS', session_cookie: 'PASS', account_linking: 'PASS',
+        logout_and_error_paths: 'PASS', audit_logging: 'PASS',
+      };
+      completedData.security_gate = { recommendation: 'PASS', checklist_version: 'oauth-security.mock.v1', issues: [] };
+    }
+
+    switch (scenario) {
+      case 'happy_path':
+        // every stage already high-confidence + valid; nothing to override.
+        break;
+
+      case 'low_confidence_hold':
+        if (task.type === lowStage && !feedbackPrompt) completedData.confidence_score = 0.58;
+        break;
+
+      case 'missing_evidence':
+        // DEV self-test / sandbox evidence is missing → _validateGateOutput BLOCKER.
+        if (task.type === 'dev-agent' && !feedbackPrompt) {
+          completedData.sandbox_result = { ...(completedData.sandbox_result || {}), tests_ran: false };
+          completedData.self_test_report = null;
+        } else if (task.type === 'dev-agent') {
+          completedData.sandbox_result = {
+            ...(completedData.sandbox_result || {}),
+            build_ok: true,
+            tests_ran: true,
+            tests_passed: Math.max(Number(completedData.sandbox_result?.tests_passed || 0), 12),
+            tests_failed: 0,
+          };
+          completedData.self_test_report = completedData.self_test_report || {
+            executed: true,
+            passed: completedData.sandbox_result.tests_passed,
+            failed: 0,
+            evidence: 'Reviewer-requested rerun: sandbox and self-test evidence attached.',
+          };
+          completedData.sandbox_report = `${completedData.sandbox_report || ''}\n\nReviewer feedback applied: sandbox execution and self-test evidence are now attached.`;
+        }
+        break;
+
+      case 'qa_blocker':
+        // QA finds a blocking defect and a failed test → QA gate fails, release locked.
+        if (task.type === 'qa-agent' && !feedbackPrompt) {
+          completedData.blocker_count = 2;
+          completedData.pass_count = Math.max(Number(completedData.pass_count || 0) - 1, 0);
+          completedData.fail_count = 1;
+          completedData.test_run_report = {
+            ...(completedData.test_run_report || {}),
+            executed: true,
+            passed: Math.max(Number(completedData.test_run_report?.passed || 0) - 1, 0),
+            failed: 1,
+            logs: 'Test runner: OAuth happy path passed, callback hardening failed. BLOCKER: CSRF state mismatch accepted in one regression case.',
+          };
+          completedData.qa_report = `${completedData.qa_report || ''}\n\nBLOCKER: OAuth callback accepted a mismatched state token in TC-015. Release is locked until DEV evidence is regenerated.`;
+          completedData.release_decision = 'LOCKED';
+          completedData.release_recommendation = 'DO_NOT_RELEASE';
+          completedData.release_reason = 'QA blocker: failed CSRF callback regression keeps the release gate locked.';
+        } else if (task.type === 'qa-agent') {
+          completedData.blocker_count = 0;
+          completedData.fail_count = 0;
+          completedData.pass_count = Number(completedData.test_run_report?.total || completedData.pass_count || 18);
+          completedData.test_run_report = {
+            ...(completedData.test_run_report || {}),
+            executed: true,
+            passed: Number(completedData.test_run_report?.total || completedData.pass_count || 18),
+            failed: 0,
+            logs: 'Reviewer-requested QA rerun: OAuth callback regression passed, blockers resolved.',
+          };
+          completedData.qa_report = `${completedData.qa_report || ''}\n\nREWORK VERIFIED: OAuth callback regression now rejects mismatched state tokens. No blockers remain.`;
+          completedData.release_decision = 'READY_FOR_REVIEW';
+          completedData.release_recommendation = 'RELEASE_WITH_REVIEW';
+          completedData.release_reason = 'QA rerun passed after blocker remediation; release can proceed to final review.';
+        }
+        break;
+
+      case 'release_reject':
+        // All agent outputs pass; the reject happens at the human Final gate (driven by the smoke test).
+        if (task.type === 'qa-agent') {
+          completedData.release_decision = 'READY_FOR_REVIEW';
+          completedData.release_recommendation = 'RELEASE_WITH_REVIEW';
+          completedData.release_reason = 'All automated gates pass; this branch expects the final human gate to reject the release packet.';
+        }
+        break;
+
+      case 'escalation':
+        // Target stage never recovers, even after reviewer feedback → repeated reject → escalation.
+        if (task.type === lowStage) {
+          completedData.confidence_score = 0.58;
+          delete completedData.rework_response;
+        }
+        break;
+
+      default:
+        break;
+    }
   }
 
   async _saveAgentData(task, completedData, userId) {
     // Save each artifact returned by the agent
     const artifactRows = [];
-    const artifactTypes = ['feature_request', 'intent_assumptions', 'clarifying_questions',
+    const artifactTypes = ['feature_request', 'scenario_brief', 'intent_assumptions', 'clarifying_questions',
       'prd', 'user_stories', 'acceptance_criteria', 'scope', 'out_of_scope', 'mcp_activity',
       'ux_spec', 'user_flow', 'wireframe_spec', 'component_inventory', 'screens',
       'architecture_ledger_update', 'implementation_plan', 'mock_code_diff', 'changed_files',
@@ -1817,7 +2201,23 @@ class SdlcWorkflowService {
     });
     await FeatureBacklog.updateStatusByTaskId(task.id, 'REVIEW');
 
-    await this._autoApproveSafeOutput(task.id, userId);
+    // T1: persist role-validation status onto this run's artifacts. A BLOCKER
+    // means the output is structurally incomplete → mark INVALID, emit no
+    // handoff, and do not advance the phase (derive stays at *_REVIEW).
+    const validation = this._validateGateOutput(task, completedData);
+    const blockers = validation.violations.filter((v) => v.severity === 'BLOCKER');
+    await AgentArtifact.setStatusByTaskId(task.id, blockers.length ? 'INVALID' : 'VALID')
+      .catch((e) => console.error('[SDLC] setStatusByTaskId failed:', e.message));
+
+    if (blockers.length) {
+      logger.warn('agent output INVALID — no handoff, phase will not advance', {
+        taskId: task.id,
+        phase: task.type,
+        blockers: blockers.map((b) => b.rule),
+      });
+    } else {
+      await this._autoApproveSafeOutput(task.id, userId);
+    }
 
     if (userId) {
       QuotaService.recordUsage({
@@ -1882,4 +2282,8 @@ class SdlcWorkflowService {
   }
 }
 
-module.exports = new SdlcWorkflowService();
+const sdlcWorkflowService = new SdlcWorkflowService();
+// I5: expose the versioned output contracts for the drift test (read-only use).
+sdlcWorkflowService.OUTPUT_CONTRACTS = OUTPUT_CONTRACTS;
+sdlcWorkflowService.OUTPUT_CONTRACT_VERSION = OUTPUT_CONTRACT_VERSION;
+module.exports = sdlcWorkflowService;

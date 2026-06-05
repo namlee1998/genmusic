@@ -53,6 +53,108 @@ const FEEDBACK_EXAMPLES: Record<string, string> = {
   dev: 'Example: Rework the implementation using a refresh-token flow and add a test for token expiry.',
 };
 
+interface DemoFeedbackPreset {
+  retryReason: string;
+  targetFields: string;
+  blockingIssue: string;
+  expectedFix: string;
+  acceptanceChecks: string[];
+  comment: string;
+}
+
+const DEMO_FEEDBACK_PRESETS: Record<string, Partial<Record<string, DemoFeedbackPreset>>> = {
+  low_confidence_hold: {
+    dev: {
+      retryReason: 'quality_low',
+      targetFields: 'confidence_score, implementation_plan, sandbox_report, linked_ac_ids',
+      blockingIssue: 'DEV output confidence is below the auto-approval threshold and lacks enough implementation evidence.',
+      expectedFix: 'Add concrete implementation evidence, link the patch to acceptance criteria, and rerun sandbox validation.',
+      acceptanceChecks: [
+        'Confidence score is at least 0.8',
+        'Implementation plan references the affected files and acceptance criteria',
+        'Sandbox report is attached and passing',
+      ],
+      comment: 'Strengthen the DEV evidence package so confidence clears the review threshold and the handoff can proceed.',
+    },
+    po: {
+      retryReason: 'quality_low',
+      targetFields: 'prd, acceptance_criteria, scope',
+      blockingIssue: 'PO output confidence is below the gate threshold because scope and acceptance criteria need clearer evidence.',
+      expectedFix: 'Clarify scope, rewrite measurable acceptance criteria, and explain why the feature is ready for UX handoff.',
+      acceptanceChecks: [
+        'Confidence score is at least 0.8',
+        'Every acceptance criterion is measurable',
+        'Scope and out-of-scope sections are explicit',
+      ],
+      comment: 'Tighten the PO artifact so the next worker receives measurable requirements and confidence can recover.',
+    },
+    ux: {
+      retryReason: 'quality_low',
+      targetFields: 'ux_spec, user_flow, screens, wireframe_spec',
+      blockingIssue: 'UX output confidence is below the gate threshold because the flow evidence is incomplete.',
+      expectedFix: 'Add the missing screen states, clarify user flow transitions, and attach updated wireframe evidence.',
+      acceptanceChecks: [
+        'Confidence score is at least 0.8',
+        'Screens cover entry, success, and error states',
+        'Wireframe evidence is attached',
+      ],
+      comment: 'Complete the UX evidence so the DEV handoff is specific enough to implement safely.',
+    },
+  },
+  missing_evidence: {
+    dev: {
+      retryReason: 'build_fail',
+      targetFields: 'sandbox_result, self_test_report, sandbox_report',
+      blockingIssue: 'DEV output is missing sandbox execution evidence and the self-test report.',
+      expectedFix: 'Run the sandbox checks, attach the self-test report, and confirm build and tests pass before handoff.',
+      acceptanceChecks: [
+        'sandbox_result.tests_ran is true',
+        'self_test_report is present',
+        'sandbox report includes passing build and test evidence',
+      ],
+      comment: 'Attach the missing sandbox and self-test evidence, then rerun DEV validation so QA can receive the handoff.',
+    },
+  },
+  qa_blocker: {
+    qa: {
+      retryReason: 'coverage_gap',
+      targetFields: 'test_run_report, qa_report, blocker_count, release_reason',
+      blockingIssue: 'QA found a blocking OAuth callback regression and the release gate is locked.',
+      expectedFix: 'Regenerate QA evidence after the callback fix, mark the blocker resolved, and attach a passing regression run.',
+      acceptanceChecks: [
+        'blocker_count is 0',
+        'test_run_report.failed is 0',
+        'QA report documents the resolved CSRF callback regression',
+      ],
+      comment: 'Re-run QA after resolving the callback regression and produce a clean release recommendation.',
+    },
+  },
+  escalation: {
+    dev: {
+      retryReason: 'quality_low',
+      targetFields: 'confidence_score, implementation_plan, sandbox_report',
+      blockingIssue: 'DEV output remains below confidence threshold after prior feedback.',
+      expectedFix: 'Provide stronger implementation evidence and prove the risky areas are covered before another handoff attempt.',
+      acceptanceChecks: [
+        'Confidence score is at least 0.8',
+        'Evidence addresses the reviewer issue directly',
+        'Retry budget is not exceeded',
+      ],
+      comment: 'This demo branch intentionally keeps confidence low after feedback so repeated rejects trigger escalation.',
+    },
+  },
+};
+
+function readScenarioBrief(agentOutput?: Record<string, unknown> | null) {
+  const brief = agentOutput?.scenario_brief;
+  if (!brief || typeof brief !== 'object') return { scenario: 'happy_path', stage: '' };
+  const record = brief as Record<string, unknown>;
+  return {
+    scenario: typeof record.scenario === 'string' ? record.scenario : 'happy_path',
+    stage: typeof record.stage === 'string' ? record.stage.replace('-agent', '') : '',
+  };
+}
+
 export default function HumanGatePanel({
   taskId, gateEvaluation, agentOutput, outputVersion = 0, retryCount = 0, onSubmit, onClose,
 }: Props) {
@@ -77,6 +179,20 @@ export default function HumanGatePanel({
   const workerLabel = gateEvaluation?.complexity?.toUpperCase() || 'Worker';
   const feedbackPlaceholder = FEEDBACK_EXAMPLES[gateEvaluation?.complexity || ''] || 'Describe what the worker should improve before rerunning.';
   const fillDemoFeedback = () => {
+    const { scenario, stage } = readScenarioBrief(agentOutput);
+    const preset = DEMO_FEEDBACK_PRESETS[scenario]?.[stage]
+      || DEMO_FEEDBACK_PRESETS[scenario]?.dev
+      || DEMO_FEEDBACK_PRESETS.low_confidence_hold.dev;
+    if (preset) {
+      setRetryReason(preset.retryReason);
+      setTargetFields(preset.targetFields);
+      setBlockingIssue(preset.blockingIssue);
+      setExpectedFix(preset.expectedFix);
+      setAcceptanceChecks(preset.acceptanceChecks.join('\n'));
+      setComment(preset.comment);
+      return;
+    }
+
     const issue = gateEvaluation?.issues?.find((item) => item.code === 'oauth_state_csrf_missing')
       || gateEvaluation?.issues?.[0];
     setRetryReason('quality_low');

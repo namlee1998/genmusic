@@ -52,6 +52,10 @@ export default function AgentPhaseCard({ phase, phaseData, isUnlocked, isActive,
         </div>
         <div className="phase-card__status">
           {statusBadge(phaseData?.status || null)}
+          {phaseData?.invalid && <span className="badge badge-invalid" title="Blocking validation issues — no handoff">INVALID</span>}
+          {!phaseData?.invalid && !approved && phaseData?.awaitingReview && (
+            <span className="badge badge-hold" title="Awaiting human review">HOLD</span>
+          )}
           {approved && <span className="badge badge-approved">Approved</span>}
           {rework && <span className="badge badge-rejected">Rework</span>}
         </div>
@@ -79,7 +83,7 @@ export default function AgentPhaseCard({ phase, phaseData, isUnlocked, isActive,
 
       <div className="phase-card__actions">
         {isUnlocked && !isActive && !completed && canStartRequest && <button className="phase-card__btn phase-card__btn--run" onClick={onRun}>Submit feature request</button>}
-        {completed && !approved && <button className="phase-card__btn phase-card__btn--gate" onClick={onOpenGate}>Review output</button>}
+        {completed && !approved && <button className="phase-card__btn phase-card__btn--gate" onClick={onOpenGate}>{phaseData?.invalid ? 'Review blockers' : 'Review output'}</button>}
         {completed && <button className="phase-card__btn phase-card__btn--view" onClick={onViewArtifacts}>View outputs</button>}
       </div>
     </motion.div>

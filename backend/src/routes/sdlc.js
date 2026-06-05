@@ -29,8 +29,14 @@ router.get('/workflow-status',                        SdlcController.getWorkflow
 router.get('/final-review-packet/:project_id',        SdlcController.getFinalReviewPacket.bind(SdlcController));
 router.post('/projects/:project_id/release-decision', SdlcController.submitReleaseDecision.bind(SdlcController));
 router.get('/audit-trail/:project_id',                SdlcController.getAuditTrail.bind(SdlcController));
+// T7: alias — same event timeline as audit-trail, UI-friendly path.
+router.get('/workflow/:id/timeline',                  SdlcController.getTimeline.bind(SdlcController));
 router.get('/projects/:project_id/metrics',           SdlcController.getWorkflowMetrics.bind(SdlcController));
 router.get('/projects/:project_id/artifacts',          SdlcController.getProjectArtifacts.bind(SdlcController));
+
+// ── Dev-only: demo scenario selector (MOCK_SCENARIO) ───────────────────────
+router.get('/dev/mock-scenario',  SdlcController.getMockScenario.bind(SdlcController));
+router.post('/dev/mock-scenario', SdlcController.setMockScenario.bind(SdlcController));
 
 // ── Backlog / Kanban ──────────────────────────────────────────────────────
 router.get('/projects/:project_id/backlog',           SdlcController.getBacklogs.bind(SdlcController));
