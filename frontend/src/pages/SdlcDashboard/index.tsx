@@ -1,209 +1,61 @@
 import './sdlc.css';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { FileText, History, Plus, Workflow } from 'lucide-react';
+import { Workflow, History, FileText } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useSdlcStore } from '@/store/useSdlcStore';
-import * as sdlcApi from '@/services/api/sdlcApi';
 import { useAppStore } from '@/store/useAppStore';
 import { useTranslation } from 'react-i18next';
-import StageInspector from './components/StageInspector';
-import HumanGatePanel, { type StructuredDecision } from './components/HumanGatePanel';
-import FeatureRequestForm from './components/FeatureRequestForm';
-import EmptyProjectState from './components/EmptyProjectState';
-import ReleaseGatePanel from './components/ReleaseGatePanel';
-import McpActivityPanel from './components/McpActivityPanel';
-
-type Phase = 'po' | 'ux' | 'dev' | 'qa';
+import RepoInput from './components/RepoInput';
+import PipelineStepper from './components/PipelineStepper';
+import ApprovalQueue from './components/ApprovalQueue';
+import QAResultCard from './components/QAResultCard';
+import DetailModal from './components/DetailModal';
 
 export default function SdlcDashboard() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { currentProjectId, treeLoaded, fetchTree } = useAppStore();
   const {
-    projectId, workflowStatus, activePhase, sseLogs, sseActive,
-    error,
-    setProjectId, setWorkflowStatus, setWorkflowLoading, setActiveTask,
-    appendSseLog, setSseActive, setAuditEvents,
-    setError, isFeatureRequestFormOpen, setFeatureRequestFormOpen,
+    projectId,
+    pipelineStatus,
+    setProjectId,
+    pollStatus,
+    error
   } = useSdlcStore();
 
-  const [gateTaskId, setGateTaskId] = useState<string | null>(null);
-  const [gateEvaluation, setGateEvaluation] = useState<{
-    complexity?: string;
-    gateType?: string;
-    score?: number;
-    recommendation?: string;
-    summary?: string;
-    issues?: Array<{
-      code: string;
-      severity: string;
-      detail: string;
-      suggestedAction?: string;
-    }>;
-  } | null>(null);
-  const [gateAgentOutput, setGateAgentOutput] = useState<Record<string, unknown> | null>(null);
-  const [gateOutputVersion, setGateOutputVersion] = useState(0);
-  const [gateRetryCount, setGateRetryCount] = useState(0);
-  const [sseAbort, setSseAbort] = useState<AbortController | null>(null);
-  const [submittedRequest, setSubmittedRequest] = useState<sdlcApi.FeatureRequest | null>(null);
-  const [dismissedGateTaskId, setDismissedGateTaskId] = useState<string | null>(null);
-  const autoOpeningGateTaskId = useRef<string | null>(null);
+  const [activeDetailType, setActiveDetailType] = useState<'prd' | 'ux_spec' | 'code_diff' | 'qa_report' | null>(null);
 
   useEffect(() => {
-    if (currentProjectId && currentProjectId !== projectId) setProjectId(currentProjectId);
+    if (currentProjectId && currentProjectId !== projectId) {
+      setProjectId(currentProjectId);
+    }
   }, [currentProjectId, projectId, setProjectId]);
 
   useEffect(() => {
     if (!treeLoaded) void fetchTree();
   }, [treeLoaded, fetchTree]);
 
-  const refreshStatus = useCallback(async () => {
-    if (!projectId) return;
-    setWorkflowLoading(true);
-    try {
-      setWorkflowStatus(await sdlcApi.getWorkflowStatus(projectId));
-      const trail = await sdlcApi.getAuditTrail(projectId);
-      setAuditEvents(trail.events);
-    } catch {
-      setError(t('dashboard.loadError'));
-    } finally {
-      setWorkflowLoading(false);
+  // Initial poll on load
+  useEffect(() => {
+    if (projectId) {
+      void pollStatus();
     }
-  }, [projectId, setAuditEvents, setError, setWorkflowLoading, setWorkflowStatus, t]);
+  }, [projectId, pollStatus]);
 
+  // Sequential poll when pipeline is running
   useEffect(() => {
-    void refreshStatus();
-  }, [refreshStatus]);
+    if (pipelineStatus === 'idle' || pipelineStatus === 'qa_complete' || pipelineStatus === 'failed') return;
 
-  useEffect(() => {
-    const hasRunningWorker = Object.values(workflowStatus?.phases || {}).some(
-      (phase) => phase?.status === 'pending' || phase?.status === 'processing',
-    );
-    const orchestratorIsAdvancing = workflowStatus?.currentPhase?.endsWith('_RUNNING');
-    if (!hasRunningWorker && !orchestratorIsAdvancing) return;
-    const interval = window.setInterval(() => void refreshStatus(), 1000);
+    // Poll immediately
+    void pollStatus();
+
+    const interval = window.setInterval(() => {
+      void pollStatus();
+    }, 2000); // 2 seconds
+
     return () => window.clearInterval(interval);
-  }, [refreshStatus, workflowStatus]);
-
-  const startSSE = useCallback((taskId: string, phase: Phase) => {
-    sseAbort?.abort();
-    setActiveTask(taskId, phase);
-    const abort = sdlcApi.subscribeTaskSSE(taskId, {
-      onProgress: (data) => appendSseLog((data.log as string) || (data.token as string) || ''),
-      onCompleted: async () => {
-        setSseActive(false);
-        await sdlcApi.getSdlcTaskStatus(taskId);
-        await refreshStatus();
-      },
-      onError: (data) => {
-        setSseActive(false);
-        setError((data.message as string) || t('dashboard.executionFailed'));
-      },
-    });
-    setSseAbort(abort);
-  }, [appendSseLog, refreshStatus, setActiveTask, setError, setSseActive, sseAbort, t]);
-
-  const startPO = async (request: sdlcApi.FeatureRequest) => {
-    if (!projectId) return;
-    setError(null);
-    setSubmittedRequest(request);
-    try {
-      const task = await sdlcApi.startPOAgent(projectId, request);
-      setFeatureRequestFormOpen(false);
-      startSSE(task.task_id, 'po');
-      await refreshStatus();
-    } catch (requestError) {
-      setSubmittedRequest(null);
-      setError(sdlcApi.getApiErrorMessage(requestError, t('dashboard.sendFailed')));
-    }
-  };
-
-  const runNext = async (phase: string, sourceTaskId: string, feedbackPrompt = '') => {
-    const runners = {
-      ux: sdlcApi.runUXAgent,
-      dev: sdlcApi.runDEVAgent,
-      qa: sdlcApi.runQAAgent,
-    };
-    const runner = runners[phase as keyof typeof runners];
-    if (!runner) return;
-    setError(null);
-    const task = await runner(sourceTaskId, feedbackPrompt);
-    startSSE(task.task_id, phase as Phase);
-  };
-
-  const openArtifacts = (taskId: string) => navigate(`/sdlc/outputs?task=${taskId}`);
-
-  const openGate = useCallback(async (taskId: string) => {
-    if (autoOpeningGateTaskId.current === taskId) return;
-    autoOpeningGateTaskId.current = taskId;
-    try {
-      const task = await sdlcApi.getSdlcTaskStatus(taskId);
-      setGateEvaluation(task.gate_evaluation || null);
-      setGateAgentOutput((task.agent_output as Record<string, unknown>) || null);
-      setGateOutputVersion(task.output_version ?? 0);
-      setGateRetryCount(task.retry_count ?? 0);
-      setDismissedGateTaskId(null);
-      setGateTaskId(taskId);
-    } catch (requestError) {
-      setError(sdlcApi.getApiErrorMessage(requestError, t('dashboard.openGateFailed')));
-    } finally {
-      autoOpeningGateTaskId.current = null;
-    }
-  }, [setError, t]);
-
-  const closeGate = () => {
-    setDismissedGateTaskId(gateTaskId);
-    setGateTaskId(null);
-    setGateEvaluation(null);
-    setGateAgentOutput(null);
-    setGateOutputVersion(0);
-    setGateRetryCount(0);
-  };
-
-  useEffect(() => {
-    const reviewPhase = workflowStatus?.currentPhase?.match(/^(PO|UX|DEV|QA)_REVIEW$/)?.[1]?.toLowerCase() as Phase | undefined;
-    if (!reviewPhase) return;
-    const reviewTaskId = workflowStatus?.phases[reviewPhase]?.taskId;
-    if (!reviewTaskId || gateTaskId === reviewTaskId || dismissedGateTaskId === reviewTaskId) return;
-    const timeout = window.setTimeout(() => void openGate(reviewTaskId), 0);
-    return () => window.clearTimeout(timeout);
-  }, [dismissedGateTaskId, gateTaskId, openGate, workflowStatus]);
-
-  // Structured HITL decision (plan 2.3/2.8): idempotency key + optimistic lock.
-  const submitGate = async (d: StructuredDecision) => {
-    if (!gateTaskId) return;
-    const response = await sdlcApi.submitStructuredDecision(gateTaskId, {
-      decision_id: crypto.randomUUID(),
-      base_output_version: gateOutputVersion,
-      action: d.action,
-      comment: d.comment,
-      payload: {
-        ...(d.retryReason ? { retry_reason: d.retryReason } : {}),
-        ...(d.editedOutput ? { edited_output: d.editedOutput } : {}),
-        ...(d.targetFields ? { target_fields: d.targetFields } : {}),
-        ...(d.blockingIssues ? { blocking_issues: d.blockingIssues } : {}),
-        ...(d.acceptanceChecks ? { acceptance_checks: d.acceptanceChecks } : {}),
-      },
-    });
-    closeGate();
-    const rerunTaskId = response.data?.rerun_task_id;
-    const rerunPhase = response.data?.rerun_task_type?.replace('-agent', '') as Phase | undefined;
-    if (rerunTaskId && rerunPhase) startSSE(rerunTaskId, rerunPhase);
-    await refreshStatus();
-  };
-
-  const submitReleaseDecision = async (decision: 'APPROVE' | 'REJECT', comment: string) => {
-    if (!projectId) return;
-    await sdlcApi.submitReleaseDecision(projectId, {
-      decision_id: crypto.randomUUID(),
-      decision,
-      comment,
-    });
-    await refreshStatus();
-  };
-
-  if (!projectId) return <EmptyProjectState />;
+  }, [pipelineStatus, pollStatus]);
 
   return (
     <main className="sdlc-dashboard">
@@ -223,53 +75,39 @@ export default function SdlcDashboard() {
           <button className="delivery-subnav__btn" onClick={() => navigate('/sdlc/outputs')}>
             <FileText size={15} /> {t('dashboard.outputs')}
           </button>
-          <button className="delivery-header__cta" onClick={() => setFeatureRequestFormOpen(true)}>
-            <Plus size={16} /> {t('dashboard.newRequest')}
-          </button>
         </div>
       </header>
 
       {error && <div className="delivery-error">{error}</div>}
 
-      <StageInspector
-        featureRequest={submittedRequest || workflowStatus?.featureRequest}
-        onStartPO={() => setFeatureRequestFormOpen(true)}
-        onRunNext={runNext}
-        onOpenGate={openGate}
-        onViewArtifacts={openArtifacts}
-        sseLogs={sseLogs}
-        activePhase={activePhase}
-        sseActive={sseActive}
-      />
+      <div className="sdlc-dashboard__content">
+        {pipelineStatus === 'idle' ? (
+          <RepoInput />
+        ) : (
+          <div className="pipeline-workspace-grid">
+            <div className="pipeline-workspace-main">
+              <PipelineStepper />
+              <ApprovalQueue onViewDetail={(type) => setActiveDetailType(type)} />
+              <QAResultCard onViewDetail={(type) => setActiveDetailType(type)} />
 
-      {workflowStatus && !workflowStatus.releaseGate?.eligible && (
-        <McpActivityPanel phases={workflowStatus.phases} />
-      )}
-
-      {workflowStatus?.releaseGate?.eligible && (
-        <ReleaseGatePanel releaseGate={workflowStatus.releaseGate} onDecide={submitReleaseDecision} />
-      )}
+              {pipelineStatus !== 'qa_complete' && pipelineStatus !== 'failed' && pipelineStatus !== 'awaiting_approval' && (
+                <div className="pipeline-running-status-card">
+                  <div className="pipeline-running-status-spinner">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
+                  </div>
+                  <p>Agent is executing current pipeline step. Please wait...</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
 
       <AnimatePresence>
-        {isFeatureRequestFormOpen && (
+        {activeDetailType && (
           <motion.div className="sdlc-modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <motion.div className="sdlc-modal" initial={{ scale: .96, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: .96, opacity: 0 }}>
-              <FeatureRequestForm onSubmit={startPO} onCancel={() => setFeatureRequestFormOpen(false)} />
-            </motion.div>
-          </motion.div>
-        )}
-        {gateTaskId && (
-          <motion.div className="sdlc-modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <motion.div className="sdlc-modal" initial={{ scale: .96, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: .96, opacity: 0 }}>
-              <HumanGatePanel
-                taskId={gateTaskId}
-                gateEvaluation={gateEvaluation}
-                agentOutput={gateAgentOutput}
-                outputVersion={gateOutputVersion}
-                retryCount={gateRetryCount}
-                onSubmit={submitGate}
-                onClose={closeGate}
-              />
+              <DetailModal artifactType={activeDetailType} onClose={() => setActiveDetailType(null)} />
             </motion.div>
           </motion.div>
         )}
@@ -277,3 +115,4 @@ export default function SdlcDashboard() {
     </main>
   );
 }
+

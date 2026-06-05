@@ -172,3 +172,293 @@ export const subscribeTaskSSE = (
 
   return abort;
 };
+
+// ── New Multica Pipeline / Mock API Layer ────────────────────────────────
+
+export interface RepoAnalysis {
+  techStack: string[];
+  fileCount: number;
+  components: string[];
+}
+
+export interface ApprovalItem {
+  id: string;
+  agentName: 'PO' | 'UX' | 'DEV' | 'QA';
+  artifactType: 'prd' | 'ux_spec' | 'code_diff' | 'qa_report';
+  confidence: number;
+  summary: string;
+  createdAt: string;
+  approved?: boolean;
+}
+
+export interface QAResult {
+  status: 'passed' | 'failed';
+  coverage: number;
+  blockers: number;
+  warnings: number;
+  reportUrl: string;
+  commitSha: string;
+}
+
+export interface PipelineResponse {
+  projectId: string;
+  status: string;
+  currentStep: number;
+  repoInfo?: RepoAnalysis;
+  approvals: ApprovalItem[];
+  qaResult?: QAResult;
+}
+
+// Client-side mock simulation state
+let mockPipeline: PipelineResponse | null = null;
+let mockTimer: any = null;
+
+const MOCK_ARTIFACTS: Record<string, string> = {
+  prd: `# Product Requirements Document (PRD)
+
+## 1. Overview
+This is a generated PRD for the repository analysis. The agent has identified the core stack is React and Node.js.
+
+## 2. Features
+- User Auth & Session Management
+- Interactive Dashboard Layout
+- Dark/Light Mode support
+- Repository Integration & Analysis
+
+## 3. Tech Stack Requirements
+- React 19 + TypeScript
+- Zustand for lightweight state management
+- Vite for building and hot-reload
+`,
+  ux_spec: `# UI/UX Specification
+
+## 1. Design System
+- Primary: HSL 220 90% 56% (Vibrant Blue)
+- Dark Background: HSL 224 71% 4% (Premium Sleek Dark)
+- Accent: HSL 142 70% 45% (Vibrant Emerald)
+
+## 2. Page Hierarchy
+- /auth: Simplified login
+- /sdlc: Single-page delivery dashboard with 3 primary panes
+- /sdlc/audit: Interactive audit trail
+- /sdlc/outputs: Detailed artifact list
+`,
+  code_diff: `diff --git a/src/App.tsx b/src/App.tsx
+index 1a2b3c4..5d6e7f8 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -10,6 +10,12 @@ export default function App() {
+   return (
+     <div className="app-container">
+       <header>
+-        <h1>SDLC Platform</h1>
++        <h1>End-to-End Autonomous Software Factory</h1>
+       </header>
++      <main>
++        <RepoInput />
++        <PipelineStepper />
++      </main>
+     </div>
+   );
+ }
+`,
+  qa_report: `# 🧪 QA Report Summary
+
+## 1. Unit Tests
+- Passed: 45 / 45 (100%)
+- Failed: 0 (0%)
+- Warnings: 2
+
+## 2. Code Coverage
+- Statements: 92.5%
+- Branches: 88.0%
+- Functions: 94.1%
+- Lines: 92.5%
+
+## 3. Security Audits
+- 0 critical vulnerabilities found.
+- 1 low severity dependency warning (npm audit).
+`
+};
+
+const startMockSimulation = (projectId: string, repoUrl: string) => {
+  if (mockTimer) clearTimeout(mockTimer);
+
+  mockPipeline = {
+    projectId,
+    status: 'cloning',
+    currentStep: 1,
+    repoInfo: {
+      techStack: ['React 19', 'Zustand', 'TypeScript', 'Vite'],
+      fileCount: 124,
+      components: ['RepoInput', 'PipelineStepper', 'ApprovalQueue', 'QAResultCard']
+    },
+    approvals: []
+  };
+
+  const steps = [
+    { status: 'cloning', step: 1, delay: 3000 },
+    { status: 'analyzing', step: 1, delay: 3000 },
+    { status: 'po_running', step: 2, delay: 4000 },
+    { status: 'awaiting_po_approval', step: 2, delay: 0 },
+    { status: 'ux_running', step: 3, delay: 4000 },
+    { status: 'dev_running', step: 4, delay: 4000 },
+    { status: 'sandbox_testing', step: 5, delay: 3000 },
+    { status: 'awaiting_dev_approval', step: 5, delay: 0 },
+    { status: 'qa_running', step: 6, delay: 4000 },
+    { status: 'qa_complete', step: 6, delay: 0 }
+  ];
+
+  let currentIdx = 0;
+
+  const runNext = () => {
+    if (!mockPipeline) return;
+    if (currentIdx >= steps.length) return;
+
+    const nextStep = steps[currentIdx];
+
+    if (nextStep.status === 'awaiting_po_approval') {
+      mockPipeline.status = 'awaiting_approval';
+      mockPipeline.approvals.push({
+        id: 'po-prd',
+        agentName: 'PO',
+        artifactType: 'prd',
+        confidence: 78,
+        summary: 'Generated high-fidelity PRD for the repository. Requires verification of core tech stack.',
+        createdAt: new Date().toISOString()
+      });
+      currentIdx++; // point to next state for when resumed
+      return;
+    }
+
+    if (nextStep.status === 'awaiting_dev_approval') {
+      mockPipeline.status = 'awaiting_approval';
+      mockPipeline.approvals.push({
+        id: 'dev-code',
+        agentName: 'DEV',
+        artifactType: 'code_diff',
+        confidence: 65,
+        summary: 'Integrated Tailwind configuration and main components. Please verify changes to index.tsx.',
+        createdAt: new Date().toISOString()
+      });
+      currentIdx++; // point to next state for when resumed
+      return;
+    }
+
+    mockPipeline.status = nextStep.status;
+    mockPipeline.currentStep = nextStep.step;
+
+    if (nextStep.status === 'qa_complete') {
+      mockPipeline.qaResult = {
+        status: 'passed',
+        coverage: 92.5,
+        blockers: 0,
+        warnings: 2,
+        reportUrl: 'QA.md',
+        commitSha: 'a7b8c9d'
+      };
+      return;
+    }
+
+    currentIdx++;
+    mockTimer = setTimeout(runNext, nextStep.delay);
+  };
+
+  mockTimer = setTimeout(runNext, 3000);
+};
+
+const approveMockItem = (approvalId: string) => {
+  if (!mockPipeline) return;
+  const item = mockPipeline.approvals.find(a => a.id === approvalId);
+  if (item) {
+    item.approved = true;
+
+    if (approvalId === 'po-prd') {
+      mockPipeline.status = 'ux_running';
+      mockPipeline.currentStep = 3;
+      setTimeout(() => {
+        if (!mockPipeline) return;
+        mockPipeline.status = 'dev_running';
+        mockPipeline.currentStep = 4;
+        setTimeout(() => {
+          if (!mockPipeline) return;
+          mockPipeline.status = 'sandbox_testing';
+          mockPipeline.currentStep = 5;
+          setTimeout(() => {
+            if (!mockPipeline) return;
+            mockPipeline.status = 'awaiting_approval';
+            mockPipeline.approvals.push({
+              id: 'dev-code',
+              agentName: 'DEV',
+              artifactType: 'code_diff',
+              confidence: 65,
+              summary: 'Integrated Tailwind configuration and main components. Please verify changes to index.tsx.',
+              createdAt: new Date().toISOString()
+            });
+          }, 3000);
+        }, 4000);
+      }, 4000);
+    } else if (approvalId === 'dev-code') {
+      mockPipeline.status = 'qa_running';
+      mockPipeline.currentStep = 6;
+      setTimeout(() => {
+        if (!mockPipeline) return;
+        mockPipeline.status = 'qa_complete';
+        mockPipeline.currentStep = 6;
+        mockPipeline.qaResult = {
+          status: 'passed',
+          coverage: 92.5,
+          blockers: 0,
+          warnings: 2,
+          reportUrl: 'QA.md',
+          commitSha: 'a7b8c9d'
+        };
+      }, 4000);
+    }
+  }
+};
+
+export const startFromRepo = (projectId: string, repoUrl: string): Promise<any> => {
+  if (import.meta.env.VITE_USE_MOCK === 'true') {
+    startMockSimulation(projectId, repoUrl);
+    return Promise.resolve({ projectId, status: 'cloning' });
+  }
+  return api.post(`${BASE}/start-from-repo`, { project_id: projectId, repo_url: repoUrl }).then(r => r.data);
+};
+
+export const getPipelineStatus = (projectId: string): Promise<PipelineResponse> => {
+  if (import.meta.env.VITE_USE_MOCK === 'true') {
+    if (!mockPipeline) {
+      return Promise.resolve({
+        projectId,
+        status: 'idle',
+        currentStep: 0,
+        approvals: []
+      });
+    }
+    return Promise.resolve(mockPipeline);
+  }
+  return api.get(`${BASE}/pipeline-status/${projectId}`).then(r => r.data.data);
+};
+
+export const approveItem = (projectId: string, approvalId: string, action: 'approve' | 'reject', comment?: string): Promise<any> => {
+  if (import.meta.env.VITE_USE_MOCK === 'true') {
+    if (action === 'approve') {
+      approveMockItem(approvalId);
+    } else {
+      if (mockPipeline) {
+        mockPipeline.status = 'failed';
+      }
+    }
+    return Promise.resolve({ success: true });
+  }
+  return api.post(`${BASE}/pipeline/${projectId}/approve`, { approval_id: approvalId, action, comment }).then(r => r.data);
+};
+
+export const getArtifactContent = (projectId: string, type: string): Promise<{ content: string }> => {
+  if (import.meta.env.VITE_USE_MOCK === 'true') {
+    return Promise.resolve({ content: MOCK_ARTIFACTS[type] || 'No content found' });
+  }
+  return api.get(`${BASE}/pipeline/${projectId}/artifacts/${type}`).then(r => r.data);
+};
+
