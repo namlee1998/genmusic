@@ -5,6 +5,9 @@ End-to-End Autonomous Software Factory with four worker agents, Human-in-the-Loo
 
 This is the single entry point for setup, local development, and testing.
 
+
+The competitor analysis report file is located at section 2 /docs/archive/week-1/Team6_RPWeek1.pdf
+
 ## 1. Repository Structure
 
 ```text
