@@ -98,8 +98,12 @@ Bảng điều khiển trung tâm quản lý toàn bộ vòng đời phát tri�
    - Loại bỏ triệt để các màu nền đen/tối cứng (`bg-[#050505]`, `bg-[#0d0e13]`) và các lớp CSS thô (`slate-*`, `gray-*`) gây lỗi hiển thị trong chế độ sáng.
    - Cấu hình bổ sung các biến tùy chỉnh mới (`--color-input`, `--color-code-bg`, `--color-code-toolbar`) và thiết lập lớp tiện ích `.input-field` giúp tái sử dụng và bảo trì đồng bộ.
    - Tối ưu hóa ErrorBoundary hỗ trợ đầy đủ thiết kế thích ứng (Responsive & Adaptive Grid Overlay) hiển thị chuẩn xác ở cả hai giao diện sáng và tối.
+10. **Tái cấu trúc SDLC Dashboard theo luồng Repo-first & Multica (Tích hợp mock API)**: Triển khai các component RepoInput, PipelineStepper, ApprovalQueue, QAResultCard, và DetailModal mới hỗ trợ toàn bộ quá trình giả lập và kiểm duyệt SDLC tự động một cách trực quan và mượt mà.
+11. **Vô hiệu hóa cơ chế xác thực cho môi trường Local**: Hỗ trợ bypass đăng nhập ở cả frontend và backend, tự động định tuyến từ trang chủ trực tiếp tới Dashboard SDLC nhằm phục vụ quá trình phát triển và chạy thử nghiệm cục bộ nhanh chóng.
+
 
 ---
+
 
 ## 📋 Kế hoạch & Công việc Tiếp theo (Next Steps / TODOs)
 

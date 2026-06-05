@@ -24,7 +24,7 @@ Song song: Quản lý tiến độ team (Minh, Nam)
 
 ### Day 1-2: Foundation + RepoInput
 
-- [ ] **Setup mock API layer**
+- [x] **Setup mock API layer**
   - File: `frontend/src/services/api/sdlcApi.ts`
   - Tạo biến `VITE_USE_MOCK=true` trong `.env.development`
   - Mock data cho 4 endpoints:
@@ -36,7 +36,7 @@ Song song: Quản lý tiến độ team (Minh, Nam)
     ```
   - Mock data nên cover đủ các state: cloning, analyzing, po_running, awaiting_approval, qa_complete
 
-- [ ] **Tạo Zustand store mới**
+- [x] **Tạo Zustand store mới**
   - File: `frontend/src/store/useSdlcStore.ts`
   - State cần:
     ```typescript
@@ -56,7 +56,7 @@ Song song: Quản lý tiến độ team (Minh, Nam)
     }
     ```
 
-- [ ] **Component: RepoInput**
+- [x] **Component: RepoInput**
   - File: `frontend/src/pages/SdlcDashboard/components/RepoInput.tsx`
   - Input field cho GitHub/GitLab URL
   - Validate URL format (phải là .git hoặc https://github.com/...)
@@ -79,7 +79,7 @@ Song song: Quản lý tiến độ team (Minh, Nam)
 
 ### Day 3: PipelineStepper
 
-- [ ] **Component: PipelineStepper**
+- [x] **Component: PipelineStepper**
   - File: `frontend/src/pages/SdlcDashboard/components/PipelineStepper.tsx`
   - 6 steps: Clone → Analyze → PO Agent → UX Agent → DEV Agent → QA Agent
   - States cho mỗi step: pending | running | awaiting_approval | complete | failed
@@ -99,7 +99,7 @@ Song song: Quản lý tiến độ team (Minh, Nam)
 
 ### Day 4: ApprovalQueue + QAResultCard + DetailModal
 
-- [ ] **Component: ApprovalQueue**
+- [x] **Component: ApprovalQueue**
   - File: `frontend/src/pages/SdlcDashboard/components/ApprovalQueue.tsx`
   - List các approval items cần user review
   - Mỗi card hiện: agent name, artifact type, confidence score, summary
@@ -125,7 +125,7 @@ Song song: Quản lý tiến độ team (Minh, Nam)
     └─────────────────────────────────────────────────┘
     ```
 
-- [ ] **Component: QAResultCard**
+- [x] **Component: QAResultCard**
   - File: `frontend/src/pages/SdlcDashboard/components/QAResultCard.tsx`
   - Hiện QA report summary (pass/fail, coverage, issues found)
   - Link tới QA.md trong repo
@@ -144,7 +144,7 @@ Song song: Quản lý tiến độ team (Minh, Nam)
     └─────────────────────────────────────────────────┘
     ```
 
-- [ ] **Component: DetailModal**
+- [x] **Component: DetailModal**
   - File: `frontend/src/pages/SdlcDashboard/components/DetailModal.tsx`
   - Modal hiện chi tiết artifact (PRD, UX spec, code diff, QA report)
   - Render markdown content
@@ -160,7 +160,7 @@ Song song: Quản lý tiến độ team (Minh, Nam)
   - Verify tất cả endpoints hoạt động với backend của Minh
   - Test WebSocket/polling real-time updates
 
-- [ ] **Update SdlcDashboard/index.tsx**
+- [x] **Update SdlcDashboard/index.tsx**
   - File: `frontend/src/pages/SdlcDashboard/index.tsx`
   - Layout mới: RepoInput → PipelineStepper → ApprovalQueue → QAResultCard
   - Archive các components cũ (move vào `_archive/`)
@@ -169,14 +169,14 @@ Song song: Quản lý tiến độ team (Minh, Nam)
 
 ### Day 6: Testing + Polish
 
-- [ ] **Test tất cả flows:**
-  - [ ] Submit repo → clone → analyze → hiện tech stack
-  - [ ] Pipeline chạy → stepper animate
-  - [ ] Approval card hiện khi confidence < 80%
-  - [ ] Approve → pipeline tiếp tục
-  - [ ] Reject → pipeline dừng
-  - [ ] QA complete → QAResultCard hiện kết quả
-  - [ ] Detail modal hiện đúng content
+- [x] **Test tất cả flows:**
+  - [x] Submit repo → clone → analyze → hiện tech stack
+  - [x] Pipeline chạy → stepper animate
+  - [x] Approval card hiện khi confidence < 80%
+  - [x] Approve → pipeline tiếp tục
+  - [x] Reject → pipeline dừng
+  - [x] QA complete → QAResultCard hiện kết quả
+  - [x] Detail modal hiện đúng content
 
 - [ ] **UI polish:**
   - [ ] Responsive trên mobile
