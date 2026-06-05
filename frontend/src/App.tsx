@@ -15,35 +15,15 @@ const PageLoader = () => (
   </div>
 );
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { session, isInitialized } = useAuthStore();
-
-  if (!isInitialized) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
-
-  if (!session) {
-    return <Navigate to="/auth" replace />;
-  }
-
   return <>{children}</>;
 };
 
 export default function App() {
-  const { initializeAuth } = useAuthStore();
-
-  useEffect(() => {
-    initializeAuth();
-  }, [initializeAuth]);
-
   return (
     <Router>
       <Suspense fallback={<PageLoader />}>
         <Routes>
-          <Route path="/" element={<LandingPage />} />
+          <Route path="/" element={<Navigate to="/sdlc" replace />} />
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/admin/*" element={<AdminApp />} />
           <Route
@@ -65,6 +45,7 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+
           <Route
             path="/profile"
             element={
