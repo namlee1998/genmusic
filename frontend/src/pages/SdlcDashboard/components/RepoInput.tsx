@@ -35,34 +35,38 @@ export default function RepoInput() {
         <h3>Repository & Feature Integration</h3>
       </div>
       <form onSubmit={handleSubmit} className="repo-input-card__form">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div className="repo-input-card__field">
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <label style={{ fontSize: '11px', color: '#908fa0', fontWeight: 600 }}>🔗 REPOSITORY URL</label>
-              <input
-                type="text"
-                placeholder="https://github.com/username/repository.git"
-                value={url}
-                onChange={(e) => {
-                  setUrl(e.target.value);
-                  if (validationError) setValidationError('');
-                }}
-                disabled={isLoading}
-                className={`repo-input-card__input ${validationError ? 'is-invalid' : ''}`}
-              />
-            </div>
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <label style={{ fontSize: '11px', color: '#908fa0', fontWeight: 600 }}>📝 FEATURE REQUEST</label>
-              <input
-                type="text"
-                placeholder="e.g. add google login"
-                value={request}
-                onChange={(e) => setRequest(e.target.value)}
-                disabled={isLoading}
-                className="repo-input-card__input"
-              />
-            </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <label style={{ fontSize: '11px', color: '#908fa0', fontWeight: 600, letterSpacing: '0.05em' }}>🔗 TARGET REPOSITORY URL</label>
+            <input
+              type="text"
+              placeholder="https://github.com/username/repository.git"
+              value={url}
+              onChange={(e) => {
+                setUrl(e.target.value);
+                if (validationError) setValidationError('');
+              }}
+              disabled={isLoading}
+              className={`repo-input-card__input ${validationError ? 'is-invalid' : ''}`}
+              style={{ width: '100%' }}
+            />
           </div>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <label style={{ fontSize: '11px', color: '#908fa0', fontWeight: 600, letterSpacing: '0.05em' }}>📝 FEATURE SPECIFICATION / REQUEST</label>
+            <textarea
+              placeholder="Describe the feature request, code changes, or guidelines for the AIFA worker agents (e.g. add google login)..."
+              value={request}
+              onChange={(e) => setRequest(e.target.value)}
+              disabled={isLoading}
+              className="repo-input-card__textarea"
+              rows={3}
+            />
+            <span style={{ fontSize: '11px', color: '#475569', fontStyle: 'italic', marginTop: '2px' }}>
+              Describe what feature, API endpoint, or UI change you want the developer agents to implement.
+            </span>
+          </div>
+
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
             <button type="submit" disabled={isLoading} className="repo-input-card__submit-btn" style={{ gap: '8px' }}>
               {isLoading ? (

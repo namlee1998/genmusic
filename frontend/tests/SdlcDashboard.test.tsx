@@ -83,8 +83,8 @@ describe('SdlcDashboard Component', () => {
       </MemoryRouter>
     );
     expect(screen.getByText('Repository & Feature Integration')).toBeInTheDocument();
-    expect(screen.getByText('🔗 REPOSITORY URL')).toBeInTheDocument();
-    expect(screen.getByText('📝 FEATURE REQUEST')).toBeInTheDocument();
+    expect(screen.getByText('🔗 TARGET REPOSITORY URL')).toBeInTheDocument();
+    expect(screen.getByText('📝 FEATURE SPECIFICATION / REQUEST')).toBeInTheDocument();
   });
 
   it('renders the Pipeline Stepper when pipeline starts running', () => {
