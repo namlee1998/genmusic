@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useSdlcStore } from '@/store/useSdlcStore';
-import { GitBranch, Loader2, BarChart2, Terminal } from 'lucide-react';
+import { GitBranch, Loader2, BarChart2, Terminal, Sparkles } from 'lucide-react';
 
 export default function RepoInput() {
   const { startPipeline, repoInfo, isLoading, error } = useSdlcStore();
@@ -52,19 +52,66 @@ export default function RepoInput() {
             />
           </div>
           
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <label style={{ fontSize: '11px', color: '#908fa0', fontWeight: 600, letterSpacing: '0.05em' }}>📝 FEATURE SPECIFICATION / REQUEST</label>
-            <textarea
-              placeholder="Describe the feature request, code changes, or guidelines for the AIFA worker agents (e.g. add google login)..."
-              value={request}
-              onChange={(e) => setRequest(e.target.value)}
-              disabled={isLoading}
-              className="repo-input-card__textarea"
-              rows={3}
-            />
-            <span style={{ fontSize: '11px', color: '#475569', fontStyle: 'italic', marginTop: '2px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <label style={{ fontSize: '11px', color: '#a5b4fc', fontWeight: 700, letterSpacing: '0.06em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                📝 FEATURE SPECIFICATION / REQUEST
+              </label>
+              <div className="prompt-badge">
+                <Sparkles size={10} style={{ marginRight: '4px' }} />
+                <span>Agent Ready</span>
+              </div>
+            </div>
+            
+            <div className="repo-input-card__textarea-wrapper">
+              <textarea
+                placeholder="Describe the feature request, code changes, or guidelines for the AIFA worker agents (e.g. add google login)..."
+                value={request}
+                onChange={(e) => setRequest(e.target.value)}
+                disabled={isLoading}
+                className="repo-input-card__textarea"
+                rows={3}
+              />
+            </div>
+            
+            <span style={{ fontSize: '11px', color: '#64748b', fontStyle: 'italic', marginTop: '2px' }}>
               Describe what feature, API endpoint, or UI change you want the developer agents to implement.
             </span>
+
+            <div className="suggestion-pills">
+              <button
+                type="button"
+                className="suggestion-pill"
+                onClick={() => setRequest('Add Google authentication login button and callbacks')}
+                disabled={isLoading}
+              >
+                🔑 Add Google Auth
+              </button>
+              <button
+                type="button"
+                className="suggestion-pill"
+                onClick={() => setRequest('Implement a responsive theme toggle (Dark / Light mode)')}
+                disabled={isLoading}
+              >
+                🎨 Theme Toggle
+              </button>
+              <button
+                type="button"
+                className="suggestion-pill"
+                onClick={() => setRequest('Create API endpoint to export user metrics as PDF')}
+                disabled={isLoading}
+              >
+                📊 PDF Export API
+              </button>
+              <button
+                type="button"
+                className="suggestion-pill"
+                onClick={() => setRequest('Configure custom SMTP email notifications and integration hook')}
+                disabled={isLoading}
+              >
+                📧 SMTP Setup
+              </button>
+            </div>
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
