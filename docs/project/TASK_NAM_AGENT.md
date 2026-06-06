@@ -1,8 +1,8 @@
 # 🎯 Task Assignment: Nam — Agent Management Lead
 
 > **Vai trò:** Agent Management, Prompt Engineering, Pipeline Logic
-> **Phases chịu trách nhiệm:** Phase 1 (Claude Code setup) + Phase 2 (Agent prompts) + Phase 4 (Cleanup agents)
-> **Tham chiếu:** [MULTICA_INTEGRATION_PLAN.md](./MULTICA_INTEGRATION_PLAN.md)
+> **Phases chịu trách nhiệm:** Phase 2 (Mock Agent Scenarios) + Phase 4 (Cleanup agents)
+> **Tham chiếu:** [AIFA_INTEGRATION_PLAN.md](./AIFA_INTEGRATION_PLAN.md)
 > **Liên hệ:** Giang (FE + PM), Minh (Backend)
 
 ---
@@ -10,136 +10,79 @@
 ## Tổng Quan Công Việc
 
 ```
-Day 1: Claude Code CLI setup + login + test
-Day 2: Multica daemon verify + agent detection test
-Day 3: Refactor PO Agent + UX Agent prompts (template-based)
-Day 4: Refactor DEV Agent + QA Agent prompts + sandbox integration
-Day 5: Integration testing — verify agents chạy qua Multica
-Day 6: E2E test full pipeline
-Day 7: Cleanup old deps + docs
+Day 1-2: Hiểu AIFA v3 strategy + thiết kế mock scenarios
+Day 3:   Refactor PO Agent (route classification bắt buộc) + UX Agent
+Day 4:   Refactor DEV Agent (risk + diff output) + QA Agent
+Day 5:   Integration testing — verify mock agents chạy qua MockClaudeCodeRunner
+Day 6:   E2E test full pipeline
+Day 7:   Cleanup old deps + docs
 ```
 
 ---
 
-## Phase 1: Claude Code CLI Setup (Day 1-2)
+## Bối Cảnh Thay Đổi Quan Trọng
 
-### Day 1: Claude Code CLI
+### ❌ KHÔNG CÒN dùng Multica
+- Không cần Multica CLI, daemon, server
+- Không cần Claude Code CLI login
+- Không gọi LLM API thật (mock toàn bộ)
 
-- [ ] **Verify Claude Code CLI đã được cài**
-  ```powershell
-  claude --version
-  # Nếu chưa có → cài từ https://docs.anthropic.com/claude-code
-  ```
+### ✅ AIFA v3 Strategy: Mock-First
+- Agents chạy mock qua `MockClaudeCodeRunner` (Minh viết)
+- Mock phát sự kiện qua **đúng interface bản thật** (AIFA v3 §4.5)
+- Execution path chính: `claude-code (mock)`
+- LangChain path: chỉ giữ compatibility, không phát triển thêm
 
-- [ ] **Login Claude Code**
-  ```powershell
-  claude login
-  # Đăng nhập bằng tài khoản Anthropic
-  # Verify:
-  claude --help
-  ```
-
-- [ ] **Test Claude Code CLI hoạt động**
-  ```powershell
-  # Test prompt đơn giản
-  claude -p "Say hello in Vietnamese"
-  
-  # Test với file context
-  claude -p "Summarize this file" --file README.md
-  
-  # Test output format
-  claude -p "List 3 programming languages" --output-format json
-  ```
-
-- [ ] **Hiểu cách Multica spawn Claude CLI**
-  
-  Multica daemon sẽ chạy lệnh tương tự:
-  ```powershell
-  claude -p "<agent prompt>" \
-    --file <workspace-file> \
-    --output-format json \
-    --max-tokens 4096
-  ```
-  
-  Quan trọng: Claude Code CLI sử dụng **session login** trên máy — KHÔNG cần API key trong code.
-
-- [ ] **Báo Minh:** ✅ Claude CLI đã login và ready
+### 🆕 Thay đổi lớn trong Agent output:
+1. **PO bắt buộc có `route_classification`** — quyết định skip UX hay không
+2. **PO bắt buộc có `risk_classification`** — phân loại rủi ro request
+3. **DEV output có `changed_files` với risk level** — RiskClassifier dùng
+4. **DEV output hiển thị diff** — không chỉ tên file
+5. **QA kiểm tra logic tối thiểu** — dù mock (AIFA v3 §5.6)
 
 ---
 
-### Day 2: Multica Daemon + Agent Detection
+## Phase 2: Mock Agent Scenarios (Day 1-4)
 
-- [ ] **Verify Multica daemon detect Claude CLI**
-  ```powershell
-  # Minh sẽ start daemon, Nam verify:
-  multica agent list
-  # Expected: claude CLI detected
-  ```
+### Day 1-2: Hiểu Strategy + Thiết Kế Scenarios
 
-- [ ] **Test agent execution qua Multica**
-  ```powershell
-  # Tạo test issue
-  multica issue create --title "Test Agent" --body "Say hello from PO agent"
-  
-  # Watch daemon logs
-  multica daemon logs
-  
-  # Check issue status
-  multica issue list --output json
-  ```
+- [ ] **Đọc AIFA v3 chiến lược** — focus vào:
+  - §4.2: Pipeline route linh hoạt (PO quyết định)
+  - §4.3: Vai đặc thù mỗi agent
+  - §5.3: Gate loại A (DEV file risk — phân tầng)
+  - §5.4: A2A contract (required fields)
+  - §5.6: QA kiểm tra logic tối thiểu
 
-- [ ] **Xác nhận flow hoạt động:**
-  ```
-  multica issue create → daemon claim → spawn claude CLI → output → issue complete
-  ```
+- [ ] **Thiết kế mock scenarios** (6 scenarios, mỗi scenario = 1 demo path):
 
-- [ ] **Báo Giang:** ✅ Agent execution qua Multica đã hoạt động
+  | # | Scenario | Route | UX? | Gate A trigger? | Sandbox? |
+  |---|---|---|---|---|---|
+  | 1 | "add google login" | FULLSTACK | ✅ | ✅ auth.js | ✅ |
+  | 2 | "fix API pagination bug" | BACKEND | ❌ skip | ❌ | ✅ |
+  | 3 | "add dark mode toggle" | UI | ✅ | ❌ | ✅ |
+  | 4 | "analyze code quality" | ANALYSIS | ❌ skip | ❌ | ❌ |
+  | 5 | "add payment Stripe" | FULLSTACK | ✅ | ✅ payment.js | ✅ |
+  | 6 | "update README" | BACKEND | ❌ skip | ❌ | ❌ |
+
+- [ ] **Viết mock data cho mỗi scenario** vào `mock-data/scenarios/`
 
 ---
 
-## Phase 2: Agent Prompt Refactor (Day 3-4)
-
-### Bối cảnh thay đổi
-
-**AS-IS:** Agents dùng LangChain + OpenAI/Claude SDK → gọi API trực tiếp
-**TO-BE:** Agents là **prompt templates** → Multica daemon spawn Claude CLI với prompt đó
-
-Mỗi agent file chuyển từ:
-```python
-# CŨ: gọi API trong code
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-response = client.chat.completions.create(model="gpt-4o", messages=[...])
-```
-
-Thành:
-```python
-# MỚI: export prompt template → Multica/Claude CLI thực thi
-def build_prompt(context: dict) -> str:
-    return f"""
-    You are a {role} agent...
-    Context: {context}
-    Output format: JSON
-    """
-```
-
----
-
-### Day 3: PO Agent + UX Agent
+### Day 3: PO Agent + UX Agent Refactor
 
 - [ ] **Refactor `agents/src/agents/po_agent.py`**
 
-  Hiện tại: dùng LangChain + OpenAI SDK
-  Mới: prompt template function
+  **QUAN TRỌNG:** PO bắt buộc chạy route classification đầu tiên (AIFA v3 §4.2)
 
   ```python
-  """PO Agent — Product Owner / PRD Generator.
-  
-  Chạy qua: Multica daemon → Claude Code CLI
-  Input: repo analysis (tech stack, components, file structure)
-  Output: PRD document (JSON structured)
+  """PO Agent — Product Owner / PRD Generator + Route Classifier.
+
+  Execution: MockClaudeCodeRunner (mock) hoặc Claude Code CLI (thật)
+  Input: repo analysis + user request
+  Output: PRD + route_classification + risk_classification
   """
-  
-  def build_po_prompt(repo_analysis: dict, user_request: str = "") -> str:
+
+  def build_po_prompt(repo_analysis: dict, user_request: str) -> str:
       """Build prompt cho PO Agent."""
       return f"""You are an expert Product Owner analyzing a software repository.
 
@@ -148,53 +91,92 @@ def build_prompt(context: dict) -> str:
   - File Count: {repo_analysis.get('fileCount', 'unknown')}
   - Components: {', '.join(repo_analysis.get('components', []))}
 
-  ## Your Task
-  Analyze this repository and generate a comprehensive PRD (Product Requirements Document).
+  ## User Request
+  {user_request}
 
-  {f"User Request: {user_request}" if user_request else ""}
+  ## STEP 1: Route Classification (MANDATORY)
+  Classify this request into one of:
+  - "UI" — only frontend/UI changes
+  - "BACKEND" — only backend/API/bugfix
+  - "ANALYSIS" — only analysis/documentation
+  - "FULLSTACK" — both frontend and backend changes
+
+  ## STEP 2: Generate PRD
+  Based on the classification, generate a comprehensive PRD.
 
   ## Output Format (JSON)
   {{
+    "route_classification": "FULLSTACK",
+    "risk_classification": "MEDIUM",
     "prd_title": "...",
     "executive_summary": "...",
     "user_stories": [
       {{"id": "US-001", "as_a": "...", "i_want": "...", "so_that": "...", "priority": "HIGH"}}
     ],
-    "functional_requirements": ["..."],
-    "non_functional_requirements": ["..."],
-    "acceptance_criteria": ["..."],
-    "confidence_score": 85,
-    "risk_assessment": "..."
+    "acceptance_criteria": ["AC-001: ...", "AC-002: ..."],
+    "scope": ["..."],
+    "out_of_scope": ["..."],
+    "confidence_score": 85
   }}
 
   Output ONLY valid JSON. No markdown fences.
   """
-  
+
   def parse_po_output(raw_output: str) -> dict:
-      """Parse PO agent output thành structured data."""
+      """Parse PO agent output + validate route_classification."""
       import json, re
       text = raw_output.strip()
-      # Strip markdown fences if present
       fence = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
       if fence:
           text = fence.group(1).strip()
       try:
-          return json.loads(text)
+          result = json.loads(text)
+          # Validate route_classification exists
+          if 'route_classification' not in result:
+              result['route_classification'] = 'FULLSTACK'  # default safe
+          # Validate risk_classification exists
+          if 'risk_classification' not in result:
+              result['risk_classification'] = 'MEDIUM'
+          return result
       except json.JSONDecodeError:
           return {
               "prd_title": "Parse Error",
-              "executive_summary": raw_output,
+              "route_classification": "FULLSTACK",
+              "risk_classification": "HIGH",
               "confidence_score": 30,
-              "error": "Failed to parse PO output as JSON"
+              "error": "Failed to parse PO output"
           }
+  ```
+
+  **Mock data cho PO (scenario 1: "add google login"):**
+  ```json
+  {
+    "route_classification": "FULLSTACK",
+    "risk_classification": "MEDIUM",
+    "prd_title": "Google OAuth Login Integration",
+    "executive_summary": "Add Google OAuth 2.0 login to existing auth system...",
+    "user_stories": [
+      {"id": "US-001", "as_a": "user", "i_want": "login with Google account", "so_that": "I can quickly access the app", "priority": "HIGH"}
+    ],
+    "acceptance_criteria": [
+      "AC-001: User can click 'Login with Google' button",
+      "AC-002: OAuth flow redirects to Google and back",
+      "AC-003: New user profile created from Google data"
+    ],
+    "scope": ["Google OAuth integration", "Login button UI", "User profile creation"],
+    "out_of_scope": ["Facebook login", "Apple login", "2FA"],
+    "confidence_score": 88
+  }
   ```
 
 - [ ] **Refactor `agents/src/agents/ux_agent.py`**
 
-  Tương tự PO Agent nhưng cho UX:
   ```python
   def build_ux_prompt(prd_output: dict, repo_analysis: dict) -> str:
-      """Build prompt cho UX Agent."""
+      """Build prompt cho UX Agent.
+
+      CHỈ CHẠY KHI route_classification = 'UI' hoặc 'FULLSTACK'.
+      """
       return f"""You are an expert UX Designer.
 
   ## PRD Context
@@ -208,30 +190,21 @@ def build_prompt(context: dict) -> str:
 
   ## Output Format (JSON)
   {{
-    "design_system": {{
-      "colors": {{}},
-      "typography": {{}},
-      "spacing": {{}}
+    "ux_spec": {{
+      "design_system": {{ "colors": {{}}, "typography": {{}}, "spacing": {{}} }},
+      "wireframes": [
+        {{"page": "...", "layout": "...", "components": ["..."]}}
+      ],
+      "user_flows": [
+        {{"name": "...", "steps": ["..."]}}
+      ]
     }},
-    "wireframes": [
-      {{"page": "...", "layout": "...", "components": ["..."]}}
-    ],
-    "user_flows": [
-      {{"name": "...", "steps": ["..."]}}
-    ],
+    "wireframe_spec": "ASCII wireframe or description",
+    "risk_classification": "{prd_output.get('risk_classification', 'MEDIUM')}",
     "accessibility_notes": ["..."],
     "confidence_score": 80
   }}
   """
-  ```
-
-- [ ] **Test prompts manually:**
-  ```powershell
-  # Test PO prompt
-  claude -p "<po_prompt_content>" --output-format json
-  
-  # Test UX prompt  
-  claude -p "<ux_prompt_content>" --output-format json
   ```
 
 ---
@@ -240,96 +213,185 @@ def build_prompt(context: dict) -> str:
 
 - [ ] **Refactor `agents/src/agents/dev_agent.py`**
 
-  DEV Agent là phức tạp nhất vì output phải là **unified git diff**:
+  **QUAN TRỌNG:** DEV output phải có:
+  1. `changed_files` với **risk level** per file
+  2. `patch_diff` dạng unified git diff
+  3. File operations cho MockClaudeCodeRunner onGate
+
   ```python
   def build_dev_prompt(prd_output: dict, ux_spec: dict, repo_analysis: dict) -> str:
-      """Build prompt cho DEV Agent."""
+      """Build prompt cho DEV Agent.
+
+      Output PHẢI là:
+      - changed_files với risk_level (cho RiskClassifier)
+      - patch_diff dạng unified diff (cho DiffViewer + Sandbox)
+      - security_gate assessment
+      """
       return f"""You are a Senior Software Engineer implementing features.
 
   ## PRD
   {json.dumps(prd_output, indent=2)}
 
   ## UX Specification
-  {json.dumps(ux_spec, indent=2)}
+  {json.dumps(ux_spec, indent=2) if ux_spec else "N/A (backend-only route)"}
 
   ## Repository Info
   - Tech Stack: {', '.join(repo_analysis.get('techStack', []))}
-  - File Count: {repo_analysis.get('fileCount', 'unknown')}
 
   ## Your Task
-  Generate the implementation as a unified git diff.
+  Generate the implementation as code changes.
 
   ## Output Format (JSON)
   {{
     "implementation_plan": "Step-by-step plan...",
-    "mock_code_diff": "diff --git a/file.js b/file.js\\n--- a/file.js\\n+++ b/file.js\\n@@ -1,3 +1,5 @@\\n...",
     "changed_files": [
-      {{"path": "src/file.js", "reason": "...", "change_type": "modify"}}
+      {{
+        "path": "src/middleware/auth.js",
+        "action": "MODIFY",
+        "reason": "Add Google OAuth middleware",
+        "risk_level": "REQUIRE_APPROVAL",
+        "risk_reason": "auth/security file"
+      }},
+      {{
+        "path": "src/features/login/GoogleLoginButton.tsx",
+        "action": "CREATE",
+        "reason": "New login component",
+        "risk_level": "AUTO_APPROVE",
+        "risk_reason": "new file in feature directory"
+      }}
     ],
-    "risk_assessment": "...",
-    "risk_level": "LOW",
-    "confidence_score": 75,
-    "summary": "..."
+    "patch_diff": "diff --git a/src/middleware/auth.js b/src/middleware/auth.js\\n--- a/src/middleware/auth.js\\n+++ b/src/middleware/auth.js\\n@@ -15,3 +15,8 @@\\n+const googleAuth = require('./google-oauth');\\n+app.use('/auth/google', googleAuth.router);",
+    "self_test_report": "Manual review: auth flow validated",
+    "security_gate": {{
+      "has_auth_changes": true,
+      "has_env_changes": false,
+      "risk_summary": "OAuth middleware added — requires review"
+    }},
+    "confidence_score": 72,
+    "summary": "Added Google OAuth login with middleware + UI button"
   }}
 
-  CRITICAL: mock_code_diff MUST be a valid unified git diff format.
+  CRITICAL: patch_diff MUST be valid unified git diff format.
+  CRITICAL: changed_files MUST include risk_level for each file.
   """
   ```
 
-  Lưu ý quan trọng:
-  - Output phải là unified git diff (`diff --git...`) → Sandbox Gate cần parse
-  - `confidence_score` < 80 → trigger approval flow
-  - DEV Agent có thể bị retry bởi Sandbox Gate
+  **Mock data cho DEV (scenario 1):** phải include file operations với risk levels:
+  ```json
+  {
+    "fileOperations": [
+      {
+        "action": "MODIFY",
+        "path": "src/middleware/auth.js",
+        "riskReason": "auth/security file — requires approval",
+        "diff": "--- a/src/middleware/auth.js\n+++ b/src/middleware/auth.js\n@@ -15,3 +15,8 @@\n+const googleAuth = require('./google-oauth');\n+app.use('/auth/google', googleAuth.router);"
+      },
+      {
+        "action": "CREATE",
+        "path": "src/features/login/GoogleLoginButton.tsx",
+        "riskReason": "new file in feature directory — auto-approved",
+        "diff": "+import React from 'react';\n+export function GoogleLoginButton() { ... }"
+      }
+    ]
+  }
+  ```
 
 - [ ] **Refactor `agents/src/agents/qa_agent.py`**
 
-  QA Agent tạo QA.md report:
+  **QA kiểm tra logic tối thiểu** (AIFA v3 §5.6) — dù mock:
+
   ```python
   def build_qa_prompt(
-      prd_output: dict, 
-      dev_output: dict, 
+      prd_output: dict,
+      dev_output: dict,
       sandbox_result: dict
   ) -> str:
-      """Build prompt cho QA Agent."""
+      """Build prompt cho QA Agent.
+
+      QA mock phải kiểm thật ở mức logic (AIFA v3 §5.6):
+      - DEV artifact có patch_diff?
+      - changed_files nằm trong scope?
+      - acceptance criteria có coverage matrix?
+      - test report ghi rõ "simulated"
+      """
       return f"""You are a QA Engineer reviewing code changes.
 
   ## PRD Requirements
-  {json.dumps(prd_output, indent=2)}
+  Acceptance Criteria: {json.dumps(prd_output.get('acceptance_criteria', []))}
 
   ## DEV Agent Output
-  Code Diff: {dev_output.get('mock_code_diff', 'N/A')}
-  Risk Level: {dev_output.get('risk_level', 'UNKNOWN')}
+  Changed Files: {json.dumps(dev_output.get('changed_files', []))}
+  Scope: {json.dumps(prd_output.get('scope', []))}
+  Risk Level: {dev_output.get('security_gate', {}).get('risk_summary', 'UNKNOWN')}
 
   ## Sandbox Test Results
   {json.dumps(sandbox_result, indent=2)}
 
   ## Your Task
-  Create a comprehensive QA report in Markdown format.
+  1. Verify changed_files are within scope
+  2. Create AC coverage matrix
+  3. Generate QA report (mark "simulated" for mock tests)
+  4. Provide release recommendation
 
   ## Output Format (JSON)
   {{
-    "qa_report_md": "# QA Report\\n\\n## Summary\\n...\\n## Test Results\\n...",
+    "qa_report_md": "# QA Report\\n\\n## Summary\\n...\\n## AC Coverage\\n...",
+    "ac_coverage_matrix": [
+      {{"ac_id": "AC-001", "status": "covered", "evidence": "..."}}
+    ],
+    "test_run_report": {{
+      "total": 5,
+      "passed": 4,
+      "failed": 0,
+      "skipped": 1,
+      "note": "Tests simulated — to be run on real environment"
+    }},
+    "security_findings": [],
+    "blocker_count": 0,
     "status": "passed",
     "coverage_estimate": 85,
-    "blockers": 0,
-    "warnings": 2,
-    "issues_found": [
-      {{"severity": "warning", "description": "...", "file": "..."}}
-    ],
-    "confidence_score": 90,
-    "recommendation": "approve"
+    "release_recommendation": "approve",
+    "confidence_score": 90
   }}
   """
   ```
 
-- [ ] **Test DEV + QA prompts:**
-  ```powershell
-  # Test DEV prompt — verify output is valid git diff
-  claude -p "<dev_prompt>" --output-format json
-  
-  # Test QA prompt — verify output has qa_report_md
-  claude -p "<qa_prompt>" --output-format json
+---
+
+### Day 5: Integration Testing
+
+- [ ] **Verify mock agents chạy qua MockClaudeCodeRunner (Minh)**
+  - PO agent → route_classification output correctly
+  - DEV agent → onGate triggers for risky files
+  - QA agent → ac_coverage_matrix validates scope
+  - A2A contract validation passes between agents
+
+- [ ] **Test scenario "add google login" end-to-end:**
   ```
+  1. PO → route = FULLSTACK → UX included ✓
+  2. A2A: PO→UX contract validated (prd + AC + risk) ✓
+  3. UX → ux_spec generated ✓
+  4. A2A: UX→DEV contract validated ✓
+  5. DEV → auth.js flagged REQUIRE_APPROVAL ✓
+  6. Gate approved → DEV continues ✓
+  7. Sandbox → tests pass ✓
+  8. A2A: DEV→QA contract validated ✓
+  9. QA → AC coverage matrix correct ✓
+  10. Final approval → RELEASED ✓
+  ```
+
+- [ ] **Test scenario "fix API pagination bug":**
+  ```
+  1. PO → route = BACKEND → UX skipped ✓
+  2. DEV → no risky files → all AUTO_APPROVE ✓
+  3. QA → validates scope ✓
+  ```
+
+---
+
+### Day 6: E2E Test
+
+- [ ] **Full pipeline test** — xem AIFA_INTEGRATION_PLAN.md §7.2
 
 ---
 
@@ -339,38 +401,41 @@ def build_prompt(context: dict) -> str:
 
 - [ ] **Update `agents/requirements.txt`**
   ```diff
-  # REMOVE these:
-  - langchain>=0.1.0
-  - langchain-openai>=0.1.0
-  - langchain-anthropic>=0.1.0
-  - langfuse>=2.0.0
-  - e2b-code-interpreter>=0.0.9
-  - openai>=1.0.0
-  - google-generativeai>=0.3.0
-  
-  # KEEP these:
-    pydantic>=2.0.0
+  # REMOVE:
+  - langchain>=0.3.0
+  - langchain-openai>=0.2.0
+  - langfuse>=3.0.0
+  - openai>=1.50.0
+  - e2b-code-interpreter>=1.0.0
+
+  # KEEP:
+    fastapi>=0.115.0
+    uvicorn[standard]>=0.30.0
     python-dotenv>=1.0.0
-    httpx>=0.25.0
+    pydantic>=2.0.0
+    httpx>=0.27.0
+    PyYAML>=6.0
+    pytest>=8.0.0
   ```
 
-- [ ] **Archive old agent files**
+- [ ] **Archive old files:**
   ```powershell
-  # Tạo thư mục archive
   mkdir agents/src/agents/_archive
-  
-  # Move original files (giữ lại để tham khảo)
-  # Copy các file gốc trước khi overwrite
+  # Move original LangChain-based files (giữ để tham khảo)
   ```
 
-- [ ] **Remove LangGraph workflow**
-  - File: `agents/src/workflows/main_pipeline.py`
-  - Archive vào `_archive/` — workflow mới nằm trong backend `SdlcWorkflowService.js`
+- [ ] **Archive sandbox files:**
+  ```
+  sandbox/e2b_runtime.py → _archive/
+  sandbox/run_dev.py → _archive/
+  sandbox/test_e2b.py → _archive/
+  ```
 
-- [ ] **Update imports và clean dead code**
-  - Xóa tất cả `from langchain...` imports
-  - Xóa tất cả `from openai...` imports
-  - Xóa `from e2b_code_interpreter...` imports
+- [ ] **Archive LangGraph workflow:**
+  - `agents/src/workflows/main_pipeline.py` → `_archive/`
+  - Pipeline mới nằm trong backend `SdlcWorkflowService.js`
+
+- [ ] **Clean imports:** xóa tất cả `from langchain...`, `from openai...`, `from e2b_code_interpreter...`
 
 ---
 
@@ -383,6 +448,7 @@ def build_prompt(context: dict) -> str:
 | 🔄 REFACTOR | `agents/src/agents/dev_agent.py` |
 | 🔄 REFACTOR | `agents/src/agents/qa_agent.py` |
 | 🔄 MODIFY | `agents/requirements.txt` |
+| 🆕 NEW | `mock-data/scenarios/` (6 scenario files) |
 | 📁 ARCHIVE | `agents/src/workflows/main_pipeline.py` |
 | 📁 ARCHIVE | `sandbox/e2b_runtime.py` |
 | 📁 ARCHIVE | `sandbox/run_dev.py` |
@@ -391,35 +457,35 @@ def build_prompt(context: dict) -> str:
 
 ---
 
-## Prompt Engineering Guidelines
+## Prompt Engineering Guidelines (AIFA v3 aligned)
 
 ### Output Format Rules
 1. **Luôn yêu cầu JSON output** — dễ parse, dễ validate
-2. **Luôn có `confidence_score`** (0-100) — backend dùng để trigger approval
-3. **DEV Agent: output PHẢI là unified git diff** — Sandbox Gate cần apply được
-4. **QA Agent: output có `qa_report_md`** — backend commit vào repo dưới dạng QA.md
+2. **PO: bắt buộc `route_classification`** — quyết định pipeline path
+3. **PO: bắt buộc `risk_classification`** — phân loại rủi ro tổng
+4. **DEV: `changed_files` PHẢI có `risk_level`** — RiskClassifier dùng
+5. **DEV: `patch_diff` phải là unified git diff** — DiffViewer + Sandbox cần
+6. **QA: `ac_coverage_matrix`** — map AC → test evidence
+7. **QA: ghi rõ "simulated"** nếu mock (trung thực — AIFA v3 §5.6)
+8. **Luôn có `confidence_score`** (0-100) — dưới ngưỡng → human gate
+
+### A2A Contract Required Fields
+
+| Chặng | PO must output | UX must output | DEV must output |
+|---|---|---|---|
+| PO → UX | prd, acceptance_criteria, risk_classification | — | — |
+| UX → DEV | — | ux_spec, wireframe_spec, risk_classification | — |
+| DEV → QA | — | — | patch_diff, sandbox_result, self_test_report, security_gate |
 
 ### Prompt Testing Checklist
-Mỗi prompt cần test:
+Mỗi prompt cần verify:
 - [ ] Output là valid JSON
+- [ ] `route_classification` (PO) là một trong: UI, BACKEND, ANALYSIS, FULLSTACK
+- [ ] `risk_classification` tồn tại (PO, UX, DEV)
+- [ ] `changed_files` có `risk_level` per file (DEV)
+- [ ] `patch_diff` bắt đầu bằng `diff --git` (DEV)
+- [ ] `ac_coverage_matrix` khớp với acceptance_criteria (QA)
 - [ ] `confidence_score` nằm trong 0-100
-- [ ] Không có markdown fences bọc JSON (hoặc parser xử lý được)
-- [ ] DEV Agent: `mock_code_diff` bắt đầu bằng `diff --git`
-- [ ] QA Agent: `qa_report_md` là valid markdown
-
-### Retry Context
-Khi DEV Agent bị retry do Sandbox Gate fail, Minh sẽ append error context vào prompt:
-```python
-def build_dev_retry_prompt(original_prompt: str, sandbox_error: str, attempt: int) -> str:
-    return f"""{original_prompt}
-
-[SYSTEM] Your previous attempt (#{attempt}) failed sandbox testing.
-Error: {sandbox_error}
-
-Please fix the code diff to address the error above.
-Output the corrected unified git diff.
-"""
-```
 
 ---
 
@@ -427,22 +493,24 @@ Output the corrected unified git diff.
 
 | Phụ thuộc | Từ ai | Khi nào cần |
 |---|---|---|
-| Claude Code CLI login | Bản thân | Day 1 |
-| Multica daemon running | Minh | Day 2 |
-| Multica issue API working | Minh | Day 3 |
-| Sandbox Docker image built | Minh | Day 4 (để test sandbox flow) |
-| Backend pipeline endpoint | Minh | Day 5 (integration) |
+| MockClaudeCodeRunner code | Minh | Day 3 (để hiểu interface) |
+| RiskClassifier rules | Minh | Day 4 (để align risk levels) |
+| A2AContractValidator | Minh | Day 5 (integration test) |
+| Sandbox Docker image | Minh | Day 5 (sandbox test) |
+| FE GatePanel working | Giang | Day 6 (E2E test) |
 
 ---
 
 ## Lưu Ý Quan Trọng
 
-> ⚠️ **Claude Code CLI cần login trên máy TRƯỚC khi daemon chạy.**  
-> Multica daemon spawn `claude` CLI process — nếu chưa login thì agent sẽ fail.
+> ⚠️ **KHÔNG CÒN cần Claude Code CLI login hay Multica daemon.**
+> Agents chạy mock hoàn toàn. Khi lên thật → spike tích hợp riêng.
 
-> ⚠️ **Agent prompts là stateless.**  
-> Mỗi lần chạy agent = 1 lần gọi `claude -p "..."`. Không có memory/conversation history.  
-> Tất cả context cần truyền qua prompt parameter.
+> ⚠️ **PO Agent PHẢI có `route_classification` trong output.**
+> Thiếu field này → pipeline không biết skip UX hay không → fallback FULLSTACK.
 
-> ⚠️ **Test từng prompt riêng lẻ TRƯỚC khi integrate.**  
-> Chạy `claude -p "<prompt>"` manually và verify JSON output trước khi đưa vào Multica flow.
+> ⚠️ **DEV Agent `changed_files` PHẢI có `risk_level`.**
+> Thiếu → RiskClassifier mặc định REQUIRE_APPROVAL cho mọi file → approval fatigue.
+
+> ⚠️ **Mock data phải đi qua đúng interface bản thật** (AIFA v3 §4.5).
+> Không cam kết "thay nguồn là xong" — phải spike tích hợp thật trước khi chốt.
