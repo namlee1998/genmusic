@@ -1,106 +1,73 @@
 import './sdlc.css';
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Workflow, History, FileText } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Workflow } from 'lucide-react';
 import { useSdlcStore } from '@/store/useSdlcStore';
-import { useAppStore } from '@/store/useAppStore';
 import { useTranslation } from 'react-i18next';
 import RepoInput from './components/RepoInput';
 import PipelineStepper from './components/PipelineStepper';
-import ApprovalQueue from './components/ApprovalQueue';
-import QAResultCard from './components/QAResultCard';
+import GatePanel from './components/GatePanel';
+import AuditLog from './components/AuditLog';
+import FinalApproval from './components/FinalApproval';
 import DetailModal from './components/DetailModal';
 
 export default function SdlcDashboard() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
-  const { currentProjectId, treeLoaded, fetchTree } = useAppStore();
   const {
-    projectId,
-    pipelineStatus,
-    setProjectId,
+    status,
+    error,
     pollStatus,
-    error
+    workflowId
   } = useSdlcStore();
 
   const [activeDetailType, setActiveDetailType] = useState<'prd' | 'ux_spec' | 'code_diff' | 'qa_report' | null>(null);
 
+  // Poll status occasionally as a robust fallback to SSE
   useEffect(() => {
-    if (currentProjectId && currentProjectId !== projectId) {
-      setProjectId(currentProjectId);
-    }
-  }, [currentProjectId, projectId, setProjectId]);
-
-  useEffect(() => {
-    if (!treeLoaded) void fetchTree();
-  }, [treeLoaded, fetchTree]);
-
-  // Initial poll on load
-  useEffect(() => {
-    if (projectId) {
+    if (workflowId && status !== 'idle' && status !== 'failed') {
       void pollStatus();
+      const interval = window.setInterval(() => {
+        void pollStatus();
+      }, 5000);
+      return () => window.clearInterval(interval);
     }
-  }, [projectId, pollStatus]);
-
-  // Sequential poll when pipeline is running
-  useEffect(() => {
-    if (pipelineStatus === 'idle' || pipelineStatus === 'qa_complete' || pipelineStatus === 'failed') return;
-
-    // Poll immediately
-    void pollStatus();
-
-    const interval = window.setInterval(() => {
-      void pollStatus();
-    }, 2000); // 2 seconds
-
-    return () => window.clearInterval(interval);
-  }, [pipelineStatus, pollStatus]);
+  }, [workflowId, status, pollStatus]);
 
   return (
-    <main className="sdlc-dashboard">
-      <header className="delivery-header">
+    <main className="sdlc-dashboard" style={{ maxWidth: '1000px', margin: '0 auto', padding: '24px 16px' }}>
+      <header className="delivery-header" style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <p className="delivery-header__eyebrow"><Workflow size={14} /> {t('dashboard.workspace')}</p>
-          <h1>{t('dashboard.title')}</h1>
-          <p>{t('dashboard.subtitle')}</p>
-        </div>
-        <div className="delivery-subnav">
-          <button className="delivery-subnav__btn is-active">
-            <Workflow size={15} /> {t('dashboard.build')}
-          </button>
-          <button className="delivery-subnav__btn" onClick={() => navigate('/sdlc/audit')}>
-            <History size={15} /> {t('dashboard.audit')}
-          </button>
-          <button className="delivery-subnav__btn" onClick={() => navigate('/sdlc/outputs')}>
-            <FileText size={15} /> {t('dashboard.outputs')}
-          </button>
+          <p className="delivery-header__eyebrow" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Workflow size={14} className="text-indigo-400" /> 
+            <span>AIFA Autonomy Panel</span>
+          </p>
+          <h1>SDLC Control Center</h1>
+          <p style={{ margin: '4px 0 0 0', color: '#908fa0', fontSize: '13px' }}>
+            Risk-based pipeline control with autonomous developer agents and automated human gates.
+          </p>
         </div>
       </header>
 
-      {error && <div className="delivery-error">{error}</div>}
+      {error && (
+        <div className="delivery-error" style={{ 
+          margin: '0 18px 16px', 
+          padding: '12px 16px', 
+          background: 'rgba(239, 68, 68, 0.08)', 
+          border: '1px solid rgba(239, 68, 68, 0.25)', 
+          borderRadius: '8px', 
+          color: '#fca5a5', 
+          fontSize: '13px' 
+        }}>
+          {error}
+        </div>
+      )}
 
-      <div className="sdlc-dashboard__content">
-        {pipelineStatus === 'idle' ? (
-          <RepoInput />
-        ) : (
-          <div className="pipeline-workspace-grid">
-            <div className="pipeline-workspace-main">
-              <PipelineStepper />
-              <ApprovalQueue onViewDetail={(type) => setActiveDetailType(type)} />
-              <QAResultCard onViewDetail={(type) => setActiveDetailType(type)} />
-
-              {pipelineStatus !== 'qa_complete' && pipelineStatus !== 'failed' && pipelineStatus !== 'awaiting_approval' && (
-                <div className="pipeline-running-status-card">
-                  <div className="pipeline-running-status-spinner">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
-                  </div>
-                  <p>Agent is executing current pipeline step. Please wait...</p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+      <div className="sdlc-dashboard__content" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <RepoInput />
+        <PipelineStepper />
+        <GatePanel />
+        <FinalApproval />
+        <AuditLog />
       </div>
 
       <AnimatePresence>
@@ -115,4 +82,3 @@ export default function SdlcDashboard() {
     </main>
   );
 }
-

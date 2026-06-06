@@ -1,124 +1,87 @@
 import api, { getBaseURL } from './client';
 import { getStoredAuthSession } from './authStorage';
 
+// ── Types ─────────────────────────────────────────────────────────────────
+
+export type GateType = 'DEV_FILE_GATE' | 'PO_CLARIFY' | 'HITL_REVIEW' | 'FINAL_RELEASE';
+export type RouteType = 'UI' | 'BACKEND' | 'ANALYSIS' | 'FULLSTACK';
+export type GateAction = 'approve' | 'reject';
+
+export interface GateItem {
+  id: string;
+  type: GateType;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  payload: {
+    action?: string;         // 'MODIFY' | 'DELETE' | 'CREATE'
+    path?: string;           // file path
+    reason?: string;         // risk reason
+    diff?: string;           // unified diff
+    questions?: string[];    // PO clarification questions (max 3)
+  };
+  createdAt: string;
+}
+
+export interface AuditEntry {
+  timestamp: string;
+  actor: 'PO' | 'UX' | 'DEV' | 'QA' | 'A2A' | 'SYSTEM' | 'USER';
+  action: string;
+  status: 'ok' | 'warning' | 'error' | 'pending';
+}
+
+export interface PhaseStatus {
+  agent: 'PO' | 'UX' | 'DEV' | 'QA';
+  status: 'pending' | 'running' | 'gate_pending' | 'completed' | 'failed' | 'skipped';
+  duration?: string;
+}
+
+export interface QAResult {
+  status: 'passed' | 'failed';
+  coverage: number;
+  blockers: number;
+  warnings: number;
+  reportUrl: string;
+  commitSha: string;
+}
+
+export interface PipelineResponse {
+  workflowId: string;
+  status: string;
+  routeType: RouteType;
+  pipelinePhases: PhaseStatus[];
+  pendingGates: GateItem[];
+  auditLog: AuditEntry[];
+  qaResult?: QAResult | null;
+  releaseStatus?: 'pending' | 'approved' | 'rejected' | null;
+  repoInfo?: {
+    techStack: string[];
+    fileCount: number;
+    components: string[];
+  } | null;
+}
+
+// ── Real API Implementation ───────────────────────────────────────────────
+
 const BASE = '/sdlc';
 
-export const getApiErrorMessage = (error: unknown, fallback: string) => {
-  if (typeof error !== 'object' || error === null) return fallback;
-  const candidate = error as { response?: { data?: { message?: string } }; message?: string };
-  return candidate.response?.data?.message || candidate.message || fallback;
-};
+export const startPipelineReal = (repoUrl: string, request: string): Promise<{ workflowId: string; status: string }> =>
+  api.post(`${BASE}/run-po-agent`, { repo_url: repoUrl, request }).then((r) => r.data);
 
-export interface FeatureRequest {
-  title: string;
-  description?: string;
-  priority?: 'High' | 'Medium' | 'Low';
-  target_user?: string;
-  business_goal?: string;
-  constraints?: string[];
-}
+export const getPipelineStatusReal = (workflowId: string): Promise<PipelineResponse> =>
+  api.get(`${BASE}/pipeline/${workflowId}`).then((r) => r.data.data);
 
-export interface GateDecisionPayload {
-  decision: 'APPROVE' | 'REJECT' | 'REQUEST_CHANGES';
-  comment?: string;
-}
+export const resolveGateReal = (gateId: string, action: 'approve' | 'reject', comment?: string): Promise<{ success: boolean }> =>
+  api.post(`${BASE}/approvals/${gateId}`, { action, comment }).then((r) => r.data);
 
-// ── IntentGate ────────────────────────────────────────────────────────────
+export const releaseDecisionReal = (projectId: string, action: 'approve' | 'reject'): Promise<{ success: boolean; branch?: string; finalMd?: string }> =>
+  api.post(`${BASE}/projects/${projectId}/release-decision`, { action }).then((r) => r.data);
 
-export const runIntentAgent = (projectId: string, featureRequest: FeatureRequest, backlogId?: string) =>
-  api.post(`${BASE}/run-intent-agent`, { project_id: projectId, feature_request: featureRequest, backlog_id: backlogId })
-    .then((r) => r.data);
+// ── Real SSE Subscription ──────────────────────────────────────────────────
 
-// ── Run Agents ────────────────────────────────────────────────────────────
-
-export const runPOAgent = (projectId: string, sourceTaskId: string, feedbackPrompt = '') =>
-  api.post(`${BASE}/run-po-agent`, { project_id: projectId, source_task_id: sourceTaskId, feedback_prompt: feedbackPrompt })
-    .then((r) => r.data);
-
-export const startPOAgent = (projectId: string, featureRequest: FeatureRequest, backlogId?: string) =>
-  api.post(`${BASE}/run-po-agent`, { project_id: projectId, feature_request: featureRequest, backlog_id: backlogId })
-    .then((r) => r.data);
-
-export const runUXAgent = (sourceTaskId: string, feedbackPrompt = '') =>
-  api.post(`${BASE}/run-ux-agent`, { source_task_id: sourceTaskId, feedback_prompt: feedbackPrompt })
-    .then((r) => r.data);
-
-export const runDEVAgent = (sourceTaskId: string, feedbackPrompt = '') =>
-  api.post(`${BASE}/run-dev-agent`, { source_task_id: sourceTaskId, feedback_prompt: feedbackPrompt })
-    .then((r) => r.data);
-
-export const runQAAgent = (sourceTaskId: string, feedbackPrompt = '') =>
-  api.post(`${BASE}/run-qa-agent`, { source_task_id: sourceTaskId, feedback_prompt: feedbackPrompt })
-    .then((r) => r.data);
-
-// ── HITL ──────────────────────────────────────────────────────────────────
-
-export const submitGateDecision = (taskId: string, payload: GateDecisionPayload) =>
-  api.post(`${BASE}/tasks/${taskId}/gate-decision`, payload).then((r) => r.data);
-
-// Structured HITL decision (plan section 2.3 / 2.8) — idempotent, optimistic-locked.
-export interface StructuredDecisionBody {
-  decision_id: string;
-  base_output_version: number;
-  action: 'approve' | 'reject' | 'edit_approve';
-  comment?: string;
-  payload?: {
-    retry_reason?: string;
-    patch?: unknown[];
-    edited_output?: Record<string, unknown>;
-    target_fields?: string[];
-    blocking_issues?: Array<{ severity: string; issue: string; expected_fix: string }>;
-    acceptance_checks?: string[];
-  };
-}
-
-export const submitStructuredDecision = (taskId: string, body: StructuredDecisionBody) =>
-  api.post(`${BASE}/tasks/${taskId}/decision`, body).then((r) => r.data);
-
-// ── Status ────────────────────────────────────────────────────────────────
-
-export const getSdlcTaskStatus = (taskId: string) =>
-  api.get(`${BASE}/tasks/${taskId}`).then((r) => r.data.data);
-
-export const getWorkflowStatus = (projectId: string) =>
-  api.get(`${BASE}/workflow-status`, { params: { project_id: projectId } }).then((r) => r.data.data);
-
-export const getFinalReviewPacket = (projectId: string) =>
-  api.get(`${BASE}/final-review-packet/${projectId}`).then((r) => r.data.data);
-
-export const submitReleaseDecision = (
-  projectId: string,
-  body: { decision_id: string; decision: 'APPROVE' | 'REJECT'; comment?: string },
-) => api.post(`${BASE}/projects/${projectId}/release-decision`, body).then((r) => r.data);
-
-export const getAuditTrail = (projectId: string) =>
-  api.get(`${BASE}/audit-trail/${projectId}`).then((r) => r.data.data);
-
-export const getWorkflowMetrics = (projectId: string) =>
-  api.get(`${BASE}/projects/${projectId}/metrics`).then((r) => r.data.data);
-
-export const getProjectArtifacts = (projectId: string) =>
-  api.get(`${BASE}/projects/${projectId}/artifacts`).then((r) => r.data.data);
-
-// ── Backlog ───────────────────────────────────────────────────────────────
-
-export const getBacklogs = (projectId: string) =>
-  api.get(`${BASE}/projects/${projectId}/backlog`).then((r) => r.data.data);
-
-export const createBacklog = (projectId: string, payload: Partial<FeatureRequest>) =>
-  api.post(`${BASE}/projects/${projectId}/backlog`, payload).then((r) => r.data.data);
-
-export const moveBacklog = (backlogId: string, status: string) =>
-  api.patch(`${BASE}/backlog/${backlogId}/move`, { status }).then((r) => r.data.data);
-
-// ── SSE subscription (reuses same pattern as original API) ────────────────
-
-export const subscribeTaskSSE = (
-  taskId: string,
+export const subscribeWorkflowSSEReal = (
+  workflowId: string,
   handlers: {
-    onProgress?: (data: Record<string, unknown>) => void;
-    onCompleted?: (data: Record<string, unknown>) => void;
-    onError?: (data: Record<string, unknown>) => void;
+    onMessage?: (event: string, data: Record<string, unknown>) => void;
+    onError?: (error: unknown) => void;
   }
 ): AbortController => {
   const abort = new AbortController();
@@ -132,10 +95,11 @@ export const subscribeTaskSSE = (
       }
 
       const baseUrl = getBaseURL().replace(/\/$/, '');
-      const response = await fetch(`${baseUrl}${BASE}/status/${taskId}`, {
+      const response = await fetch(`${baseUrl}${BASE}/stream/${workflowId}`, {
         signal: abort.signal,
         headers
       });
+
       if (!response.body) return;
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -155,17 +119,15 @@ export const subscribeTaskSSE = (
           } else if (line.startsWith('data: ') && currentEvent) {
             try {
               const data = JSON.parse(line.slice(6));
-              if (currentEvent === 'progress') handlers.onProgress?.(data);
-              else if (currentEvent === 'completed') handlers.onCompleted?.(data);
-              else if (currentEvent === 'error') handlers.onError?.(data);
-            } catch { /* Ignore malformed SSE frames and continue streaming. */ }
+              handlers.onMessage?.(currentEvent, data);
+            } catch { /* Ignore malformed frames */ }
             currentEvent = null;
           }
         }
       }
     } catch (err) {
       if (!(err instanceof DOMException && err.name === 'AbortError')) {
-        handlers.onError?.({ message: 'SSE connection error' });
+        handlers.onError?.(err);
       }
     }
   })();
@@ -173,292 +135,477 @@ export const subscribeTaskSSE = (
   return abort;
 };
 
-// ── New Multica Pipeline / Mock API Layer ────────────────────────────────
+// ── Client-Side Mock Simulator State ────────────────────────────────────────
 
-export interface RepoAnalysis {
-  techStack: string[];
-  fileCount: number;
-  components: string[];
-}
-
-export interface ApprovalItem {
-  id: string;
-  agentName: 'PO' | 'UX' | 'DEV' | 'QA';
-  artifactType: 'prd' | 'ux_spec' | 'code_diff' | 'qa_report';
-  confidence: number;
-  summary: string;
-  createdAt: string;
-  approved?: boolean;
-}
-
-export interface QAResult {
-  status: 'passed' | 'failed';
-  coverage: number;
-  blockers: number;
-  warnings: number;
-  reportUrl: string;
-  commitSha: string;
-}
-
-export interface PipelineResponse {
-  projectId: string;
+interface MockState {
+  workflowId: string | null;
   status: string;
-  currentStep: number;
-  repoInfo?: RepoAnalysis;
-  approvals: ApprovalItem[];
-  qaResult?: QAResult;
+  routeType: RouteType;
+  pipelinePhases: PhaseStatus[];
+  pendingGates: GateItem[];
+  gateHistory: GateItem[];
+  auditLog: AuditEntry[];
+  qaResult: QAResult | null;
+  releaseStatus: 'pending' | 'approved' | 'rejected' | null;
+  repoInfo: {
+    techStack: string[];
+    fileCount: number;
+    components: string[];
+  } | null;
 }
 
-// Client-side mock simulation state
-let mockPipeline: PipelineResponse | null = null;
-let mockTimer: any = null;
-
-const MOCK_ARTIFACTS: Record<string, string> = {
-  prd: `# Product Requirements Document (PRD)
-
-## 1. Overview
-This is a generated PRD for the repository analysis. The agent has identified the core stack is React and Node.js.
-
-## 2. Features
-- User Auth & Session Management
-- Interactive Dashboard Layout
-- Dark/Light Mode support
-- Repository Integration & Analysis
-
-## 3. Tech Stack Requirements
-- React 19 + TypeScript
-- Zustand for lightweight state management
-- Vite for building and hot-reload
-`,
-  ux_spec: `# UI/UX Specification
-
-## 1. Design System
-- Primary: HSL 220 90% 56% (Vibrant Blue)
-- Dark Background: HSL 224 71% 4% (Premium Sleek Dark)
-- Accent: HSL 142 70% 45% (Vibrant Emerald)
-
-## 2. Page Hierarchy
-- /auth: Simplified login
-- /sdlc: Single-page delivery dashboard with 3 primary panes
-- /sdlc/audit: Interactive audit trail
-- /sdlc/outputs: Detailed artifact list
-`,
-  code_diff: `diff --git a/src/App.tsx b/src/App.tsx
-index 1a2b3c4..5d6e7f8 100644
---- a/src/App.tsx
-+++ b/src/App.tsx
-@@ -10,6 +10,12 @@ export default function App() {
-   return (
-     <div className="app-container">
-       <header>
--        <h1>SDLC Platform</h1>
-+        <h1>End-to-End Autonomous Software Factory</h1>
-       </header>
-+      <main>
-+        <RepoInput />
-+        <PipelineStepper />
-+      </main>
-     </div>
-   );
- }
-`,
-  qa_report: `# 🧪 QA Report Summary
-
-## 1. Unit Tests
-- Passed: 45 / 45 (100%)
-- Failed: 0 (0%)
-- Warnings: 2
-
-## 2. Code Coverage
-- Statements: 92.5%
-- Branches: 88.0%
-- Functions: 94.1%
-- Lines: 92.5%
-
-## 3. Security Audits
-- 0 critical vulnerabilities found.
-- 1 low severity dependency warning (npm audit).
-`
+let mockState: MockState = {
+  workflowId: null,
+  status: 'idle',
+  routeType: 'FULLSTACK',
+  pipelinePhases: [],
+  pendingGates: [],
+  gateHistory: [],
+  auditLog: [],
+  qaResult: null,
+  releaseStatus: null,
+  repoInfo: null
 };
 
-const startMockSimulation = (projectId: string, repoUrl: string) => {
-  if (mockTimer) clearTimeout(mockTimer);
+// Simulated callbacks for SSE emulation
+interface SSEListener {
+  onMessage?: (event: string, data: Record<string, unknown>) => void;
+}
+let activeSSEListener: SSEListener | null = null;
+let simulationTimeout: any = null;
 
-  mockPipeline = {
-    projectId,
+const addAudit = (actor: AuditEntry['actor'], action: string, status: AuditEntry['status'] = 'ok') => {
+  const timestamp = new Date().toLocaleTimeString();
+  const entry: AuditEntry = { timestamp, actor, action, status };
+  mockState.auditLog = [entry, ...mockState.auditLog];
+  
+  // Emit progress update via mock SSE
+  if (activeSSEListener) {
+    activeSSEListener.onMessage?.('progress', {
+      status: mockState.status,
+      pipelinePhases: mockState.pipelinePhases,
+      auditLog: mockState.auditLog
+    });
+  }
+};
+
+const emitGatePending = (gate: GateItem) => {
+  if (activeSSEListener) {
+    activeSSEListener.onMessage?.('gate_pending', { gate });
+  }
+};
+
+const triggerStateTransition = (nextIdx: number, steps: Array<{ status: string; delay: number; action: () => void }>) => {
+  if (nextIdx >= steps.length) return;
+  const step = steps[nextIdx];
+  simulationTimeout = setTimeout(() => {
+    step.action();
+    triggerStateTransition(nextIdx + 1, steps);
+  }, step.delay);
+};
+
+// Start simulation
+const startMockSimulation = (repoUrl: string, request: string) => {
+  if (simulationTimeout) clearTimeout(simulationTimeout);
+
+  mockState = {
+    workflowId: 'wf-mock-aifa-' + Math.random().toString(36).substring(2, 9),
     status: 'cloning',
-    currentStep: 1,
-    repoInfo: {
-      techStack: ['React 19', 'Zustand', 'TypeScript', 'Vite'],
-      fileCount: 124,
-      components: ['RepoInput', 'PipelineStepper', 'ApprovalQueue', 'QAResultCard']
-    },
-    approvals: []
+    routeType: request.toLowerCase().includes('backend') ? 'BACKEND' : 'FULLSTACK',
+    pipelinePhases: [
+      { agent: 'PO', status: 'pending' },
+      { agent: 'UX', status: 'pending' },
+      { agent: 'DEV', status: 'pending' },
+      { agent: 'QA', status: 'pending' }
+    ],
+    pendingGates: [],
+    gateHistory: [],
+    auditLog: [],
+    qaResult: null,
+    releaseStatus: 'pending',
+    repoInfo: null
   };
+
+  if (mockState.routeType === 'BACKEND') {
+    mockState.pipelinePhases = [
+      { agent: 'PO', status: 'pending' },
+      { agent: 'UX', status: 'skipped' },
+      { agent: 'DEV', status: 'pending' },
+      { agent: 'QA', status: 'pending' }
+    ];
+  }
+
+  addAudit('SYSTEM', `Cloning target repository: ${repoUrl}`);
 
   const steps = [
-    { status: 'cloning', step: 1, delay: 3000 },
-    { status: 'analyzing', step: 1, delay: 3000 },
-    { status: 'po_running', step: 2, delay: 4000 },
-    { status: 'awaiting_po_approval', step: 2, delay: 0 },
-    { status: 'ux_running', step: 3, delay: 4000 },
-    { status: 'dev_running', step: 4, delay: 4000 },
-    { status: 'sandbox_testing', step: 5, delay: 3000 },
-    { status: 'awaiting_dev_approval', step: 5, delay: 0 },
-    { status: 'qa_running', step: 6, delay: 4000 },
-    { status: 'qa_complete', step: 6, delay: 0 }
-  ];
-
-  let currentIdx = 0;
-
-  const runNext = () => {
-    if (!mockPipeline) return;
-    if (currentIdx >= steps.length) return;
-
-    const nextStep = steps[currentIdx];
-
-    if (nextStep.status === 'awaiting_po_approval') {
-      mockPipeline.status = 'awaiting_approval';
-      mockPipeline.approvals.push({
-        id: 'po-prd',
-        agentName: 'PO',
-        artifactType: 'prd',
-        confidence: 78,
-        summary: 'Generated high-fidelity PRD for the repository. Requires verification of core tech stack.',
-        createdAt: new Date().toISOString()
-      });
-      currentIdx++; // point to next state for when resumed
-      return;
-    }
-
-    if (nextStep.status === 'awaiting_dev_approval') {
-      mockPipeline.status = 'awaiting_approval';
-      mockPipeline.approvals.push({
-        id: 'dev-code',
-        agentName: 'DEV',
-        artifactType: 'code_diff',
-        confidence: 65,
-        summary: 'Integrated Tailwind configuration and main components. Please verify changes to index.tsx.',
-        createdAt: new Date().toISOString()
-      });
-      currentIdx++; // point to next state for when resumed
-      return;
-    }
-
-    mockPipeline.status = nextStep.status;
-    mockPipeline.currentStep = nextStep.step;
-
-    if (nextStep.status === 'qa_complete') {
-      mockPipeline.qaResult = {
-        status: 'passed',
-        coverage: 92.5,
-        blockers: 0,
-        warnings: 2,
-        reportUrl: 'QA.md',
-        commitSha: 'a7b8c9d'
-      };
-      return;
-    }
-
-    currentIdx++;
-    mockTimer = setTimeout(runNext, nextStep.delay);
-  };
-
-  mockTimer = setTimeout(runNext, 3000);
-};
-
-const approveMockItem = (approvalId: string) => {
-  if (!mockPipeline) return;
-  const item = mockPipeline.approvals.find(a => a.id === approvalId);
-  if (item) {
-    item.approved = true;
-
-    if (approvalId === 'po-prd') {
-      mockPipeline.status = 'ux_running';
-      mockPipeline.currentStep = 3;
-      setTimeout(() => {
-        if (!mockPipeline) return;
-        mockPipeline.status = 'dev_running';
-        mockPipeline.currentStep = 4;
-        setTimeout(() => {
-          if (!mockPipeline) return;
-          mockPipeline.status = 'sandbox_testing';
-          mockPipeline.currentStep = 5;
-          setTimeout(() => {
-            if (!mockPipeline) return;
-            mockPipeline.status = 'awaiting_approval';
-            mockPipeline.approvals.push({
-              id: 'dev-code',
-              agentName: 'DEV',
-              artifactType: 'code_diff',
-              confidence: 65,
-              summary: 'Integrated Tailwind configuration and main components. Please verify changes to index.tsx.',
-              createdAt: new Date().toISOString()
-            });
-          }, 3000);
-        }, 4000);
-      }, 4000);
-    } else if (approvalId === 'dev-code') {
-      mockPipeline.status = 'qa_running';
-      mockPipeline.currentStep = 6;
-      setTimeout(() => {
-        if (!mockPipeline) return;
-        mockPipeline.status = 'qa_complete';
-        mockPipeline.currentStep = 6;
-        mockPipeline.qaResult = {
-          status: 'passed',
-          coverage: 92.5,
-          blockers: 0,
-          warnings: 2,
-          reportUrl: 'QA.md',
-          commitSha: 'a7b8c9d'
+    {
+      status: 'analyzing',
+      delay: 2500,
+      action: () => {
+        mockState.status = 'analyzing';
+        mockState.repoInfo = {
+          techStack: ['React 19', 'Zustand', 'TypeScript', 'Tailwind CSS v4'],
+          fileCount: 88,
+          components: ['RepoInput', 'PipelineStepper', 'ApprovalQueue', 'QAResultCard']
         };
-      }, 4000);
-    }
-  }
-};
-
-export const startFromRepo = (projectId: string, repoUrl: string): Promise<any> => {
-  if (import.meta.env.VITE_USE_MOCK === 'true') {
-    startMockSimulation(projectId, repoUrl);
-    return Promise.resolve({ projectId, status: 'cloning' });
-  }
-  return api.post(`${BASE}/start-from-repo`, { project_id: projectId, repo_url: repoUrl }).then(r => r.data);
-};
-
-export const getPipelineStatus = (projectId: string): Promise<PipelineResponse> => {
-  if (import.meta.env.VITE_USE_MOCK === 'true') {
-    if (!mockPipeline) {
-      return Promise.resolve({
-        projectId,
-        status: 'idle',
-        currentStep: 0,
-        approvals: []
-      });
-    }
-    return Promise.resolve(mockPipeline);
-  }
-  return api.get(`${BASE}/pipeline-status/${projectId}`).then(r => r.data.data);
-};
-
-export const approveItem = (projectId: string, approvalId: string, action: 'approve' | 'reject', comment?: string): Promise<any> => {
-  if (import.meta.env.VITE_USE_MOCK === 'true') {
-    if (action === 'approve') {
-      approveMockItem(approvalId);
-    } else {
-      if (mockPipeline) {
-        mockPipeline.status = 'failed';
+        addAudit('SYSTEM', 'Repository cloned successfully to local workspace. Found 88 files.');
+        addAudit('SYSTEM', 'Analyzing tech stack: React 19, TypeScript, Tailwind v4 detected.');
+      }
+    },
+    {
+      status: 'po_running',
+      delay: 3000,
+      action: () => {
+        mockState.status = 'po_running';
+        mockState.pipelinePhases[0].status = 'running';
+        addAudit('PO', 'PO Agent active. Classifying development route requirements...');
+        addAudit('PO', `Route classification: ${mockState.routeType}. Generating Product Requirements (PRD) and acceptance criteria.`);
+      }
+    },
+    {
+      status: 'gate_pending_po',
+      delay: 3000,
+      action: () => {
+        mockState.status = 'awaiting_approval';
+        mockState.pipelinePhases[0].status = 'gate_pending';
+        
+        const poGate: GateItem = {
+          id: 'gate-po-clarify',
+          type: 'PO_CLARIFY',
+          status: 'PENDING',
+          payload: {
+            questions: [
+              'Do we need custom branding style for OAuth login panels or follow standard Google instructions?',
+              'Should authentication state persist locally across browser sessions using localStorage?',
+              'Is fallback auth (email/password) required alongside Google Login?'
+            ]
+          },
+          createdAt: new Date().toISOString()
+        };
+        
+        mockState.pendingGates = [poGate];
+        addAudit('PO', '🔔 Human Gate Required: PO Clarification on requirements. Waiting for user input.', 'warning');
+        emitGatePending(poGate);
       }
     }
-    return Promise.resolve({ success: true });
+  ];
+
+  triggerStateTransition(0, steps);
+};
+
+// Resumes simulation after PO gate is resolved
+const resumeSimulationAfterPO = () => {
+  addAudit('SYSTEM', 'Handoff integrity verified. Initializing A2A contract between PO and developmental stages.');
+  addAudit('A2A', '🔗 Handoff PO → UX contract verified. Hashes match, upstream commit hash: a8b9c10.');
+  
+  if (mockState.routeType === 'FULLSTACK') {
+    mockState.status = 'ux_running';
+    mockState.pipelinePhases[1].status = 'running';
+    addAudit('UX', 'UX Agent active. Generating layout layouts and interactive flow definitions.');
+
+    setTimeout(() => {
+      mockState.pipelinePhases[1].status = 'completed';
+      mockState.pipelinePhases[1].duration = '1m 20s';
+      addAudit('UX', 'UX Specification and Penpot mockup specs generated successfully.');
+      addAudit('A2A', '🔗 Handoff UX → DEV contract verified. Hashes match, upstream commit hash: c5d6e7f.');
+      startDevPhase();
+    }, 4000);
+  } else {
+    // Skip UX for BACKEND route
+    startDevPhase();
   }
-  return api.post(`${BASE}/pipeline/${projectId}/approve`, { approval_id: approvalId, action, comment }).then(r => r.data);
+};
+
+const startDevPhase = () => {
+  mockState.status = 'dev_running';
+  mockState.pipelinePhases[2].status = 'running';
+  addAudit('DEV', 'DEV Agent active (Mock Claude Code). Analyzing existing structure and writing code changes...');
+
+  setTimeout(() => {
+    mockState.status = 'awaiting_approval';
+    mockState.pipelinePhases[2].status = 'gate_pending';
+
+    const devGate: GateItem = {
+      id: 'gate-dev-risk',
+      type: 'DEV_FILE_GATE',
+      status: 'PENDING',
+      payload: {
+        action: 'MODIFY',
+        path: 'src/middleware/auth.js',
+        reason: 'auth/security file modification (High Risk Level)',
+        diff: `diff --git a/src/middleware/auth.js b/src/middleware/auth.js
+index f3b91a2..9e2c4c8 100644
+--- a/src/middleware/auth.js
++++ b/src/middleware/auth.js
+@@ -10,6 +10,12 @@ const checkAuth = (req, res, next) => {
+   if (!token) {
+     return res.status(401).json({ message: 'Unauthorized access' });
+   }
++  
++  // Google OAuth validation branch
++  if (token.startsWith('g_oauth_')) {
++    req.user = { provider: 'google', id: token.slice(8) };
++    return next();
++  }
+ 
+   try {
+     const decoded = jwt.verify(token, process.env.JWT_SECRET);`
+      },
+      createdAt: new Date().toISOString()
+    };
+
+    mockState.pendingGates = [devGate];
+    addAudit('DEV', '🔔 Human Gate Required: Security file modification in src/middleware/auth.js detected.', 'warning');
+    emitGatePending(devGate);
+  }, 4000);
+};
+
+// Resumes simulation after DEV gate is resolved
+const resumeSimulationAfterDev = () => {
+  mockState.status = 'sandbox_testing';
+  addAudit('SYSTEM', 'Deploying patch to Docker Sandboxed local container (--network=none)...');
+
+  setTimeout(() => {
+    addAudit('SYSTEM', 'Docker Sandbox testing completed successfully. 12 / 12 tests passed.');
+    addAudit('A2A', '🔗 Handoff DEV → QA contract verified. Hashes match, upstream commit hash: d9e8f7a.');
+    
+    mockState.status = 'qa_running';
+    mockState.pipelinePhases[3].status = 'running';
+    addAudit('QA', 'QA Agent active. Running regression testing suite and auditing code coverage metrics...');
+
+    setTimeout(() => {
+      mockState.status = 'qa_complete';
+      mockState.pipelinePhases[2].status = 'completed';
+      mockState.pipelinePhases[2].duration = '2m 15s';
+      mockState.pipelinePhases[3].status = 'completed';
+      mockState.pipelinePhases[3].duration = '1m 05s';
+      
+      mockState.qaResult = {
+        status: 'passed',
+        coverage: 94.2,
+        blockers: 0,
+        warnings: 1,
+        reportUrl: 'http://localhost/reports/qa-report.html',
+        commitSha: '9ef34ddf7e8a91b'
+      };
+
+      addAudit('QA', 'QA regression suite completed. Coverage rate: 94.2%. 0 blockers found.');
+      addAudit('SYSTEM', 'Pipeline execution completed. Release branch aifa/google-oauth ready for deployment. Final Approval Required.');
+    }, 4000);
+
+  }, 3000);
+};
+
+// Exported mock controls
+export const startPipelineMock = (repoUrl: string, request: string): Promise<{ workflowId: string; status: string }> => {
+  startMockSimulation(repoUrl, request);
+  return Promise.resolve({
+    workflowId: mockState.workflowId!,
+    status: mockState.status
+  });
+};
+
+export const getPipelineStatusMock = (workflowId: string): Promise<PipelineResponse> => {
+  return Promise.resolve({
+    workflowId: mockState.workflowId || workflowId,
+    status: mockState.status,
+    routeType: mockState.routeType,
+    pipelinePhases: mockState.pipelinePhases,
+    pendingGates: mockState.pendingGates,
+    auditLog: mockState.auditLog,
+    qaResult: mockState.qaResult,
+    releaseStatus: mockState.releaseStatus,
+    repoInfo: mockState.repoInfo
+  });
+};
+
+export const resolveGateMock = (gateId: string, action: 'approve' | 'reject', comment?: string): Promise<{ success: boolean }> => {
+  const gateIdx = mockState.pendingGates.findIndex(g => g.id === gateId);
+  if (gateIdx !== -1) {
+    const gate = mockState.pendingGates[gateIdx];
+    gate.status = action === 'approve' ? 'APPROVED' : 'REJECTED';
+    
+    // Move to history
+    mockState.gateHistory.push(gate);
+    mockState.pendingGates.splice(gateIdx, 1);
+
+    addAudit('USER', `Resolved gate ${gateId}: ${action.toUpperCase()}${comment ? ' - ' + comment : ''}`);
+
+    if (activeSSEListener) {
+      activeSSEListener.onMessage?.('gate_resolved', { gateId, action, comment });
+    }
+
+    if (action === 'approve') {
+      if (gateId === 'gate-po-clarify') {
+        resumeSimulationAfterPO();
+      } else if (gateId === 'gate-dev-risk') {
+        resumeSimulationAfterDev();
+      }
+    } else {
+      mockState.status = 'failed';
+      mockState.pipelinePhases.forEach(p => {
+        if (p.status === 'running' || p.status === 'gate_pending') {
+          p.status = 'failed';
+        }
+      });
+      addAudit('SYSTEM', `Pipeline halted because gate ${gateId} was rejected.`, 'error');
+    }
+  }
+
+  return Promise.resolve({ success: true });
+};
+
+export const releaseDecisionMock = (projectId: string, action: 'approve' | 'reject'): Promise<{ success: boolean; branch?: string; finalMd?: string }> => {
+  mockState.releaseStatus = action === 'approve' ? 'approved' : 'rejected';
+  
+  if (action === 'approve') {
+    mockState.status = 'idle'; // Finished
+    addAudit('USER', 'Owner approved release deployment.');
+    addAudit('SYSTEM', 'Successfully merged features/google-oauth into main. Released branch created.', 'ok');
+    return Promise.resolve({
+      success: true,
+      branch: 'aifa/google-oauth-release',
+      finalMd: '# AIFA Build Release Documentation\n- Merge completed successfully\n- QA code verified'
+    });
+  } else {
+    mockState.status = 'failed';
+    addAudit('USER', 'Owner rejected release deployment.');
+    return Promise.resolve({ success: false });
+  }
+};
+
+export const subscribeWorkflowSSEMock = (
+  workflowId: string,
+  handlers: {
+    onMessage?: (event: string, data: Record<string, unknown>) => void;
+    onError?: (error: unknown) => void;
+  }
+): AbortController => {
+  const abort = new AbortController();
+  activeSSEListener = handlers;
+  
+  abort.signal.addEventListener('abort', () => {
+    activeSSEListener = null;
+  });
+
+  return abort;
+};
+
+// ── Environment Routing Wrapper ───────────────────────────────────────────
+
+const useMock = () => {
+  return import.meta.env.VITE_USE_MOCK === 'true';
+};
+
+export const startPipeline = (repoUrl: string, request: string): Promise<{ workflowId: string; status: string }> => {
+  return useMock() ? startPipelineMock(repoUrl, request) : startPipelineReal(repoUrl, request);
+};
+
+export const getPipelineStatus = (workflowId: string): Promise<PipelineResponse> => {
+  return useMock() ? getPipelineStatusMock(workflowId) : getPipelineStatusReal(workflowId);
+};
+
+export const resolveGate = (gateId: string, action: 'approve' | 'reject', comment?: string): Promise<{ success: boolean }> => {
+  return useMock() ? resolveGateMock(gateId, action, comment) : resolveGateReal(gateId, action, comment);
+};
+
+export const releaseDecision = (projectId: string, action: 'approve' | 'reject'): Promise<{ success: boolean; branch?: string; finalMd?: string }> => {
+  return useMock() ? releaseDecisionMock(projectId, action) : releaseDecisionReal(projectId, action);
+};
+
+export const subscribeWorkflowSSE = (
+  workflowId: string,
+  handlers: {
+    onMessage?: (event: string, data: Record<string, unknown>) => void;
+    onError?: (error: unknown) => void;
+  }
+): AbortController => {
+  return useMock() ? subscribeWorkflowSSEMock(workflowId, handlers) : subscribeWorkflowSSEReal(workflowId, handlers);
+};
+
+// Backward-compatibility adapters for existing components if any
+export const startFromRepo = (projectId: string, repoUrl: string): Promise<any> => {
+  return startPipeline(repoUrl, 'add google login').then(res => ({
+    projectId: workflowIdToProjectId(res.workflowId),
+    status: res.status
+  }));
+};
+
+export const getPipelineStatusLegacy = (projectId: string): Promise<any> => {
+  const workflowId = projectIdToWorkflowId(projectId);
+  return getPipelineStatus(workflowId).then(res => ({
+    projectId,
+    status: res.status,
+    currentStep: phaseToStep(res.status),
+    repoInfo: res.repoInfo,
+    approvals: res.pendingGates.map(g => ({
+      id: g.id,
+      agentName: g.type === 'PO_CLARIFY' ? 'PO' : 'DEV',
+      artifactType: g.type === 'PO_CLARIFY' ? 'prd' : 'code_diff',
+      confidence: 90,
+      summary: g.type === 'PO_CLARIFY' ? 'PO Clarifications' : g.payload.reason || 'Code changes',
+      createdAt: g.createdAt,
+      approved: g.status === 'APPROVED'
+    })),
+    qaResult: res.qaResult
+  }));
+};
+
+export const approveItemLegacy = (projectId: string, approvalId: string, action: 'approve' | 'reject', comment?: string): Promise<any> => {
+  return resolveGate(approvalId, action, comment);
 };
 
 export const getArtifactContent = (projectId: string, type: string): Promise<{ content: string }> => {
-  if (import.meta.env.VITE_USE_MOCK === 'true') {
-    return Promise.resolve({ content: MOCK_ARTIFACTS[type] || 'No content found' });
-  }
-  return api.get(`${BASE}/pipeline/${projectId}/artifacts/${type}`).then(r => r.data);
+  const contentMap: Record<string, string> = {
+    prd: `# PRD for target repository\n- Authentication feature integration.`,
+    ux_spec: `# UX Spec for authentication flow\n- Interactive Google button widget.`,
+    code_diff: `diff --git a/auth.js b/auth.js\n+ // auth codes`,
+    qa_report: `# QA Report\n- All validation assertions passed successfully.`
+  };
+  return Promise.resolve({ content: contentMap[type] || 'No content found' });
 };
+
+// Utilities to map legacy parameters
+const workflowIdToProjectId = (wfId: string) => wfId;
+const projectIdToWorkflowId = (pId: string) => pId;
+const phaseToStep = (status: string): number => {
+  switch (status) {
+    case 'cloning': return 1;
+    case 'analyzing': return 1;
+    case 'po_running': return 2;
+    case 'awaiting_approval': return 2;
+    case 'ux_running': return 3;
+    case 'dev_running': return 4;
+    case 'sandbox_testing': return 5;
+    case 'qa_running': return 6;
+    case 'qa_complete': return 6;
+    default: return 0;
+  }
+};
+
+// ── Restored Legacy API Functions ──
+
+export interface FeatureRequest {
+  title: string;
+  description?: string;
+  priority?: 'High' | 'Medium' | 'Low';
+  target_user?: string;
+  business_goal?: string;
+  constraints?: string[];
+}
+
+export const getWorkflowStatus = (projectId: string): Promise<any> =>
+  api.get(`${BASE}/workflow-status`, { params: { project_id: projectId } }).then((r) => r.data.data);
+
+export const getAuditTrail = (projectId: string): Promise<any> =>
+  api.get(`${BASE}/audit-trail/${projectId}`).then((r) => r.data.data);
+
+export const getWorkflowMetrics = (projectId: string): Promise<any> =>
+  api.get(`${BASE}/projects/${projectId}/metrics`).then((r) => r.data.data);
+
+export const getProjectArtifacts = (projectId: string): Promise<any> =>
+  api.get(`${BASE}/projects/${projectId}/artifacts`).then((r) => r.data.data);
+
+export const getBacklogs = (projectId: string): Promise<any> =>
+  api.get(`${BASE}/projects/${projectId}/backlog`).then((r) => r.data.data);
 

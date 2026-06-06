@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { useSdlcStore } from '@/store/useSdlcStore';
-import { GitBranch, Loader2, BarChart2 } from 'lucide-react';
+import { GitBranch, Loader2, BarChart2, Terminal } from 'lucide-react';
 
 export default function RepoInput() {
-  const { submitRepo, repoInfo, isLoading, error } = useSdlcStore();
+  const { startPipeline, repoInfo, isLoading, error } = useSdlcStore();
   const [url, setUrl] = useState('');
+  const [request, setRequest] = useState('add google login');
   const [validationError, setValidationError] = useState('');
 
   const validateUrl = (value: string) => {
@@ -24,35 +25,56 @@ export default function RepoInput() {
       return;
     }
     setValidationError('');
-    await submitRepo(url);
+    await startPipeline(url, request);
   };
 
   return (
     <div className="repo-input-card">
       <div className="repo-input-card__header">
         <GitBranch className="repo-input-card__icon" size={20} />
-        <h3>Repository Integration</h3>
+        <h3>Repository & Feature Integration</h3>
       </div>
       <form onSubmit={handleSubmit} className="repo-input-card__form">
-        <div className="repo-input-card__field">
-          <input
-            type="text"
-            placeholder="https://github.com/username/repository.git"
-            value={url}
-            onChange={(e) => {
-              setUrl(e.target.value);
-              if (validationError) setValidationError('');
-            }}
-            disabled={isLoading}
-            className={`repo-input-card__input ${validationError ? 'is-invalid' : ''}`}
-          />
-          <button type="submit" disabled={isLoading} className="repo-input-card__submit-btn">
-            {isLoading ? (
-              <Loader2 className="animate-spin" size={18} />
-            ) : (
-              'Analyze'
-            )}
-          </button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div className="repo-input-card__field">
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label style={{ fontSize: '11px', color: '#908fa0', fontWeight: 600 }}>🔗 REPOSITORY URL</label>
+              <input
+                type="text"
+                placeholder="https://github.com/username/repository.git"
+                value={url}
+                onChange={(e) => {
+                  setUrl(e.target.value);
+                  if (validationError) setValidationError('');
+                }}
+                disabled={isLoading}
+                className={`repo-input-card__input ${validationError ? 'is-invalid' : ''}`}
+              />
+            </div>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label style={{ fontSize: '11px', color: '#908fa0', fontWeight: 600 }}>📝 FEATURE REQUEST</label>
+              <input
+                type="text"
+                placeholder="e.g. add google login"
+                value={request}
+                onChange={(e) => setRequest(e.target.value)}
+                disabled={isLoading}
+                className="repo-input-card__input"
+              />
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
+            <button type="submit" disabled={isLoading} className="repo-input-card__submit-btn" style={{ gap: '8px' }}>
+              {isLoading ? (
+                <Loader2 className="animate-spin" size={16} />
+              ) : (
+                <>
+                  <Terminal size={16} />
+                  <span>Start AIFA Orchestrator</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
         {(validationError || error) && (
           <p className="repo-input-card__error">{validationError || error}</p>
@@ -63,7 +85,7 @@ export default function RepoInput() {
         <div className="repo-analysis-panel">
           <div className="repo-analysis-panel__header">
             <BarChart2 size={16} />
-            <h4>Repository Analysis Results</h4>
+            <h4>Target Repository Scan Analysis</h4>
           </div>
           <div className="repo-analysis-panel__metrics">
             <div className="repo-analysis-panel__metric">
