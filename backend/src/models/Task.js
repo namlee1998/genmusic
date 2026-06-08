@@ -18,22 +18,38 @@ function parseJson(value, fallback = null) {
 
 class TaskModel {
   static async create(data) {
-    const record = await prisma.task.create({
-      data: {
-        id: data.id,
-        projectId: data.projectId,
-        type: data.type,
-        status: data.status || 'pending',
-        promptProfile: data.promptProfile,
-        result: serializeJson(data.result),
-        error: data.error,
-        inputContentHash: data.inputContentHash || null,
-        outputContentHash: data.outputContentHash || null,
-        sourceRunId: data.sourceRunId || null,
-        versionStatus: data.versionStatus || 'draft',
-        observability: serializeJson(data.observability, '{}'),
-        gateMode: data.gateMode || null,
-      }
+    const record = await prisma.$transaction(async (tx) => {
+      const task = await tx.task.create({
+        data: {
+          id: data.id,
+          projectId: data.projectId,
+          type: data.type,
+          status: data.status || 'pending',
+          promptProfile: data.promptProfile,
+          result: serializeJson(data.result),
+          error: data.error,
+          inputContentHash: data.inputContentHash || null,
+          outputContentHash: data.outputContentHash || null,
+          sourceRunId: data.sourceRunId || null,
+          versionStatus: data.versionStatus || 'draft',
+          observability: serializeJson(data.observability, '{}'),
+          gateMode: data.gateMode || null,
+          executionStatus: data.executionStatus || 'queued',
+          attempt: data.attempt || 0,
+          maxAttempts: data.maxAttempts || 1,
+        },
+      });
+      await tx.agentEvent.create({
+        data: {
+          taskId: task.id,
+          projectId: task.projectId,
+          sequence: 1,
+          type: 'task_queued',
+          actor: 'orchestrator',
+          payload: JSON.stringify({ stage: task.type }),
+        },
+      });
+      return task;
     });
     return this._map(record);
   }
@@ -64,6 +80,14 @@ class TaskModel {
       retryCount: data.retryCount,
       lastRetryReason: data.lastRetryReason,
       gateMode: data.gateMode,
+      executionStatus: data.executionStatus,
+      attempt: data.attempt,
+      maxAttempts: data.maxAttempts,
+      lockedBy: data.lockedBy,
+      lockedAt: data.lockedAt,
+      heartbeatAt: data.heartbeatAt,
+      startedAt: data.startedAt,
+      finishedAt: data.finishedAt,
     };
     Object.keys(mapped).forEach(k => mapped[k] === undefined && delete mapped[k]);
 
@@ -72,6 +96,14 @@ class TaskModel {
       data: mapped
     });
     return this._map(record);
+  }
+
+  static async listByExecutionStatus(executionStatus) {
+    const data = await prisma.task.findMany({
+      where: { executionStatus },
+      orderBy: { createdAt: 'asc' },
+    });
+    return (data || []).map(this._map);
   }
 
   static async findByProjectId(projectId) {
@@ -150,6 +182,14 @@ class TaskModel {
       retryCount: row.retryCount ?? 0,
       lastRetryReason: row.lastRetryReason || null,
       gateMode: row.gateMode || null,
+      executionStatus: row.executionStatus || 'queued',
+      attempt: row.attempt ?? 0,
+      maxAttempts: row.maxAttempts ?? 1,
+      lockedBy: row.lockedBy || null,
+      lockedAt: row.lockedAt || null,
+      heartbeatAt: row.heartbeatAt || null,
+      startedAt: row.startedAt || null,
+      finishedAt: row.finishedAt || null,
     };
   }
 }

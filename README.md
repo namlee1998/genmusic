@@ -1,9 +1,71 @@
-# AIDLC Control Platform - Team 6
+# AIFA Documentation
 
-End-to-End Autonomous Software Factory with four worker agents, Human-in-the-Loop
-(HITL) review gates, sandbox validation, and QA quality gates.
+Thu muc nay mo ta kien truc va trang thai hien tai cua AIFA v3.
 
-This is the single entry point for setup, local development, and testing.
+## Tai lieu chinh
+
+| File | Muc dich |
+| --- | --- |
+| [AIFA_V3_IMPLEMENTATION_SUMMARY.md](AIFA_V3_IMPLEMENTATION_SUMMARY.md) | Nguon su that ve tinh nang da co, hardening da lam va gioi han hien tai |
+| [architecture.md](architecture.md) | Kien truc runtime hien tai va luong PO/UX/DEV/QA |
+| [AIFA_NOTES.md](AIFA_NOTES.md) | Ban do codebase cho developer |
+| [QUALITY_GATE_RULES.md](QUALITY_GATE_RULES.md) | Quy tac validation, risk gate, QA gate va release gate |
+| [AIFA_DEMO_1_WEEK_ROADMAP.md](AIFA_DEMO_1_WEEK_ROADMAP.md) | Ke hoach 1 tuan de persist task/event/gate va recovery |
+| [AIFA_REAL_DATA_3_WEEK_ROADMAP.md](AIFA_REAL_DATA_3_WEEK_ROADMAP.md) | Ke hoach 3 tuan de chuyen tu mock sang controlled real execution |
+| [CHANGELOG.md](CHANGELOG.md) | Lich su thay doi dang chu y |
+
+## Nguyen tac to chuc
+
+- `README`: muc luc va loi vao duy nhat.
+- `AIFA_V3_IMPLEMENTATION_SUMMARY`: current state, bao gom limitations va cac
+  hardening da hoan tat.
+- `architecture`, `AIFA_NOTES`, `QUALITY_GATE_RULES`: tai lieu tham chieu cho
+  developer, moi file co mot chu de rieng.
+- Hai roadmap chi mo ta future work; khong tron voi current state.
+- `CHANGELOG` chi ghi lich su phien ban, khong dung lam roadmap.
+
+## Workflow hien tai
+
+```text
+Open folder / repo
+  -> PO route classification + clarification gate
+  -> UX Penpot mock (neu route co UI)
+  -> DEV question/tool gates + file changes
+  -> QA quality gate + human review
+  -> Owner/Admin release approval
+  -> Release bundle + final.md
+```
+
+Execution path chinh cua demo:
+
+```env
+EXECUTION_PATH=claude-code
+USE_MOCK_CLAUDE_CODE=true
+USE_MOCK_AGENTS=true
+```
+
+Mock Claude Code dung cung interface `onGate` du kien cho runner that. Moi
+output van phai qua output contract, validation ba lop va A2A integrity check.
+
+## Cach doc
+
+1. Doc [AIFA_V3_IMPLEMENTATION_SUMMARY.md](AIFA_V3_IMPLEMENTATION_SUMMARY.md)
+   de nam pham vi da thuc hien va gioi han.
+2. Doc [architecture.md](architecture.md) de hieu luong runtime.
+3. Planning agent doc [AIFA_DEMO_1_WEEK_ROADMAP.md](AIFA_DEMO_1_WEEK_ROADMAP.md)
+   truoc
+   khi bat dau [AIFA_REAL_DATA_3_WEEK_ROADMAP.md](AIFA_REAL_DATA_3_WEEK_ROADMAP.md).
+4. Developer doc [AIFA_NOTES.md](AIFA_NOTES.md) va
+   [QUALITY_GATE_RULES.md](QUALITY_GATE_RULES.md) truoc khi sua runtime.
+
+## Gioi han quan trong
+
+- Claude Code runner that van la stub; demo dang dung mock.
+- Pending gate metadata da persist, nhung continuation van in-memory; backend
+  restart se danh dau gate `interrupted`, chua the resume tu diem gate.
+- Ghi `final.md` vao folder local can Chrome/Edge va quyen `readwrite`.
+- Path `langchain` duoc giu de tuong thich, nhung khong phai path phat trien chinh.
+
 
 ## 1. Repository Structure
 
@@ -39,7 +101,7 @@ Feature request
   -> DEV Agent + sandbox validation
   -> QA Agent + quality gate
   -> QA human approval
-  -> Final release decision
+  -> Final release decision![alt text](image.png)
 ```
 
 The Intent endpoint remains available only as a compatibility adapter for
@@ -47,6 +109,8 @@ older local data. New workflow runs start directly at PO Agent.
 
 For design details, see [docs/architecture.md](docs/architecture.md). For agent
 roles and required models, see [AGENTS.md](AGENTS.md).
+
+
 
 ## 2. Current Implementation Status
 
@@ -93,21 +157,12 @@ The repository includes an end-to-end local workflow demo:
 - Owners can delete a project from the sidebar. Deletion removes its workflow
   tasks, artifacts, HITL decisions, backlog items, folders, invitations, and
   memberships.
-- Local mock mode is available through `USE_MOCK_AGENTS=true`. Set
-  `MOCK_LOW_CONFIDENCE_STAGE` to `po-agent`, `ux-agent`, or `dev-agent` to
-  choose which intermediate worker pauses at confidence `0.58`. The default is
-  `dev-agent`.
-- **Demo scenarios (`MOCK_SCENARIO`).** With `USE_MOCK_AGENTS=true`, set
-  `MOCK_SCENARIO` to drive a deterministic branch through the same
-  `mock-data/` set (no extra mock tree, no query param). Leaving it unset keeps
-  the legacy behaviour (DEV holds low + the OAuth security-rework cycle):
-  - `happy_path` — every stage passes first try → reaches Final Release.
-  - `low_confidence_hold` — the `MOCK_LOW_CONFIDENCE_STAGE` worker returns `0.58` → HOLD.
-  - `missing_evidence` — DEV omits sandbox/self-test evidence → output `INVALID`, no handoff.
-  - `qa_blocker` — QA reports a blocker + failed test → QA gate fails, release LOCKED.
-  - `release_reject` — outputs pass; the reviewer rejects at the Final gate.
-  - `escalation` — the target stage never recovers → repeated reject → escalation.
-  Run `cd backend && npm run demo:smoke` as a preflight to verify all six branches.
+- The demo runtime intentionally supports one polished deterministic
+  `happy_path`: PO clarification, UX Penpot mock, DEV clarification and tool
+  approval, QA review, release approval, then `final.md`.
+- Failure-handling mechanisms remain in product code, but synthetic bad-case
+  switching is not exposed during the happy-path demo.
+- Run `cd backend && npm run demo:smoke` as the complete happy-path preflight.
 - Local JWT sign-in works without hosted authentication. Development CORS
   accepts local frontend ports such as `5173` and `5174`.
 - Resilience: errors return a stable `{status, code, message, phase, requestId}`
@@ -151,9 +206,8 @@ implementation:
 - `backend`: `npm.cmd test` passes `58/58` Jest tests (includes the agent-output
   contract drift guard, the agent conformance suite, and the INVALID-handoff
   guard for PO->UX, UX->DEV, DEV->QA).
-- `backend`: `npm.cmd run demo:smoke` passes `6/6` deterministic scenarios
-  against an isolated smoke database (`happy_path`, `low_confidence_hold`,
-  `missing_evidence`, `qa_blocker`, `release_reject`, `escalation`).
+- `backend`: `npm.cmd run demo:smoke` verifies the complete deterministic happy
+  path against an isolated smoke database.
 - `backend`: `npx.cmd prisma migrate diff --exit-code` reports no schema drift
   (the CI drift guard; the repo uses db push, so `migrate diff` replaces the
   N/A `migrate status`).
@@ -258,10 +312,9 @@ SUPABASE_AUTH_REDIRECT_URL=http://localhost:5173/auth
 AGENTS_BASE_URL=http://127.0.0.1:8001
 FRONTEND_URL=http://localhost:5173
 
-USE_MOCK_AGENTS=false
-MOCK_LOW_CONFIDENCE_STAGE=dev-agent
-# Optional demo branch selector (see "Demo scenarios" above). Unset = legacy behaviour.
-# MOCK_SCENARIO=happy_path
+USE_MOCK_AGENTS=true
+EXECUTION_PATH=claude-code
+USE_MOCK_CLAUDE_CODE=true
 ENABLE_LEGACY_WORKFLOWS=false
 
 JWT_SECRET=replace-for-shared-environments

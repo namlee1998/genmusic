@@ -14,7 +14,6 @@ import ReleaseGatePanel from './components/ReleaseGatePanel';
 import McpActivityPanel from './components/McpActivityPanel';
 import DeliveryErrorBanner from './components/DeliveryErrorBanner';
 import WorkflowStatusBanner from './components/WorkflowStatusBanner';
-import ScenarioSwitcher from './components/ScenarioSwitcher';
 
 type Phase = 'po' | 'ux' | 'dev' | 'qa';
 
@@ -233,7 +232,6 @@ export default function SdlcDashboard() {
         </div>
       </header>
 
-      <ScenarioSwitcher onChanged={refreshStatus} />
 
       <DeliveryErrorBanner error={error} onDismiss={() => setError(null)} />
 

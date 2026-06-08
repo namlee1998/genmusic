@@ -3,6 +3,13 @@ const ERROR_CODES = {
   ARTIFACT_MISSING: 'ARTIFACT_MISSING',
   HASH_MISMATCH: 'HASH_MISMATCH',
   MOCK_PARSE_ERROR: 'MOCK_PARSE_ERROR',
+  CLAUDE_CODE_AUTH_ERROR: 'CLAUDE_CODE_AUTH_ERROR',
+  CLAUDE_CODE_CERTIFICATE_ERROR: 'CLAUDE_CODE_CERTIFICATE_ERROR',
+  CLAUDE_CODE_EXIT: 'CLAUDE_CODE_EXIT',
+  CLAUDE_CODE_RATE_LIMIT: 'CLAUDE_CODE_RATE_LIMIT',
+  CLAUDE_CODE_TIMEOUT: 'CLAUDE_CODE_TIMEOUT',
+  CLAUDE_OUTPUT_CONTRACT_INVALID: 'CLAUDE_OUTPUT_CONTRACT_INVALID',
+  CLAUDE_OUTPUT_PARSE_ERROR: 'CLAUDE_OUTPUT_PARSE_ERROR',
 };
 
 // Fallback code derived from the HTTP status when an error has none.
@@ -24,8 +31,15 @@ const errorHandler = (err, req, res, _next) => {
   console.error('[ErrorHandler]', err);
 
   // Default error response
-  const statusCode = err.statusCode || err.status || 500;
-  const message = err.message || 'Internal Server Error';
+  const isMulterError = err?.name === 'MulterError';
+  const statusCode = isMulterError ? 413 : (err.statusCode || err.status || 500);
+  const message = isMulterError
+    ? (err.code === 'LIMIT_FILE_SIZE'
+      ? 'Folder contains a file larger than the 25 MB upload limit'
+      : err.code === 'LIMIT_FILE_COUNT'
+        ? 'Folder contains more than the 8,000 file upload limit'
+        : `Folder upload rejected: ${err.message}`)
+    : (err.message || 'Internal Server Error');
 
   // Don't leak error details in production
   const response = {

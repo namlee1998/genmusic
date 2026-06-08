@@ -7,6 +7,9 @@ const { startBatchJobs } = require('./jobs/batchJob');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { requestLogger } = require('./middleware/logger');
 const { requestContextMiddleware } = require('./middleware/requestContext');
+const gateBridge = require('./services/gateBridge');
+const taskWorker = require('./services/taskWorkerService');
+const SdlcWorkflowService = require('./services/SdlcWorkflowService');
 
 const app = express();
 const PRISMA_CONNECT_TIMEOUT_MS = 5_000;
@@ -74,6 +77,23 @@ const startServer = async () => {
     try {
       await connectPrismaWithTimeout();
       console.log('[Prisma] Connection verified.');
+      const interrupted = await gateBridge.markOrphanedPendingInterrupted();
+      if (interrupted.count > 0) {
+        console.warn(`[GateBridge] Marked ${interrupted.count} orphaned pending gate(s) as interrupted.`);
+      }
+      // DMO-001: reclaim tasks left `running` by a crashed/restarted process so
+      // they don't hang forever, then start the periodic stale-task sweeper.
+      const reclaimed = await taskWorker.sweepStale({ reason: 'orphaned by backend restart' });
+      if (reclaimed > 0) {
+        console.warn(`[TaskWorker] Reclaimed ${reclaimed} orphaned running task(s) on boot.`);
+      }
+      taskWorker.startSweeper();
+      // DMO-003: re-dispatch tasks stuck at an interrupted gate so a restart does
+      // not force the user to re-run the workflow (only the interrupted stage re-runs).
+      const resumed = await SdlcWorkflowService.recoverInterruptedGates();
+      if (resumed > 0) {
+        console.warn(`[Recovery] Re-dispatched ${resumed} interrupted-gate stage(s).`);
+      }
     } catch (dbError) {
       console.error('[Prisma] Connection test failed:', dbError.message);
       console.warn('[Prisma] Ensure database exists and schema is pushed');

@@ -55,7 +55,7 @@ export default function RepoInput() {
           </button>
         </div>
         {(validationError || error) && (
-          <p className="repo-input-card__error">{validationError || error}</p>
+          <p className="repo-input-card__error">{validationError || error?.message}</p>
         )}
       </form>
 

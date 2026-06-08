@@ -8,6 +8,8 @@ const LandingPage = lazy(() => import('@/pages/LandingPage').then(module => ({ d
 const NotFoundPage = lazy(() => import('@/pages/NotFound').then(module => ({ default: module.NotFoundPage })));
 const UpgradePlanPage = lazy(() => import('@/pages/UpgradePlan').then(module => ({ default: module.UpgradePlanPage })));
 const AdminApp = lazy(() => import('@/pages/Admin').then(module => ({ default: module.AdminApp })));
+// AIFA v3 single-screen demo (Phase 7).
+const AifaDemo = lazy(() => import('@/pages/AifaDemo'));
 
 const PageLoader = () => (
   <div className="min-h-screen flex items-center justify-center bg-background">
@@ -23,7 +25,8 @@ export default function App() {
     <Router>
       <Suspense fallback={<PageLoader />}>
         <Routes>
-          <Route path="/" element={<Navigate to="/sdlc" replace />} />
+          {/* AIFA v3 single-screen demo is now the default landing (Phase 7). */}
+          <Route path="/" element={<Navigate to="/aifa" replace />} />
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/admin/*" element={<AdminApp />} />
           <Route
@@ -34,17 +37,13 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="/app/*" element={<Navigate to="/sdlc" replace />} />
-          
-          {/* ── AIDLC Control Platform ── */}
-          <Route
-            path="/sdlc/*"
-            element={
-              <ProtectedRoute>
-                <AppShell />
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/app/*" element={<Navigate to="/aifa" replace />} />
+
+          {/* ── AIFA v3 single-screen demo (primary UI) ── */}
+          <Route path="/aifa" element={<AifaDemo />} />
+
+          {/* ── Legacy AIDLC dashboard: redirected to the single-screen demo ── */}
+          <Route path="/sdlc/*" element={<Navigate to="/aifa" replace />} />
 
           <Route
             path="/profile"

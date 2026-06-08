@@ -1,6 +1,8 @@
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
-const { Task, AgentArtifact, HitlDecision } = require('../models');
+const { Task, AgentArtifact, HitlDecision, AgentEvent } = require('../models');
+const taskLifecycle = require('./taskLifecycleService');
+const taskWorker = require('./taskWorkerService');
 const FeatureBacklog = require('../models/FeatureBacklog');
 const AgentService = require('./AgentService');
 const MembershipService = require('./MembershipService');
@@ -10,7 +12,21 @@ const fs = require('fs/promises');
 const path = require('path');
 const { ApiError, ERROR_CODES } = require('../middleware/errorHandler');
 const { assertOutputConforms } = require('./agentContract');
+const repoService = require('./repoService');
+const riskClassifier = require('./riskClassifier');
+const gateBridge = require('./gateBridge');
+const claudeCodeRunner = require('../agents/claudeCodeRunner');
+const claudePermissionDispatcher = require('../agents/claudePermissionDispatcher');
+const workflowReport = require('./workflowReport');
 const logger = require('../config/logger');
+
+// T2.3 — in-memory onGate audit (taskId -> entries[]). Single-process demo store;
+// surfaced through getAuditTrail so the UI sees auto/approval/block events.
+const GATE_AUDIT = new Map();
+
+// AIFA v3 execution-path flags (plan T0.2). Defaults keep the old behaviour.
+const EXECUTION_PATH = () => (process.env.EXECUTION_PATH || 'langchain');
+const MAX_PARALLEL_WORKFLOWS = () => Math.max(1, Number(process.env.MAX_PARALLEL_WORKFLOWS) || 3);
 
 const WORKSPACE_DIR = path.join(__dirname, '../../../workspace/projects');
 
@@ -71,6 +87,12 @@ const DEFAULT_GATE_MODE = {
   'qa-agent':  GATE_MODE.STRICT_MANUAL,
 };
 
+// Demo board: per-project review holds. demoBoardService registers the roles a
+// staged flow must PARK on (PO/DEV), forcing them to STRICT_MANUAL so the flow
+// stops at that stage's review instead of auto-approving. In-memory only — a
+// non-demo run never reads this, and a restart simply clears it (re-seed).
+const REVIEW_HOLDS = new Map(); // projectId -> Set(role)
+
 // ---------------------------------------------------------------------------
 // Gate configuration (T2) — single, documented place for the HITL gate knobs.
 // IMPORTANT: do NOT lower AUTO_APPROVE_CONFIDENCE. Existing behaviour/tests
@@ -97,7 +119,8 @@ const AUTO_APPROVE_CONFIDENCE = GATE_CONFIG.AUTO_APPROVE_CONFIDENCE;
 // Each rule: { rule, severity, check(out, task) -> bool, detail(out)|string,
 //              when?(out) -> bool }  (no Ajv — predicates stay hand-written).
 // ---------------------------------------------------------------------------
-const OUTPUT_CONTRACT_VERSION = 'gate-output.v1';
+// v2 (T5.1): added the layer-2 semantic `ac_testable` BLOCKER to PO/intent.
+const OUTPUT_CONTRACT_VERSION = 'gate-output.v2';
 
 const _acList = (o) => (Array.isArray(o.acceptance_criteria) ? o.acceptance_criteria : []);
 const _matrix = (o) => (Array.isArray(o.ac_coverage_matrix) ? o.ac_coverage_matrix : []);
@@ -107,6 +130,11 @@ const PO_RULES = [
     check: (o) => typeof o.prd === 'string' && o.prd.trim().length > 0 },
   { rule: 'ac_present', severity: 'BLOCKER', detail: 'No acceptance criteria',
     check: (o) => _acList(o).length > 0 },
+  // T5.1 layer 2 (semantic): at least one AC must be concrete enough to test.
+  // Catches "field is present but not testable" (all-vague AC lists) as a BLOCKER.
+  { rule: 'ac_testable', severity: 'BLOCKER',
+    detail: 'Acceptance criteria are present but none are concrete/testable enough',
+    check: (o) => _acList(o).length === 0 || _acList(o).some((a) => String(a).trim().length >= 15) },
   { rule: 'ac_measurable', severity: 'WARNING',
     detail: (o) => `${_acList(o).filter((a) => String(a).trim().length < 12).length} acceptance criteria look too vague to test`,
     check: (o) => _acList(o).every((a) => String(a).trim().length >= 12) },
@@ -179,8 +207,6 @@ const AGENT_POLICY = {
 const FINAL_GATE = 'FINAL_GATE';
 const RELEASE_DECISIONS = ['APPROVE', 'REJECT'];
 const MOCK_REVIEW_STAGES = ['po-agent', 'ux-agent', 'dev-agent'];
-// T3: deterministic demo scenarios, selected via env `MOCK_SCENARIO`.
-const MOCK_SCENARIOS = ['happy_path', 'low_confidence_hold', 'missing_evidence', 'qa_blocker', 'release_reject', 'escalation'];
 const DEFAULT_MOCK_SCENARIO = 'happy_path';
 const VAGUE_REVIEW_COMMENTS = new Set(['rework', 'fix', 'bad', 'wrong', 'redo', 'do again', 'lam lai', 'sua lai']);
 
@@ -190,36 +216,10 @@ const MOCK_SCENARIO_PROFILES = {
     outcome: 'All worker gates pass and the final release can be approved.',
     signals: ['high confidence', 'complete evidence', 'QA pass'],
   },
-  low_confidence_hold: {
-    title: 'Low confidence hold',
-    outcome: 'The configured review stage finishes with low confidence and waits for HITL review.',
-    signals: ['confidence 0.58', 'manual review required', 'no auto-commit'],
-  },
-  missing_evidence: {
-    title: 'Missing DEV evidence',
-    outcome: 'DEV omits sandbox execution evidence, artifacts become INVALID, and QA handoff is blocked.',
-    signals: ['sandbox tests not run', 'self test report missing', 'DEV INVALID'],
-  },
-  qa_blocker: {
-    title: 'QA blocker',
-    outcome: 'QA finds a blocking regression and the release gate stays locked.',
-    signals: ['blocker count 2', 'failed test present', 'release not eligible'],
-  },
-  release_reject: {
-    title: 'Final release reject',
-    outcome: 'All agents pass, then the final human release decision rejects the packet.',
-    signals: ['QA pass', 'release packet ready', 'final gate rejects'],
-  },
-  escalation: {
-    title: 'Max retry escalation',
-    outcome: 'The target review stage remains low confidence after rework and escalates after retry budget.',
-    signals: ['confidence stays 0.58', 'rework cannot recover', 'escalation_required'],
-  },
 };
 
 function resolveMockScenario() {
-  const rawScenario = (process.env.MOCK_SCENARIO || '').toLowerCase();
-  return MOCK_SCENARIOS.includes(rawScenario) ? rawScenario : DEFAULT_MOCK_SCENARIO;
+  return DEFAULT_MOCK_SCENARIO;
 }
 
 function buildScenarioBrief(scenario, task) {
@@ -291,6 +291,39 @@ function classifyFeatureRequest(featureRequest = {}) {
     reason: isHighRisk
       ? 'Sensitive feature keywords require evidence-based review and a security checklist.'
       : 'No sensitive feature keyword was detected by the mock classifier.',
+  };
+}
+
+/**
+ * T4.1 — PO route classification. Decides whether a request needs a UI phase.
+ * route ∈ { ui, backend, analysis, fullstack }. Only backend/analysis skip UX.
+ * Default is fullstack (keeps the existing PO→UX→DEV→QA path) so unknown
+ * requests never accidentally drop the design step.
+ */
+function classifyRoute(featureRequest = {}) {
+  const text = `${featureRequest.title || ''} ${featureRequest.description || ''}`.toLowerCase();
+  const uiKeywords = ['login', 'signin', 'sign in', 'sign-up', 'signup', 'page', 'screen', 'button', 'form',
+    'ui', 'ux', 'frontend', 'front-end', 'dashboard', 'modal', 'layout', 'design', 'component', 'navbar', 'menu'];
+  const backendKeywords = ['logging', 'log ', 'api', 'endpoint', 'database', 'migration', 'cron', 'queue',
+    'webhook', 'cache', 'rate limit', 'background job', 'index', 'schema', 'service', 'pipeline'];
+  const analysisKeywords = ['analy', 'report', 'metric', 'investigate', 'research', 'audit', 'benchmark', 'profiling'];
+
+  const hasUI = uiKeywords.some((k) => text.includes(k));
+  const hasBackend = backendKeywords.some((k) => text.includes(k));
+  const isAnalysis = analysisKeywords.some((k) => text.includes(k));
+
+  let route;
+  if (hasUI && hasBackend) route = 'fullstack';
+  else if (hasUI) route = 'ui';
+  else if (isAnalysis && !hasBackend) route = 'analysis';
+  else if (hasBackend) route = 'backend';
+  else route = 'fullstack'; // safe default → keep UX
+
+  return {
+    route,
+    has_ui: route === 'ui' || route === 'fullstack',
+    classifier: 'mock-route.v1',
+    reason: `Classified as "${route}" from request keywords.`,
   };
 }
 
@@ -486,7 +519,8 @@ class SdlcWorkflowService {
   /**
    * Start a PO Agent run — reads intent assumptions, produces PRD artifacts.
    */
-  async runPOAgent({ projectId, sourceTaskId = null, featureRequest = null, feedbackPrompt = '', backlogId = null, user }) {
+  async runPOAgent({ projectId, sourceTaskId = null, featureRequest = null, feedbackPrompt = '', backlogId = null,
+    repoUrl = null, repoPath = null, branch = 'main', request = '', newWorkflow = false, user }) {
     const sourceTask = sourceTaskId
       ? await this._requireApprovedTask(sourceTaskId, 'intent-agent', user)
       : null;
@@ -494,6 +528,27 @@ class SdlcWorkflowService {
     if (!effectiveProjectId) throw new ApiError(400, 'projectId is required');
     if (user) {
       await MembershipService.requireProjectRole(user.id, effectiveProjectId, ['owner', 'admin', 'editor']);
+    }
+
+    // T1.4: a fresh, user-initiated workflow is subject to the parallel-run cap
+    // and (optionally) clones a repo before any PO task is created. Internal
+    // handoffs / reruns pass newWorkflow=false and skip both.
+    let repoContext = null;
+    if (newWorkflow) {
+      const active = await this._countActiveWorkflows();
+      if (active >= MAX_PARALLEL_WORKFLOWS()) {
+        throw new ApiError(429, `Too many active workflows (${active}/${MAX_PARALLEL_WORKFLOWS()}). Try again when one finishes.`, 'TOO_MANY_WORKFLOWS', 'PO_RUNNING');
+      }
+      if (repoUrl) {
+        const cloned = await repoService.cloneRepo({ repoUrl, branch, projectId: effectiveProjectId, request });
+        const safety = await repoService.assertRepoSafe(cloned.repoPath);
+        repoContext = { ...cloned, repoUrl, request, safety };
+      } else if (repoPath) {
+        // "Open folder" flow: use an already-cloned local repo instead of cloning.
+        const local = await repoService.useLocalRepo({ repoPath, branch, projectId: effectiveProjectId, request });
+        const safety = await repoService.assertRepoSafe(local.repoPath);
+        repoContext = { ...local, repoUrl: null, request, safety };
+      }
     }
 
     const sourceArtifacts = sourceTask ? await AgentArtifact.findByTaskId(sourceTask.id) : [];
@@ -513,6 +568,17 @@ class SdlcWorkflowService {
       versionStatus: 'draft',
     });
 
+    // T1.4: persist the repo context on the PO task observability so downstream
+    // agents (and the claude-code runner) can recover repoPath/branch/request.
+    // DMO-003: also persist the feature request so a PO interrupted at its
+    // clarification gate (before any artifact is saved) can be resumed.
+    const poObservability = {};
+    if (repoContext) poObservability.repo = repoContext;
+    if (featureRequest) poObservability.featureRequest = featureRequest;
+    if (Object.keys(poObservability).length) {
+      await Task.update(task.id, { observability: poObservability });
+    }
+
     if (backlogId) {
       try {
         await FeatureBacklog.linkTask(backlogId, task.id, effectiveProjectId);
@@ -525,6 +591,7 @@ class SdlcWorkflowService {
     const context = await this._buildContextFromArtifacts(sourceArtifacts, {
       feedbackPrompt,
       ...(featureRequest ? { featureRequest } : {}),
+      ...(repoContext ? { repoContext } : {}),
     });
 
     this._runAgent(task, context, user?.id).catch((err) => console.error('[SDLC] PO Agent failed:', err));
@@ -564,13 +631,17 @@ class SdlcWorkflowService {
    * Start a DEV Agent run — reads approved UX artifacts, produces implementation plan.
    */
   async runDEVAgent({ projectId, sourceTaskId, feedbackPrompt = '', user }) {
-    const sourceTask = await this._requireApprovedTask(sourceTaskId, 'ux-agent', user);
+    // T4.2 — DEV source may be UX (default) or PO directly (route skipped UX).
+    const sourceTask = await this._requireApprovedTask(sourceTaskId, ['ux-agent', 'po-agent'], user);
     const effectiveProjectId = projectId || sourceTask.projectId;
+    const fromPoDirectly = sourceTask.type === 'po-agent';
 
-    // Also load PO artifacts for DEV context
-    const poTask = await Task.findLatestByProject(effectiveProjectId, 'po-agent', 'completed', 'committed');
+    // Load UX (the source, if any) + PO artifacts for DEV context.
+    const poTask = fromPoDirectly
+      ? sourceTask
+      : await Task.findLatestByProject(effectiveProjectId, 'po-agent', 'completed', 'committed');
     const [uxArtifacts, poArtifacts] = await Promise.all([
-      AgentArtifact.findByTaskId(sourceTask.id),
+      fromPoDirectly ? Promise.resolve([]) : AgentArtifact.findByTaskId(sourceTask.id),
       poTask ? AgentArtifact.findByTaskId(poTask.id) : Promise.resolve([]),
     ]);
 
@@ -601,6 +672,16 @@ class SdlcWorkflowService {
   async runQAAgent({ projectId, sourceTaskId, feedbackPrompt = '', user }) {
     const sourceTask = await this._requireApprovedTask(sourceTaskId, 'dev-agent', user);
     const effectiveProjectId = projectId || sourceTask.projectId;
+    const projectTasks = await Task.findByProjectId(effectiveProjectId);
+
+    if (gateBridge.listPending({ taskId: sourceTask.id }).length > 0) {
+      throw new ApiError(409, 'DEV still has a pending gate; QA cannot start yet');
+    }
+
+    const existingQa = projectTasks.find(
+      (task) => task.type === 'qa-agent' && task.sourceRunId === sourceTask.id
+    );
+    if (existingQa) return existingQa;
 
     const [poTask, uxTask] = await Promise.all([
       Task.findLatestByProject(effectiveProjectId, 'po-agent', 'completed', 'committed'),
@@ -713,11 +794,43 @@ class SdlcWorkflowService {
       if (rule.when && !rule.when(out, task)) continue;
       if (rule.check(out, task)) continue;
       const detail = typeof rule.detail === 'function' ? rule.detail(out, task) : rule.detail;
-      violations.push({ rule: rule.rule, detail, severity: rule.severity });
+      violations.push({ rule: rule.rule, detail, severity: rule.severity, layer: this._layerOf(rule.rule) });
     }
 
     const blockers = violations.filter((v) => v.severity === 'BLOCKER');
     return { ok: blockers.length === 0, violations };
+  }
+
+  /**
+   * T5.1 — map a contract rule to one of the three validation layers:
+   *   schema   — structural completeness / format
+   *   semantic — meaning: AC testable, coverage complete, diff related to scope
+   *   risk     — auth/payment/security/config evidence
+   */
+  _layerOf(ruleName) {
+    const RISK = new Set(['security_notes', 'security_gate', 'quality_gate_pass']);
+    const SEMANTIC = new Set(['ac_testable', 'ac_measurable', 'coverage_complete', 'tests_passed',
+      'no_blockers', 'release_reason', 'linked_ac', 'build_ok', 'sandbox_tests']);
+    if (RISK.has(ruleName)) return 'risk';
+    if (SEMANTIC.has(ruleName)) return 'semantic';
+    return 'schema';
+  }
+
+  /**
+   * T5.1 — group a role validation into the three layers. A BLOCKER in ANY
+   * layer means INVALID (no handoff). Returned for UI/audit surfacing.
+   */
+  _threeLayerSummary(task, output) {
+    const { violations } = this._validateGateOutput(task, output);
+    const byLayer = { schema: [], semantic: [], risk: [] };
+    for (const v of violations) byLayer[v.layer || 'schema'].push(v);
+    const layerOk = (arr) => !arr.some((v) => v.severity === 'BLOCKER');
+    return {
+      schema: { ok: layerOk(byLayer.schema), violations: byLayer.schema },
+      semantic: { ok: layerOk(byLayer.semantic), violations: byLayer.semantic },
+      risk: { ok: layerOk(byLayer.risk), violations: byLayer.risk },
+      ok: violations.filter((v) => v.severity === 'BLOCKER').length === 0,
+    };
   }
 
   _evaluateGatePolicy(task) {
@@ -768,6 +881,8 @@ class SdlcWorkflowService {
       summary: reasons.join(' ') || 'Confidence and validation checks passed. Safe to auto-approve.',
       issues,
       validation,
+      // T5.1 — three-layer breakdown (schema / semantic / risk).
+      layers: this._threeLayerSummary(task, output),
     };
   }
 
@@ -876,6 +991,53 @@ class SdlcWorkflowService {
     await this._recordApprovedHandoff(refreshed, record);
     await this._startNextAgentIfAvailable(refreshed, user?.id);
     return { task: refreshed, hitlDecision: record, validation };
+  }
+
+  // =========================================================================
+  // Gate resolution (T2.4) — wake a pending onGate approval, idempotently.
+  // =========================================================================
+
+  /**
+   * Resolve a pending gate created by _makeOnGate / gateBridge.requestGate.
+   *   type A (tool):     { action:'approve'|'reject', comment? }  (reject needs reason)
+   *   type B (question): { answers }
+   * 404 if the gate is not pending (also covers a double POST — no double action).
+   */
+  async resolveApproval({ approvalId, action, comment = '', answers = null, user }) {
+    if (!gateBridge.hasPending(approvalId)) {
+      const persisted = await gateBridge.findPersisted(approvalId);
+      if (persisted?.status === 'interrupted') {
+        throw new ApiError(409, 'This gate was interrupted by a backend restart. Re-trigger the workflow to continue.');
+      }
+      throw new ApiError(404, 'No pending approval with that id (already resolved or expired)');
+    }
+    const gate = gateBridge.getPending(approvalId);
+    if (user && gate.projectId) {
+      await MembershipService.requireProjectRole(user.id, gate.projectId, ['owner', 'admin', 'editor']);
+    }
+
+    if (gate.kind === 'question') {
+      const result = { answers: Array.isArray(answers) ? answers : (answers ? [answers] : []) };
+      const woke = await gateBridge.resolveGate(approvalId, result);
+      return { approvalId, resolved: woke, kind: 'question' };
+    }
+
+    // type A (tool)
+    if (!['approve', 'reject'].includes(action)) {
+      throw new ApiError(400, "action must be 'approve' or 'reject'");
+    }
+    if (action === 'reject' && (!comment || !comment.trim())) {
+      throw new ApiError(400, 'A reject decision requires a reason (comment).');
+    }
+    const woke = await gateBridge.resolveGate(approvalId, { action, comment: comment.trim() });
+    return { approvalId, resolved: woke, kind: 'tool', action };
+  }
+
+  /** List pending gates for a task or project (poll-friendly for SSE/UI). */
+  async listPendingGates({ taskId = null, projectId = null } = {}) {
+    const memory = gateBridge.listPending({ taskId, projectId });
+    const interrupted = await gateBridge.listInterrupted({ taskId, projectId });
+    return [...memory, ...interrupted.filter((gate) => !memory.some((item) => item.approvalId === gate.approvalId))];
   }
 
   // =========================================================================
@@ -1113,6 +1275,19 @@ class SdlcWorkflowService {
           type: 'a2a_handoff',
         };
       }),
+      // T2.3: onGate audit (auto/approval/block/question) for the claude-code path.
+      ...sdlcTasks.flatMap((t) => this._getGateAudit(t.id).map((g) => ({
+        timestamp: g.timestamp,
+        actor: g.kind === 'GATE_AUTO' || g.kind === 'GATE_BLOCK' ? 'ORCHESTRATOR' : 'HUMAN',
+        action: g.kind,
+        taskId: t.id,
+        agent: t.type,
+        comment: g.comment || g.detail || null,
+        reason: g.detail || null,
+        file: g.file || null,
+        category: g.category || null,
+        type: 'gate_audit',
+      }))),
     ].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
     // I3: synthesize a consistent PHASE_TRANSITION chain from the existing
@@ -1254,14 +1429,14 @@ class SdlcWorkflowService {
 
     const existing = await HitlDecision.findByDecisionId(decisionId);
     if (existing) return { hitlDecision: existing, idempotentReplay: true };
-    const priorDecisions = await HitlDecision.findByProjectId(projectId);
-    const priorReleaseDecision = [...priorDecisions].reverse().find((record) => record.gate === FINAL_GATE);
-    if (priorReleaseDecision && ['APPROVE', 'REJECT'].includes(priorReleaseDecision.decision)) {
-      throw new ApiError(409, `Release already finalized as ${priorReleaseDecision.decision}`);
-    }
-
     const qaTask = await Task.findLatestByProject(projectId, 'qa-agent', 'completed', 'committed');
     if (!qaTask) throw new ApiError(409, 'Release gate is unavailable until QA is approved');
+    const priorDecisions = await HitlDecision.findByProjectId(projectId);
+    const priorReleaseDecision = [...priorDecisions].reverse()
+      .find((record) => record.gate === FINAL_GATE && record.taskId === qaTask.id);
+    if (priorReleaseDecision && ['APPROVE', 'REJECT'].includes(priorReleaseDecision.decision)) {
+      throw new ApiError(409, `This QA run was already finalized as ${priorReleaseDecision.decision}`);
+    }
     if (qaTask.result?.gateRecommendation !== 'PASS') {
       throw new ApiError(409, 'Release gate is unavailable until QA quality gate returns PASS');
     }
@@ -1295,7 +1470,26 @@ class SdlcWorkflowService {
       },
     });
 
-    return { hitlDecision: record };
+    // T6.2 — on RELEASED, assemble the multi-part release bundle (branch +
+    // commit/diff + final.md + QA report + release decision) in the repo clone.
+    let releaseOutputs = null;
+    if (decision === 'APPROVE') {
+      try {
+        const [packet, audit, repoContext] = await Promise.all([
+          this.getFinalReviewPacket(projectId, null),
+          this.getAuditTrail(projectId, null),
+          this._getRepoContext(projectId),
+        ]);
+        const bundle = await workflowReport.writeReleaseBundle({
+          projectId, repoContext, packet, audit, evidence, releaseDecision: record,
+        });
+        releaseOutputs = bundle.outputs;
+      } catch (err) {
+        logger.error('release bundle failed', { projectId, error: err.message });
+      }
+    }
+
+    return { hitlDecision: record, releaseOutputs };
   }
 
   async _buildReleaseEvidenceSummary(projectId) {
@@ -1375,6 +1569,27 @@ class SdlcWorkflowService {
     };
   }
 
+  async getReleaseFile(projectId, fileName, user) {
+    if (user) {
+      await MembershipService.requireProjectRole(user.id, projectId, ['owner', 'admin', 'editor', 'viewer']);
+    }
+    if (!['final.md', 'qa-report.md'].includes(fileName)) {
+      throw new ApiError(400, 'Only final.md and qa-report.md can be downloaded');
+    }
+    const repoContext = await this._getRepoContext(projectId);
+    const baseDir = repoContext?.repoPath || path.join(repoService.WORKSPACE_DIR, projectId, 'release');
+    const filePath = path.join(baseDir, fileName);
+    if (!repoService.isWithinRepo(baseDir, fileName)) {
+      throw new ApiError(400, 'Invalid release file path');
+    }
+    try {
+      await fs.access(filePath);
+    } catch (_) {
+      throw new ApiError(404, `${fileName} has not been generated yet`);
+    }
+    return filePath;
+  }
+
   // =========================================================================
   // Task status (SSE-compatible, reuses base WorkflowService pattern)
   // =========================================================================
@@ -1396,6 +1611,8 @@ class SdlcWorkflowService {
     task.hitlDecision = hitlDecision;
     task.gate = AGENT_GATES[task.type] || null;
     task.nextAgent = NEXT_AGENT[task.type];
+    // T2/T7: surface pending onGate gates (claude-code path) for the UI/SSE.
+    task.pendingGates = gateBridge.listPending({ taskId });
 
     // Attach Quality Gate evaluation for QA tasks
     if (task.type === 'qa-agent') {
@@ -1425,13 +1642,8 @@ class SdlcWorkflowService {
       await MembershipService.requireProjectRole(user.id, projectId, ['owner', 'admin', 'editor', 'viewer']);
     }
 
-    const [intentTask, poTask, uxTask, devTask, qaTask] = await Promise.all([
-      Task.findLatestByProject(projectId, 'intent-agent', null),
-      Task.findLatestByProject(projectId, 'po-agent', null),
-      Task.findLatestByProject(projectId, 'ux-agent', null),
-      Task.findLatestByProject(projectId, 'dev-agent', null),
-      Task.findLatestByProject(projectId, 'qa-agent', null),
-    ]);
+    const tasks = await Task.findByProjectId(projectId);
+    const { intentTask, poTask, uxTask, devTask, qaTask } = this._selectCurrentTaskChain(tasks);
 
     const hitlDecisions = await HitlDecision.findByProjectId(projectId);
     // T5: pick the most-recent non-final decision per task deterministically
@@ -1470,6 +1682,7 @@ class SdlcWorkflowService {
       return {
         taskId: task.id,
         status: task.status,
+        executionStatus: task.executionStatus || null,
         versionStatus: task.versionStatus,
         gate: AGENT_GATES[task.type],
         hitlDecision: decisionsByTaskId[task.id] || null,
@@ -1480,6 +1693,8 @@ class SdlcWorkflowService {
           && decisionsByTaskId[task.id]?.decision !== 'APPROVE',
         // T1: the output failed role validation (blocking) — no handoff possible.
         invalid: !!invalidByTaskId[task.id],
+        error: task.error || null,
+        failure: task.observability?.failure || null,
         createdAt: task.createdAt,
         updatedAt: task.updatedAt,
       };
@@ -1493,10 +1708,19 @@ class SdlcWorkflowService {
       }
     }
     const releaseEvidence = await this._buildReleaseEvidenceSummary(projectId);
+    const pendingQuestion = this._getPendingQuestionGate(projectId);
 
     return {
       projectId,
       featureRequest,
+      pipelineLock: pendingQuestion ? {
+        locked: true,
+        reason: 'question_pending',
+        role: pendingQuestion.role,
+        taskId: pendingQuestion.taskId,
+        approvalId: pendingQuestion.approvalId,
+        message: `${pendingQuestion.role} is waiting for a human answer`,
+      } : { locked: false },
       phases: {
         intent: mapPhase(intentTask),
         po: mapPhase(poTask),
@@ -1527,14 +1751,73 @@ class SdlcWorkflowService {
   // Internals
   // =========================================================================
 
+  /**
+   * T4.1/T4.2 — the agent that follows a task, honouring the PO route. When the
+   * PO route has no UI, PO hands off straight to DEV (UX is skipped).
+   */
+  _nextAgentFor(task) {
+    if (task?.type === 'po-agent') {
+      const route = task.observability?.route || task.agentOutput?.route_classification || null;
+      if (route && route.has_ui === false) return 'dev-agent';
+      return 'ux-agent';
+    }
+    return NEXT_AGENT[task?.type];
+  }
+
+  /** True when this project's PO route skips the UX phase. */
+  _poRouteSkipsUx(poTask) {
+    const route = poTask?.observability?.route || poTask?.agentOutput?.route_classification || null;
+    return !!(route && route.has_ui === false);
+  }
+
+  async getTaskEvents(taskId, { afterSequence = null, limit = 200 } = {}, user) {
+    const task = await Task.findById(taskId);
+    if (!task) throw new ApiError(404, 'Task not found');
+    if (user) {
+      await MembershipService.requireProjectRole(user.id, task.projectId, ['owner', 'admin', 'editor', 'viewer']);
+    }
+    return AgentEvent.list({
+      taskId,
+      afterSequence: Number.isFinite(Number(afterSequence)) ? Number(afterSequence) : null,
+      limit: Number(limit) || 200,
+    });
+  }
+
+  /**
+   * Select one coherent workflow chain. A QA task from an older DEV run must
+   * never appear beside the current DEV task.
+   */
+  _selectCurrentTaskChain(tasks = []) {
+    const latest = (type) => tasks.find((task) => task.type === type) || null;
+    const intentTask = latest('intent-agent');
+    const poTask = latest('po-agent');
+    const skipUx = this._poRouteSkipsUx(poTask);
+    const uxTask = poTask && !skipUx
+      ? tasks.find((task) => task.type === 'ux-agent' && task.sourceRunId === poTask.id) || null
+      : null;
+    const devSourceId = skipUx ? poTask?.id : uxTask?.id;
+    const devTask = devSourceId
+      ? tasks.find((task) => task.type === 'dev-agent' && task.sourceRunId === devSourceId) || null
+      : null;
+    const qaTask = devTask
+      ? tasks.find((task) => task.type === 'qa-agent' && task.sourceRunId === devTask.id) || null
+      : null;
+
+    return { intentTask, poTask, uxTask, devTask, qaTask };
+  }
+
   _deriveCurrentPhase(poTask, uxTask, devTask, qaTask, decisionsByTaskId, releaseDecision = null) {
     if (!poTask) return 'BACKLOG';
     if (!poTask || poTask.status === 'pending' || poTask.status === 'processing') return 'PO_RUNNING';
     if (poTask.status === 'failed') return 'PO_FAILED';
     if (!decisionsByTaskId[poTask?.id] || decisionsByTaskId[poTask?.id]?.decision !== 'APPROVE') return 'PO_REVIEW';
-    if (!uxTask || uxTask.status === 'pending' || uxTask.status === 'processing') return 'UX_RUNNING';
-    if (uxTask.status === 'failed') return 'UX_FAILED';
-    if (!decisionsByTaskId[uxTask?.id] || decisionsByTaskId[uxTask?.id]?.decision !== 'APPROVE') return 'UX_REVIEW';
+    // T4.2 — skip the UX checks entirely when the route has no UI.
+    const skipUx = this._poRouteSkipsUx(poTask);
+    if (!skipUx) {
+      if (!uxTask || uxTask.status === 'pending' || uxTask.status === 'processing') return 'UX_RUNNING';
+      if (uxTask.status === 'failed') return 'UX_FAILED';
+      if (!decisionsByTaskId[uxTask?.id] || decisionsByTaskId[uxTask?.id]?.decision !== 'APPROVE') return 'UX_REVIEW';
+    }
     if (!devTask || devTask.status === 'pending' || devTask.status === 'processing') return 'DEV_RUNNING';
     if (devTask.status === 'failed') return 'DEV_FAILED';
     if (!decisionsByTaskId[devTask?.id] || decisionsByTaskId[devTask?.id]?.decision !== 'APPROVE') return 'DEV_REVIEW';
@@ -1546,11 +1829,158 @@ class SdlcWorkflowService {
     return 'FINAL_REVIEW';
   }
 
+  /**
+   * T1.4 — count distinct active workflows (projects with an SDLC task that is
+   * still running). Used to enforce MAX_PARALLEL_WORKFLOWS at workflow start.
+   */
+  async _countActiveWorkflows() {
+    const [pending, processing] = await Promise.all([
+      Task.list({ status: 'pending', limit: 200 }),
+      Task.list({ status: 'processing', limit: 200 }),
+    ]);
+    const sdlcTypes = ['intent-agent', 'po-agent', 'ux-agent', 'dev-agent', 'qa-agent'];
+    const activeProjects = new Set(
+      [...pending, ...processing]
+        .filter((t) => sdlcTypes.includes(t.type))
+        .map((t) => t.projectId),
+    );
+    return activeProjects.size;
+  }
+
+  /**
+   * Recover the repo context (repoPath/branch/workingBranch/request) persisted
+   * on the PO task observability for a project. Null if the workflow had no repo.
+   */
+  async _getRepoContext(projectId) {
+    const poTasks = (await Task.findByProjectId(projectId)).filter((t) => t.type === 'po-agent');
+    for (const t of poTasks) {
+      const repo = t.observability?.repo;
+      if (repo?.repoPath) return repo;
+    }
+    return null;
+  }
+
+  /**
+   * T2.3 — build the onGate callback for a task/role. Same shape as the real
+   * Claude Code `canUseTool`: async (toolName, input) => { behavior, ... }.
+   *   - AskUserQuestion (type B): pause for a human answer, return updatedInput.
+   *   - write/edit tools (type A): classify risk → auto allow | pause | deny.
+   * Every branch is audited.
+   */
+  _makeOnGate(taskId, role, { projectId = null, scope = {} } = {}) {
+    return async (toolName, input = {}, options = {}) => claudePermissionDispatcher.dispatch({
+      toolName,
+      input,
+      options,
+      taskId,
+      projectId,
+      role,
+      scope,
+      audit: (entry) => this._recordGateAudit(taskId, entry),
+    });
+  }
+
+  _makeOnGateLegacyUnused(taskId, role, { projectId = null, scope = {} } = {}) {
+    return async (toolName, input = {}) => {
+      // Type B — PO clarification question.
+      if (toolName === 'AskUserQuestion') {
+        this._recordGateAudit(taskId, { kind: 'GATE_QUESTION', role, detail: 'asked clarifying questions', toolName });
+        const { approvalId, promise, ready } = gateBridge.requestGate({
+          taskId, projectId, role, kind: 'question',
+          payload: { questions: input.questions || [] },
+        });
+        taskWorker.pauseBudget(taskId); // human gate wait does not consume the run budget
+        let result;
+        try {
+          await ready;
+          result = await promise;
+        } finally {
+          taskWorker.resumeBudget(taskId);
+        }
+        const answers = result.answers || result.updatedInput?.answers || [];
+        this._recordGateAudit(taskId, { kind: 'GATE_ANSWER', role, approvalId, detail: result.timedOut ? 'defaults used (timeout)' : 'human answered', answers });
+        return { behavior: 'allow', updatedInput: { questions: input.questions || [], answers, timedOut: !!result.timedOut } };
+      }
+
+      // Type A — file write/edit. Classify by risk.
+      const decision = riskClassifier.classifyAction(toolName, input, scope);
+      if (decision.tier === 'auto') {
+        this._recordGateAudit(taskId, { kind: 'GATE_AUTO', role, toolName, detail: decision.reason, file: input.file_path || null, category: decision.category });
+        return { behavior: 'allow', auto: true };
+      }
+      if (decision.tier === 'block') {
+        this._recordGateAudit(taskId, { kind: 'GATE_BLOCK', role, toolName, detail: decision.reason, file: input.file_path || null, category: decision.category });
+        return { behavior: 'deny', message: decision.reason };
+      }
+      // approval — pause for a human.
+      this._recordGateAudit(taskId, { kind: 'GATE_REQUEST', role, toolName, detail: decision.reason, file: input.file_path || null, category: decision.category });
+      const { approvalId, promise, ready } = gateBridge.requestGate({
+        taskId, projectId, role, kind: 'tool',
+        payload: {
+          tool: toolName,
+          file_path: input.file_path || null,
+          diff: input.diff || input.content || null,
+          reason: decision.reason,
+          category: decision.category,
+        },
+      });
+      taskWorker.pauseBudget(taskId); // human gate wait does not consume the run budget
+      let result;
+      try {
+        await ready;
+        result = await promise;
+      } finally {
+        taskWorker.resumeBudget(taskId);
+      }
+      const approved = result.action === 'approve' && !result.timedOut;
+      this._recordGateAudit(taskId, {
+        kind: 'GATE_DECISION', role, approvalId, toolName,
+        detail: approved ? 'approved' : `denied${result.timedOut ? ' (timeout)' : ''}`,
+        comment: result.comment || null, file: input.file_path || null,
+      });
+      return approved
+        ? { behavior: 'allow' }
+        : { behavior: 'deny', message: result.comment || 'Rejected by reviewer' };
+    };
+  }
+
+  /** Append an onGate audit entry (in-memory, surfaced by getAuditTrail). */
+  _recordGateAudit(taskId, entry) {
+    const list = GATE_AUDIT.get(taskId) || [];
+    list.push({ ...entry, timestamp: new Date().toISOString() });
+    GATE_AUDIT.set(taskId, list);
+    Task.findById(taskId)
+      .then((task) => task && AgentEvent.create({
+        taskId,
+        projectId: task.projectId,
+        type: 'gate_audit',
+        actor: entry.role || 'orchestrator',
+        payload: entry,
+      }))
+      .catch((error) => logger.warn('failed to persist gate audit event', { taskId, error: error.message }));
+    logger.info('gate_audit', { taskId, kind: entry.kind, role: entry.role, file: entry.file || null });
+  }
+
+  /** Read the onGate audit entries for a task (used by getAuditTrail). */
+  _getGateAudit(taskId) {
+    return GATE_AUDIT.get(taskId) || [];
+  }
+
   async _requireApprovedTask(taskId, expectedType, user) {
     const task = await Task.findById(taskId);
     if (!task) throw new ApiError(404, 'Source task not found');
     if (user) await MembershipService.requireProjectRole(user.id, task.projectId, ['owner', 'admin', 'editor']);
-    if (task.type !== expectedType) throw new ApiError(400, `Source task must be type: ${expectedType}`);
+    const pendingQuestion = this._getPendingQuestionGate(task.projectId);
+    if (pendingQuestion) {
+      throw new ApiError(
+        409,
+        `Pipeline is locked while ${pendingQuestion.role} waits for a human answer`,
+        'PIPELINE_QUESTION_PENDING',
+        pendingQuestion.role,
+      );
+    }
+    const allowedTypes = Array.isArray(expectedType) ? expectedType : [expectedType];
+    if (!allowedTypes.includes(task.type)) throw new ApiError(400, `Source task must be type: ${allowedTypes.join(' | ')}`);
     if (task.status !== 'completed') throw new ApiError(400, 'Source task must be completed');
     if (task.versionStatus !== 'committed') {
       throw new ApiError(400, 'Source task must be approved (committed) before running next agent');
@@ -1568,6 +1998,10 @@ class SdlcWorkflowService {
       }
     }
     return task;
+  }
+
+  _getPendingQuestionGate(projectId) {
+    return gateBridge.listPending({ projectId }).find((gate) => gate.kind === 'question') || null;
   }
 
   async _buildContextFromArtifacts(artifacts, extras = {}) {
@@ -1622,7 +2056,7 @@ class SdlcWorkflowService {
   }
 
   async _recordApprovedHandoff(task, approval) {
-    const nextAgent = NEXT_AGENT[task.type];
+    const nextAgent = this._nextAgentFor(task);
     if (!nextAgent) return;
 
     const artifacts = await AgentArtifact.findByTaskId(task.id);
@@ -1645,11 +2079,15 @@ class SdlcWorkflowService {
         validation_result_id: `validation:${task.id}`,
       },
       contract: {
-        required_downstream_inputs: {
-          'ux-agent': ['prd', 'acceptance_criteria', 'risk_classification'],
-          'dev-agent': ['ux_spec', 'wireframe_spec', 'risk_classification'],
-          'qa-agent': ['patch_diff', 'sandbox_result', 'self_test_report', 'security_gate'],
-        }[nextAgent] || [],
+        // T4.2/T5.2 — contract inputs depend on the actual edge. PO→DEV (UX
+        // skipped) hands off the PRD directly instead of a UX spec.
+        required_downstream_inputs: (task.type === 'po-agent' && nextAgent === 'dev-agent')
+          ? ['prd', 'acceptance_criteria', 'risk_classification']
+          : ({
+            'ux-agent': ['prd', 'acceptance_criteria', 'risk_classification'],
+            'dev-agent': ['ux_spec', 'wireframe_spec', 'risk_classification'],
+            'qa-agent': ['patch_diff', 'sandbox_result', 'self_test_report', 'security_gate'],
+          }[nextAgent] || []),
       },
       integrity: {
         artifact_hash: contentHash(outputArtifacts.map((artifact) => artifact.contentHash)),
@@ -1722,6 +2160,21 @@ class SdlcWorkflowService {
     }
     if (['intent-agent', 'po-agent'].includes(task.type) && context.featureRequest) {
       completedData.feature_request = context.featureRequest;
+    }
+    // T4.1 — PO classifies the request route (decides whether UX runs).
+    if (task.type === 'po-agent') {
+      completedData.route_classification = classifyRoute(context.featureRequest || {});
+      // T4.3 — fold a PO clarification answer (or its default) into the PRD.
+      if (context.po_clarification) {
+        const c = context.po_clarification;
+        completedData.assumptions = [
+          ...(Array.isArray(completedData.assumptions) ? completedData.assumptions : []),
+          c.defaulted
+            ? `Assumption (no answer given, default used): ${c.answer}`
+            : `Clarified with reviewer: ${c.answer}`,
+        ];
+        completedData.prd = `${completedData.prd || ''}\n\n## Clarification\n- ${c.defaulted ? 'Default assumption' : 'Reviewer answer'}: ${c.answer}`;
+      }
     }
     const feedbackPrompt = context.feedbackPrompt?.trim();
     const inheritedRisk = firstContextValue(context, 'risk_classification');
@@ -1796,8 +2249,7 @@ class SdlcWorkflowService {
         security_gate: firstContextValue(context, 'security_gate'),
       };
     }
-    // T3: scenario-driven mock shaping (confidence + bad-case overrides),
-    // selected via the existing env mechanism (MOCK_SCENARIO / MOCK_LOW_CONFIDENCE_STAGE).
+    // Deterministic happy_path mock shaping (confidence + security passes).
     this._applyMockScenario(task, completedData, feedbackPrompt);
     return completedData;
   }
@@ -1806,10 +2258,66 @@ class SdlcWorkflowService {
    * Core runner — calls AgentService and parses SSE stream, saves artifacts.
    * @private
    */
+  /**
+   * T3.4 — run a role via the claude-code path. Builds the onGate callback and
+   * repo target, then delegates artifact generation to the local Claude Code CLI.
+   */
+  async _runClaudeCodePath(task, context) {
+    const repoContext = context.repoContext || await this._getRepoContext(task.projectId);
+    const repoPath = repoContext?.repoPath || null;
+    const onGate = this._makeOnGate(task.id, task.type, {
+      projectId: task.projectId,
+      scope: { featurePaths: ['src/', 'tests/', 'docs/'] },
+    });
+
+    const { output } = await claudeCodeRunner.runAgent({
+      role: task.type,
+      repoPath,
+      taskId: task.id,
+      context,
+      onGate,
+    });
+    return output;
+  }
+
   async _runAgent(task, context, userId = null) {
     await Task.update(task.id, { status: 'processing' });
+    await taskLifecycle.transition(task.id, 'running', {
+      actor: task.type,
+      payload: { stage: task.type },
+    });
+    // DMO-001: claim the task for this worker + start the heartbeat. Released at
+    // the canonical terminal points (_saveAgentData / _markTaskFailed) so a task
+    // orphaned by a crashed process is detectable by the stale-task sweeper.
+    // The execution-time budget (gate-aware) fires _handleTaskTimeout if the
+    // agent runs past its role budget — human gate waits are excluded.
+    const budgetMs = (AGENT_POLICY[task.type]?.timeout_seconds || 0) * 1000;
+    await taskWorker.beginRun(task.id, {
+      budgetMs,
+      onTimeout: () => this._handleTaskTimeout(task).catch((e) => console.error('[SDLC] timeout handler failed:', e)),
+    });
 
-    // Hybrid Mock Mode Bypass
+    const executionPath = EXECUTION_PATH();
+
+    // T3.4 — claude-code path (mock): drive the run through onGate, then build
+    // the (validated) output with the existing builder. Opt-in via EXECUTION_PATH.
+    if (executionPath === 'claude-code') {
+      try {
+        const completedData = await this._runClaudeCodePath(task, context);
+        await this._saveAgentData(task, completedData, userId);
+        return;
+      } catch (err) {
+        console.error(`[SDLC._runAgent] claude-code path failed for task ${task.id}:`, err);
+        if (err.code === ERROR_CODES.MOCK_PARSE_ERROR) {
+          await this._markTaskFailed(task, err);
+          return;
+        }
+        await this._markTaskFailed(task, err);
+        return; // never silently fall back to a real model in the mock phase
+      }
+    }
+
+    // Hybrid Mock Mode Bypass (langchain path, default)
     if (process.env.USE_MOCK_AGENTS === 'true') {
       try {
         console.log(`[SDLC] Running in MOCK mode for agent ${task.type}`);
@@ -1904,33 +2412,178 @@ class SdlcWorkflowService {
   }
 
   async _markTaskFailed(task, error) {
+    const current = await Task.findById(task.id);
+    if (current?.status === 'completed' && current?.versionStatus === 'committed') {
+      logger.error('ignored failure after task was already completed and committed', {
+        taskId: task.id,
+        phase: task.type,
+        code: error.code || null,
+        error: error.message,
+      });
+      return;
+    }
+
     // T4: keep the structured error code visible in the persisted error so the
     // SSE error event / UI can render a precise error state.
     const errMsg = error.code ? `[${error.code}] ${error.message}` : error.message;
-    logger.error('task failed', { taskId: task.id, phase: task.type, code: error.code || null, error: error.message });
-    await Task.update(task.id, { status: 'failed', error: errMsg });
+    const failureObservability = {
+      ...(current?.observability || {}),
+      failure: {
+        code: error.code || null,
+        message: error.message,
+        recoverable: error.recoverable ?? null,
+        exitCode: error.exitCode ?? null,
+        signal: error.signal || null,
+        stderrPreview: typeof error.stderr === 'string' ? error.stderr.slice(0, 2000) : null,
+        stdoutPreview: typeof error.stdout === 'string' ? error.stdout.slice(0, 2000) : null,
+        failedAt: new Date().toISOString(),
+      },
+    };
+    logger.error('task failed', {
+      taskId: task.id,
+      phase: task.type,
+      code: error.code || null,
+      recoverable: error.recoverable ?? null,
+      error: error.message,
+    });
+    await Task.update(task.id, {
+      status: 'failed',
+      error: errMsg,
+      observability: failureObservability,
+      lockedBy: null,
+      heartbeatAt: null,
+    });
+    await taskLifecycle.transition(task.id, 'failed', {
+      actor: task.type,
+      reason: errMsg,
+      payload: {
+        code: error.code || null,
+        recoverable: error.recoverable ?? null,
+        exitCode: error.exitCode ?? null,
+      },
+    });
     await FeatureBacklog.updateStatusByTaskId(task.id, 'TODO');
+    await taskWorker.endRun(task.id); // DMO-001: terminal — release the worker lock
+  }
+
+  // Execution-time budget expired (excludes human gate waits). Move the task to a
+  // `timeout` terminal state so the workflow does not hang on a runaway agent.
+  async _handleTaskTimeout(task) {
+    const current = await Task.findById(task.id);
+    if (!current || ['completed', 'failed', 'cancelled', 'timeout'].includes(current.executionStatus)) return;
+    const reason = `execution timeout — exceeded ${AGENT_POLICY[task.type]?.timeout_seconds || '?'}s budget`;
+    logger.warn('task execution timed out', { taskId: task.id, phase: task.type });
+    await Task.update(task.id, { status: 'failed', error: reason, lockedBy: null, heartbeatAt: null });
+    await taskLifecycle.transitionIfPresent(task.id, 'timeout', { actor: 'orchestrator', reason });
+    await FeatureBacklog.updateStatusByTaskId(task.id, 'TODO').catch(() => {});
+    await taskWorker.endRun(task.id);
   }
 
   /**
-   * T3: shape a mock agent output for a chosen demo scenario. Selected via the
-   * existing env mechanism (`MOCK_SCENARIO`, defaulting to `happy_path`).
-   * All overrides are deterministic so the
-   * preflight smoke test (T9) can assert the expected branch every run.
-   *
-   * Scenarios (each is a full PO→UX→DEV→QA run, the override fires on the
-   * relevant stage only):
-   *   - happy_path         : every stage high-confidence + valid → reaches Final Release.
-   *   - low_confidence_hold : target stage returns 0.58 → HOLD (human review).
-   *   - missing_evidence    : DEV drops sandbox test evidence → BLOCKER → INVALID, no handoff.
-   *   - qa_blocker          : QA reports a blocker + a failed test → QA gate fails, release LOCKED.
-   *   - release_reject      : outputs all pass; the smoke test rejects at the Final gate.
-   *   - escalation          : target stage stays at 0.58 even after feedback → repeated reject → escalation.
+   * Cancel a non-terminal task: unblock any pending gate, move it to `cancelled`,
+   * and release the worker lock. Idempotent guard returns 409 if already terminal.
+   */
+  async cancelTask({ taskId, reason = 'cancelled by user', user }) {
+    const task = await Task.findById(taskId);
+    if (!task) throw new ApiError(404, 'Task not found');
+    if (user) await MembershipService.requireProjectRole(user.id, task.projectId, ['owner', 'admin', 'editor']);
+    if (['completed', 'failed', 'cancelled', 'timeout'].includes(task.executionStatus)) {
+      throw new ApiError(409, `Task already ${task.executionStatus}`, 'TASK_TERMINAL');
+    }
+    // Resolve any pending gate so an in-flight run unblocks instead of hanging.
+    for (const gate of gateBridge.listPending({ taskId })) {
+      await gateBridge.resolveGate(gate.approvalId, { action: 'reject', cancelled: true, comment: reason }).catch(() => {});
+    }
+    await Task.update(taskId, { status: 'cancelled', error: reason, lockedBy: null, heartbeatAt: null });
+    await taskLifecycle.transitionIfPresent(taskId, 'cancelled', { actor: user ? 'human' : 'system', reason });
+    await FeatureBacklog.updateStatusByTaskId(taskId, 'TODO').catch(() => {});
+    await taskWorker.endRun(taskId);
+    logger.info('task cancelled', { taskId, phase: task.type, reason });
+    return { taskId, status: 'cancelled' };
+  }
+
+  // ── DMO-003: recover in-execution gates orphaned by a backend restart ──────
+  // A task left at `awaiting_gate` lost its in-memory continuation when the
+  // process died. Rather than make the user re-run the whole workflow, we
+  // re-dispatch ONLY that interrupted stage (prior committed stages are kept):
+  // the agent re-runs idempotently and raises a fresh gate the human can act on.
+
+  /** Rebuild the run context for an existing task from its persisted sources. */
+  async _rebuildContextForTask(task) {
+    const repoContext = await this._getRepoContext(task.projectId);
+    const extras = repoContext ? { repoContext } : {};
+    const projectId = task.projectId;
+
+    if (task.type === 'po-agent') {
+      // Prefer the feature request persisted on the task (survives an interrupt
+      // before any artifact is saved); fall back to the saved artifact.
+      let featureRequest = task.observability?.featureRequest || null;
+      if (!featureRequest) {
+        featureRequest = await this._getFeatureRequestFromIntentTask(task).catch(() => null);
+      }
+      return this._buildContextFromArtifacts([], { ...extras, ...(featureRequest ? { featureRequest } : {}) });
+    }
+
+    const sourceTask = task.sourceRunId ? await Task.findById(task.sourceRunId) : null;
+
+    if (task.type === 'ux-agent') {
+      const sourceArtifacts = sourceTask ? await AgentArtifact.findByTaskId(sourceTask.id) : [];
+      return this._buildContextFromArtifacts(sourceArtifacts, extras);
+    }
+    if (task.type === 'dev-agent') {
+      const fromPo = sourceTask?.type === 'po-agent';
+      const poTask = fromPo ? sourceTask : await Task.findLatestByProject(projectId, 'po-agent', 'completed', 'committed');
+      const uxArtifacts = fromPo || !sourceTask ? [] : await AgentArtifact.findByTaskId(sourceTask.id);
+      const poArtifacts = poTask ? await AgentArtifact.findByTaskId(poTask.id) : [];
+      return this._buildContextFromArtifacts([...poArtifacts, ...uxArtifacts], extras);
+    }
+    if (task.type === 'qa-agent') {
+      const [poTask, uxTask] = await Promise.all([
+        Task.findLatestByProject(projectId, 'po-agent', 'completed', 'committed'),
+        Task.findLatestByProject(projectId, 'ux-agent', 'completed', 'committed'),
+      ]);
+      const all = (await Promise.all([
+        poTask ? AgentArtifact.findByTaskId(poTask.id) : Promise.resolve([]),
+        uxTask ? AgentArtifact.findByTaskId(uxTask.id) : Promise.resolve([]),
+        sourceTask ? AgentArtifact.findByTaskId(sourceTask.id) : Promise.resolve([]),
+      ])).flat();
+      return this._buildContextFromArtifacts(all, extras);
+    }
+    return this._buildContextFromArtifacts([], extras);
+  }
+
+  /** Re-run a single interrupted task's stage in place. Returns true if resumed. */
+  async _resumeInterruptedTask(task) {
+    if (task.executionStatus !== 'awaiting_gate') return false;
+    const context = await this._rebuildContextForTask(task);
+    // _runAgent transitions awaiting_gate -> running and re-drives the agent.
+    this._runAgent(task, context, null).catch((err) => console.error('[SDLC] resume failed:', err));
+    logger.warn('re-dispatched interrupted-gate stage', { taskId: task.id, phase: task.type });
+    return true;
+  }
+
+  /** Boot recovery: re-dispatch every task stuck at an interrupted gate. */
+  async recoverInterruptedGates() {
+    const tasks = await Task.listByExecutionStatus('awaiting_gate');
+    let resumed = 0;
+    for (const task of tasks) {
+      try {
+        if (await this._resumeInterruptedTask(task)) resumed += 1;
+      } catch (err) {
+        logger.warn('failed to resume interrupted task', { taskId: task.id, error: err.message });
+      }
+    }
+    return resumed;
+  }
+
+  /**
+   * Shape a deterministic mock agent output for the single demo scenario
+   * (`happy_path`): every stage is high-confidence + valid so the run reaches
+   * Final Release. Reviewer feedback (HITL reject → rework) is still honored so
+   * the human gate stays exercised. The synthetic bad-case scenarios of the old
+   * system have been removed; failure-handling can be reintroduced later.
    */
   _applyMockScenario(task, completedData, feedbackPrompt) {
-    const lowStage = MOCK_REVIEW_STAGES.includes(process.env.MOCK_LOW_CONFIDENCE_STAGE)
-      ? process.env.MOCK_LOW_CONFIDENCE_STAGE
-      : 'dev-agent';
     const scenario = resolveMockScenario();
     applyScenarioNarrative(task, completedData, scenario, feedbackPrompt);
 
@@ -1965,93 +2618,7 @@ class SdlcWorkflowService {
       completedData.security_gate = { recommendation: 'PASS', checklist_version: 'oauth-security.mock.v1', issues: [] };
     }
 
-    switch (scenario) {
-      case 'happy_path':
-        // every stage already high-confidence + valid; nothing to override.
-        break;
-
-      case 'low_confidence_hold':
-        if (task.type === lowStage && !feedbackPrompt) completedData.confidence_score = 0.58;
-        break;
-
-      case 'missing_evidence':
-        // DEV self-test / sandbox evidence is missing → _validateGateOutput BLOCKER.
-        if (task.type === 'dev-agent' && !feedbackPrompt) {
-          completedData.sandbox_result = { ...(completedData.sandbox_result || {}), tests_ran: false };
-          completedData.self_test_report = null;
-        } else if (task.type === 'dev-agent') {
-          completedData.sandbox_result = {
-            ...(completedData.sandbox_result || {}),
-            build_ok: true,
-            tests_ran: true,
-            tests_passed: Math.max(Number(completedData.sandbox_result?.tests_passed || 0), 12),
-            tests_failed: 0,
-          };
-          completedData.self_test_report = completedData.self_test_report || {
-            executed: true,
-            passed: completedData.sandbox_result.tests_passed,
-            failed: 0,
-            evidence: 'Reviewer-requested rerun: sandbox and self-test evidence attached.',
-          };
-          completedData.sandbox_report = `${completedData.sandbox_report || ''}\n\nReviewer feedback applied: sandbox execution and self-test evidence are now attached.`;
-        }
-        break;
-
-      case 'qa_blocker':
-        // QA finds a blocking defect and a failed test → QA gate fails, release locked.
-        if (task.type === 'qa-agent' && !feedbackPrompt) {
-          completedData.blocker_count = 2;
-          completedData.pass_count = Math.max(Number(completedData.pass_count || 0) - 1, 0);
-          completedData.fail_count = 1;
-          completedData.test_run_report = {
-            ...(completedData.test_run_report || {}),
-            executed: true,
-            passed: Math.max(Number(completedData.test_run_report?.passed || 0) - 1, 0),
-            failed: 1,
-            logs: 'Test runner: OAuth happy path passed, callback hardening failed. BLOCKER: CSRF state mismatch accepted in one regression case.',
-          };
-          completedData.qa_report = `${completedData.qa_report || ''}\n\nBLOCKER: OAuth callback accepted a mismatched state token in TC-015. Release is locked until DEV evidence is regenerated.`;
-          completedData.release_decision = 'LOCKED';
-          completedData.release_recommendation = 'DO_NOT_RELEASE';
-          completedData.release_reason = 'QA blocker: failed CSRF callback regression keeps the release gate locked.';
-        } else if (task.type === 'qa-agent') {
-          completedData.blocker_count = 0;
-          completedData.fail_count = 0;
-          completedData.pass_count = Number(completedData.test_run_report?.total || completedData.pass_count || 18);
-          completedData.test_run_report = {
-            ...(completedData.test_run_report || {}),
-            executed: true,
-            passed: Number(completedData.test_run_report?.total || completedData.pass_count || 18),
-            failed: 0,
-            logs: 'Reviewer-requested QA rerun: OAuth callback regression passed, blockers resolved.',
-          };
-          completedData.qa_report = `${completedData.qa_report || ''}\n\nREWORK VERIFIED: OAuth callback regression now rejects mismatched state tokens. No blockers remain.`;
-          completedData.release_decision = 'READY_FOR_REVIEW';
-          completedData.release_recommendation = 'RELEASE_WITH_REVIEW';
-          completedData.release_reason = 'QA rerun passed after blocker remediation; release can proceed to final review.';
-        }
-        break;
-
-      case 'release_reject':
-        // All agent outputs pass; the reject happens at the human Final gate (driven by the smoke test).
-        if (task.type === 'qa-agent') {
-          completedData.release_decision = 'READY_FOR_REVIEW';
-          completedData.release_recommendation = 'RELEASE_WITH_REVIEW';
-          completedData.release_reason = 'All automated gates pass; this branch expects the final human gate to reject the release packet.';
-        }
-        break;
-
-      case 'escalation':
-        // Target stage never recovers, even after reviewer feedback → repeated reject → escalation.
-        if (task.type === lowStage) {
-          completedData.confidence_score = 0.58;
-          delete completedData.rework_response;
-        }
-        break;
-
-      default:
-        break;
-    }
+    // happy_path: every stage is already high-confidence + valid; nothing to override.
   }
 
   async _saveAgentData(task, completedData, userId) {
@@ -2059,7 +2626,8 @@ class SdlcWorkflowService {
     const artifactRows = [];
     const artifactTypes = ['feature_request', 'scenario_brief', 'intent_assumptions', 'clarifying_questions',
       'prd', 'user_stories', 'acceptance_criteria', 'scope', 'out_of_scope', 'mcp_activity',
-      'ux_spec', 'user_flow', 'wireframe_spec', 'component_inventory', 'screens',
+      'route_classification', 'assumptions',
+      'ux_spec', 'user_flow', 'wireframe_spec', 'component_inventory', 'screens', 'penpot_mock',
       'architecture_ledger_update', 'implementation_plan', 'mock_code_diff', 'changed_files',
       'patch_diff', 'patch_format', 'linked_ac_ids', 'sandbox_result', 'self_test_report',
       'risk_assessment', 'risk_level', 'sandbox_report', 'patch_branch', 'patch_commit',
@@ -2189,15 +2757,26 @@ class SdlcWorkflowService {
     }
 
     const outputHash = contentHash(artifactRows.map((a) => a.contentHash));
+    // T4.1 — keep the PO route on the PO task observability (alongside any repo
+    // context) so the state machine can decide whether to run UX.
+    let observability = completedData.observability || {};
+    if (task.type === 'po-agent') {
+      const existing = (await Task.findById(task.id))?.observability || {};
+      observability = { ...existing, ...observability, route: completedData.route_classification || null };
+    }
     await Task.update(task.id, {
       status: 'completed',
       output_content_hash: outputHash,
       result: taskResult,
-      observability: completedData.observability || {},
+      observability,
       // Structured HITL (plan 2.4): keep the raw agent output distinct from the
       // human-approved output. approvedOutput is only set on approve/edit.
       agentOutput: completedData,
-      gateMode: DEFAULT_GATE_MODE[task.type] || GATE_MODE.STRICT_MANUAL,
+      gateMode: this._resolveGateMode(task),
+    });
+    await taskLifecycle.transition(task.id, 'completed', {
+      actor: task.type,
+      payload: { outputHash },
     });
     await FeatureBacklog.updateStatusByTaskId(task.id, 'REVIEW');
 
@@ -2229,6 +2808,22 @@ class SdlcWorkflowService {
         tokenOutput: completedData.token_usage?.output || 0,
       }).catch(() => {});
     }
+    await taskWorker.endRun(task.id); // DMO-001: terminal (completed) — release the worker lock
+  }
+
+  // Demo board review holds: force PARK roles to STRICT_MANUAL so a staged flow
+  // stops at that stage's review. Registered/cleared by demoBoardService.
+  setReviewHolds(projectId, roles = []) {
+    REVIEW_HOLDS.set(projectId, new Set(roles));
+  }
+
+  clearReviewHolds(projectId) {
+    REVIEW_HOLDS.delete(projectId);
+  }
+
+  _resolveGateMode(task) {
+    if (REVIEW_HOLDS.get(task.projectId)?.has(task.type)) return GATE_MODE.STRICT_MANUAL;
+    return DEFAULT_GATE_MODE[task.type] || GATE_MODE.STRICT_MANUAL;
   }
 
   async _autoApproveSafeOutput(taskId, userId = null) {
@@ -2257,13 +2852,27 @@ class SdlcWorkflowService {
     });
     const refreshed = await Task.findById(task.id);
     await this._recordApprovedHandoff(refreshed, approval);
-    await this._startNextAgentIfAvailable(refreshed, userId);
+    try {
+      await this._startNextAgentIfAvailable(refreshed, userId);
+    } catch (err) {
+      // A downstream startup failure must not turn an already completed and
+      // committed upstream task into FAILED.
+      logger.error('downstream agent failed to start after auto-approval', {
+        sourceTaskId: refreshed.id,
+        sourceAgent: refreshed.type,
+        nextAgent: this._nextAgentFor(refreshed),
+        error: err.message,
+      });
+    }
     return true;
   }
 
   async _startNextAgentIfAvailable(task, userId = null) {
-    const nextAgent = NEXT_AGENT[task.type];
+    const nextAgent = this._nextAgentFor(task);
     if (!nextAgent) return null;
+    if (task.status !== 'completed' || task.versionStatus !== 'committed') return null;
+    if (this._getPendingQuestionGate(task.projectId)) return null;
+    if (gateBridge.listPending({ taskId: task.id }).length > 0) return null;
 
     const tasks = await Task.findByProjectId(task.projectId);
     const existing = tasks.find((candidate) => candidate.type === nextAgent && candidate.sourceRunId === task.id);
@@ -2276,6 +2885,7 @@ class SdlcWorkflowService {
     };
     if (nextAgent === 'po-agent') return this.runPOAgent(args);
     if (nextAgent === 'ux-agent') return this.runUXAgent(args);
+    // T4.2 — DEV's source can be UX (default) or PO directly (route skipped UX).
     if (nextAgent === 'dev-agent') return this.runDEVAgent(args);
     if (nextAgent === 'qa-agent') return this.runQAAgent(args);
     return null;

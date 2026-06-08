@@ -7,7 +7,8 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "admin:create": "node scripts/create_admin.js",
-    "demo:smoke": "node scripts/demoSmoke.js",
+    "demo:smoke": "node scripts/demoSmokeClaudeCode.js",
+    "demo:smoke:cc": "node scripts/demoSmokeClaudeCode.js",
     "test": "jest --runInBand"
   },
   "keywords": [],
@@ -15,6 +16,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.168",
     "@prisma/client": "^5.10.0",
     "@supabase/supabase-js": "^2.45.0",
     "axios": "^1.16.0",

@@ -7,12 +7,12 @@ jest.mock('uuid', () => ({ v4: jest.fn(() => 'test-uuid') }));
 
 const SdlcWorkflowService = require('../../src/services/SdlcWorkflowService');
 
-const EXPECTED_VERSION = 'gate-output.v1';
+const EXPECTED_VERSION = 'gate-output.v2';
 
 // Frozen expectation of rule name → severity per role.
 const EXPECTED = {
-  'intent-agent': { prd_present: 'BLOCKER', ac_present: 'BLOCKER', ac_measurable: 'WARNING' },
-  'po-agent': { prd_present: 'BLOCKER', ac_present: 'BLOCKER', ac_measurable: 'WARNING' },
+  'intent-agent': { prd_present: 'BLOCKER', ac_present: 'BLOCKER', ac_testable: 'BLOCKER', ac_measurable: 'WARNING' },
+  'po-agent': { prd_present: 'BLOCKER', ac_present: 'BLOCKER', ac_testable: 'BLOCKER', ac_measurable: 'WARNING' },
   'ux-agent': { ux_spec_present: 'BLOCKER', screens_present: 'BLOCKER' },
   'dev-agent': {
     patch_present: 'BLOCKER', patch_format: 'WARNING', build_ok: 'BLOCKER',

@@ -44,8 +44,11 @@ frontend/.vite/
 *.db
 backend/prisma/dev.db
 backend/prisma/*.db-journal
-workspace/projects/
+backend/prisma/*.db-wal
+backend/prisma/*.db-shm
+workspace/
 uploads/
+hook_target.txt
 
 # ---------------------------------------------------------------------------
 # Logs

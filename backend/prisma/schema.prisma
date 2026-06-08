@@ -111,6 +111,14 @@ model Task {
   retryCount        Int      @default(0)
   lastRetryReason   String?
   gateMode          String?  // strict_manual | confidence_based | auto_approve_safe
+  executionStatus   String   @default("queued")
+  attempt           Int      @default(0)
+  maxAttempts       Int      @default(1)
+  lockedBy          String?
+  lockedAt          DateTime?
+  heartbeatAt       DateTime?
+  startedAt         DateTime?
+  finishedAt        DateTime?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -118,6 +126,24 @@ model Task {
   user              User?    @relation(fields: [userId], references: [id])
   project           Project  @relation(fields: [projectId], references: [id])
   artifacts         AgentArtifact[]
+  events            AgentEvent[]
+}
+
+model AgentEvent {
+  id         String   @id @default(uuid())
+  taskId     String
+  projectId  String
+  sequence   Int
+  type       String
+  actor      String
+  payload    String?
+  createdAt  DateTime @default(now())
+
+  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, sequence])
+  @@index([projectId, createdAt])
+  @@index([taskId, createdAt])
 }
 
 model AgentArtifact {
@@ -208,6 +234,24 @@ model HitlDecision {
   jsonPatch         String?  // JSON string — RFC 6902 operations (for edit_approve)
   payload           String?  // JSON string — extra context (rerun input/output, etc.)
   createdAt     DateTime @default(now())
+}
+
+model PendingGate {
+  approvalId String   @id
+  taskId     String
+  projectId  String?
+  role       String
+  kind       String
+  payload    String
+  status     String   @default("pending")
+  resolution String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  resolvedAt DateTime?
+
+  @@index([taskId])
+  @@index([projectId])
+  @@index([status])
 }
 
 model FeatureBacklog {
