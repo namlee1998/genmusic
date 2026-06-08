@@ -1,7 +1,6 @@
 import './sdlc.css';
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { FileText, History, Workflow, RefreshCw, ArrowLeft } from 'lucide-react';
+import { Workflow, RefreshCw } from 'lucide-react';
 import { useSdlcStore } from '@/store/useSdlcStore';
 import { useAppStore } from '@/store/useAppStore';
 import * as sdlcApi from '@/services/api/sdlcApi';
@@ -18,7 +17,6 @@ import type { WorkflowMetrics } from '@/store/useSdlcStore';
  * fetches independently — it must work even when the Build page was never opened.
  */
 export default function AuditPage() {
-  const navigate = useNavigate();
   const { currentProjectId } = useAppStore();
   const {
     projectId, auditEvents, error,
@@ -57,27 +55,21 @@ export default function AuditPage() {
   if (!projectId) return <EmptyProjectState />;
 
   return (
-    <main className="sdlc-dashboard">
-      <header className="delivery-header">
+    <main className="sdlc-dashboard" style={{ maxWidth: '1000px', margin: '0 auto', padding: '24px 16px' }}>
+      <header className="delivery-header" style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <p className="delivery-header__eyebrow"><Workflow size={14} /> AIDLC delivery workspace</p>
+          <p className="delivery-header__eyebrow" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Workflow size={14} className="text-indigo-400" />
+            <span>AIDLC delivery workspace</span>
+          </p>
           <h1>Audit &amp; Logs</h1>
-          <p>Run timeline, A2A handoffs, and every human-in-the-loop decision for this project.</p>
+          <p style={{ margin: '4px 0 0 0', color: '#908fa0', fontSize: '13px' }}>
+            Run timeline, A2A handoffs, and every human-in-the-loop decision for this project.
+          </p>
         </div>
-        <div className="delivery-subnav">
-          <button className="delivery-subnav__btn" onClick={() => navigate('/sdlc')}>
-            <ArrowLeft size={15} /> Build
-          </button>
-          <button className="delivery-subnav__btn is-active">
-            <History size={15} /> Audit
-          </button>
-          <button className="delivery-subnav__btn" onClick={() => navigate('/sdlc/outputs')}>
-            <FileText size={15} /> Outputs
-          </button>
-          <button className="delivery-header__cta" onClick={() => void refreshAudit()} disabled={loading}>
-            <RefreshCw size={16} className={loading ? 'spin' : ''} /> Refresh
-          </button>
-        </div>
+        <button className="delivery-header__cta" onClick={() => void refreshAudit()} disabled={loading}>
+          <RefreshCw size={16} className={loading ? 'spin' : ''} /> Refresh
+        </button>
       </header>
 
       {error && <div className="delivery-error">{error}</div>}

@@ -26,9 +26,13 @@ export default function FinalApproval() {
   const canApprove = qaPassed && !hasBlockers && !isLoading;
 
   return (
-    <div className={`final-approval-card ${isApproved ? 'final-approval-card--active' : ''}`} style={{
-      borderColor: isApproved ? '#10b981' : isRejected ? '#ef4444' : '#1e293b'
-    }}>
+    <div 
+      data-gate-id="gate-release-mock"
+      className={`final-approval-card ${isApproved ? 'final-approval-card--active' : ''}`} 
+      style={{
+        borderColor: isApproved ? '#10b981' : isRejected ? '#ef4444' : '#1e293b'
+      }}
+    >
       <div className="final-approval-card__header">
         <GitPullRequest className={isApproved ? "text-emerald-500" : isRejected ? "text-red-500" : "text-indigo-400"} size={20} />
         <h3 className="final-approval-card__title">

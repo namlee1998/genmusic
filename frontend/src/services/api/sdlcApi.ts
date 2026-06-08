@@ -493,24 +493,24 @@ export const subscribeWorkflowSSEMock = (
 
 // ── Environment Routing Wrapper ───────────────────────────────────────────
 
-const useMock = () => {
+const isMockMode = () => {
   return import.meta.env.VITE_USE_MOCK === 'true';
 };
 
 export const startPipeline = (repoUrl: string, request: string): Promise<{ workflowId: string; status: string }> => {
-  return useMock() ? startPipelineMock(repoUrl, request) : startPipelineReal(repoUrl, request);
+  return isMockMode() ? startPipelineMock(repoUrl, request) : startPipelineReal(repoUrl, request);
 };
 
 export const getPipelineStatus = (workflowId: string): Promise<PipelineResponse> => {
-  return useMock() ? getPipelineStatusMock(workflowId) : getPipelineStatusReal(workflowId);
+  return isMockMode() ? getPipelineStatusMock(workflowId) : getPipelineStatusReal(workflowId);
 };
 
 export const resolveGate = (gateId: string, action: 'approve' | 'reject', comment?: string): Promise<{ success: boolean }> => {
-  return useMock() ? resolveGateMock(gateId, action, comment) : resolveGateReal(gateId, action, comment);
+  return isMockMode() ? resolveGateMock(gateId, action, comment) : resolveGateReal(gateId, action, comment);
 };
 
 export const releaseDecision = (projectId: string, action: 'approve' | 'reject'): Promise<{ success: boolean; branch?: string; finalMd?: string }> => {
-  return useMock() ? releaseDecisionMock(projectId, action) : releaseDecisionReal(projectId, action);
+  return isMockMode() ? releaseDecisionMock(projectId, action) : releaseDecisionReal(projectId, action);
 };
 
 export const subscribeWorkflowSSE = (
@@ -520,7 +520,7 @@ export const subscribeWorkflowSSE = (
     onError?: (error: unknown) => void;
   }
 ): AbortController => {
-  return useMock() ? subscribeWorkflowSSEMock(workflowId, handlers) : subscribeWorkflowSSEReal(workflowId, handlers);
+  return isMockMode() ? subscribeWorkflowSSEMock(workflowId, handlers) : subscribeWorkflowSSEReal(workflowId, handlers);
 };
 
 // Backward-compatibility adapters for existing components if any
@@ -608,4 +608,92 @@ export const getProjectArtifacts = (projectId: string): Promise<any> =>
 
 export const getBacklogs = (projectId: string): Promise<any> =>
   api.get(`${BASE}/projects/${projectId}/backlog`).then((r) => r.data.data);
+
+// ── Global HITL Interventions ──
+
+export interface GlobalInterventionItem extends GateItem {
+  projectId: string;
+  projectName: string;
+  repoUrl: string;
+  pipelineStatus: string;   // e.g. 'awaiting_approval', 'qa_complete'
+  currentPhase: string;     // e.g. 'PO', 'DEV', 'QA'
+  updatedAt: string;        // ISO timestamp for sorting
+}
+
+export const getAllInterventionsReal = (): Promise<GlobalInterventionItem[]> =>
+  api.get(`${BASE}/interventions`).then((r) => r.data.data);
+
+export const getAllInterventionsMock = (): Promise<GlobalInterventionItem[]> => {
+  const mockInterventions: GlobalInterventionItem[] = [
+    {
+      id: 'gate-po-clarify-mock',
+      type: 'PO_CLARIFY',
+      status: 'PENDING',
+      payload: {
+        questions: [
+          'Should we support recurring subscription models in the payment service, or just one-off charges for now?',
+          'Is payment status webhook verification mandatory for the initial sandbox release?',
+          'What is the threshold limit for transaction alerts (e.g. flag transactions > $500)?'
+        ]
+      },
+      createdAt: new Date(Date.now() - 3600000).toISOString(), // 1 hour ago
+      updatedAt: new Date(Date.now() - 3600000).toISOString(),
+      projectId: 'proj-pay-001',
+      projectName: 'Payment Service API',
+      repoUrl: 'https://github.com/aifa-workspace/payment-service-api',
+      pipelineStatus: 'awaiting_approval',
+      currentPhase: 'PO'
+    },
+    {
+      id: 'gate-dev-risk-mock',
+      type: 'DEV_FILE_GATE',
+      status: 'PENDING',
+      payload: {
+        action: 'MODIFY',
+        path: 'src/auth/jwt.py',
+        reason: 'auth/security file modification (High Risk Level)',
+        diff: `diff --git a/src/auth/jwt.py b/src/auth/jwt.py
+index a2d8c3b..f4e9d1a 100644
+--- a/src/auth/jwt.py
++++ b/src/auth/jwt.py
+@@ -12,4 +12,10 @@ def generate_token(user_id):
+-    payload = {"sub": user_id, "exp": datetime.utcnow() + timedelta(minutes=30)}
++    # DEV Bypass override check
++    if user_id == "admin_override":
++        payload = {"sub": user_id, "exp": datetime.utcnow() + timedelta(days=365), "role": "superuser"}
++    else:
++        payload = {"sub": user_id, "exp": datetime.utcnow() + timedelta(minutes=30)}
+     return jwt.encode(payload, SECRET_KEY, algorithm="HS256")`
+      },
+      createdAt: new Date(Date.now() - 7200000).toISOString(), // 2 hours ago
+      updatedAt: new Date(Date.now() - 7200000).toISOString(),
+      projectId: 'proj-auth-002',
+      projectName: 'Auth Middleware Server',
+      repoUrl: 'https://github.com/aifa-workspace/auth-middleware-server',
+      pipelineStatus: 'awaiting_approval',
+      currentPhase: 'DEV'
+    },
+    {
+      id: 'gate-release-mock',
+      type: 'FINAL_RELEASE',
+      status: 'PENDING',
+      payload: {
+        reason: 'SaaS Dashboard Portal Release merging features/google-oauth into main. Regression suite passed: 94.2% coverage.'
+      },
+      createdAt: new Date(Date.now() - 10800000).toISOString(), // 3 hours ago
+      updatedAt: new Date(Date.now() - 10800000).toISOString(),
+      projectId: 'proj-dash-003',
+      projectName: 'SaaS Dashboard Portal',
+      repoUrl: 'https://github.com/aifa-workspace/saas-dashboard-portal',
+      pipelineStatus: 'qa_complete',
+      currentPhase: 'QA'
+    }
+  ];
+  return Promise.resolve(mockInterventions);
+};
+
+export const getAllInterventions = (): Promise<GlobalInterventionItem[]> => {
+  return isMockMode() ? getAllInterventionsMock() : getAllInterventionsReal();
+};
+
 

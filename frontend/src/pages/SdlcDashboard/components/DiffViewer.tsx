@@ -28,7 +28,7 @@ export default function DiffViewer({ diff, fileName }: DiffViewerProps) {
           <code>
             {lines.map((line, index) => {
               let className = 'diff-line';
-              let displayLine = line;
+              const displayLine = line;
               if (line.startsWith('+') && !line.startsWith('+++')) {
                 className += ' diff-line--added';
               } else if (line.startsWith('-') && !line.startsWith('---')) {

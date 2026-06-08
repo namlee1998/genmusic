@@ -3,19 +3,20 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useTheme } from '@/theme';
-import { ProjectPanel } from './ProjectPanel';
+import { AppSidebar } from './AppSidebar';
 import { useApiActions } from '@/hooks/useApiActions';
 import { useAppStore } from '@/store';
 import { ProfilePage } from '@/pages/Profile';
 import { ProjectSettings } from '@/pages/ProjectSettings';
 import { NotFoundPage } from '@/pages/NotFound';
-import { getProfile, listMyInvitations, acceptInvitation, type Profile, type ProjectInvitationItem } from '@/services/api';
+import { listMyInvitations, acceptInvitation, type ProjectInvitationItem } from '@/services/api';
 import { useQuotaStore } from '@/store/useQuotaStore';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
-import { useSdlcStore } from '@/store/useSdlcStore';
 import SdlcDashboard from '@/pages/SdlcDashboard';
 import AuditPage from '@/pages/SdlcDashboard/AuditPage';
 import OutputsPage from '@/pages/SdlcDashboard/OutputsPage';
+import HitlDashboard from '@/pages/SdlcDashboard/HitlDashboard';
+import { useHitlStore } from '@/store/useHitlStore';
 
 // ---------------------------------------------------------------------------
 // Invitations bell
@@ -169,54 +170,26 @@ function QuotaBadge() {
 function AppTopBar() {
   const { t } = useTranslation();
   const { resolvedMode, toggleMode } = useTheme();
-  const { user, signOut } = useAuthStore();
+  const { signOut } = useAuthStore();
   const navigate = useNavigate();
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const fetchQuota = useQuotaStore((s) => s.fetch);
-  const { currentProjectId } = useAppStore();
-  const setFeatureRequestFormOpen = useSdlcStore((s) => s.setFeatureRequestFormOpen);
 
-  useEffect(() => { void fetchQuota(); }, [fetchQuota]);
+  const fetchQuota = useQuotaStore((s) => s.fetch);
+  const fetchInterventions = useHitlStore((s) => s.fetchInterventions);
 
   useEffect(() => {
-    let mounted = true;
+    void fetchQuota();
+  }, [fetchQuota]);
 
-    const loadProfile = async () => {
-      try {
-        const data = await getProfile();
-        if (mounted) setProfile(data);
-      } catch {
-        if (mounted) setProfile(null);
-      }
-    };
-
-    const handleProfileUpdated = (event: Event) => {
-      const nextProfile = (event as CustomEvent<Profile>).detail;
-      setProfile(nextProfile);
-    };
-
-    void loadProfile();
-    window.addEventListener('profile-updated', handleProfileUpdated);
-    return () => {
-      mounted = false;
-      window.removeEventListener('profile-updated', handleProfileUpdated);
-    };
-  }, []);
+  useEffect(() => {
+    void fetchInterventions();
+    const timer = setInterval(() => void fetchInterventions(), 30000);
+    return () => clearInterval(timer);
+  }, [fetchInterventions]);
 
   const handleSignOut = async () => {
     await signOut();
     navigate('/auth');
   };
-
-  const displayName =
-    profile?.full_name ||
-    (user?.user_metadata?.company_name as string) ||
-    user?.email?.split('@')[0] ||
-    t('layout.welcomeAdmin');
-  const roleName = (profile?.job_title || user?.user_metadata?.job_title || t('layout.welcomeGuest')) as string;
-  const avatarUrl =
-    profile?.avatar_url ||
-    `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=0D8ABC&color=fff`;
 
   return (
     <header className="h-16 shrink-0 z-40 border-b border-outline-variant bg-surface-container-lowest/80 backdrop-blur-md flex items-center justify-between px-6">
@@ -239,16 +212,6 @@ function AppTopBar() {
       </div>
 
       <div className="flex items-center gap-3">
-        <button
-          onClick={() => setFeatureRequestFormOpen(true)}
-          disabled={!currentProjectId}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-primary hover:bg-primary/95 text-on-primary text-xs font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_10px_rgba(99,102,241,0.2)]"
-          title={!currentProjectId ? t('layout.chooseProjectFirst') : ""}
-        >
-          <span>🚀</span>
-          <span>{t('layout.newFeatureRequest')}</span>
-        </button>
-        <div className="w-px h-5 bg-outline-variant/30 mx-1" />
         <LanguageSwitcher />
         <QuotaBadge />
         <button
@@ -268,27 +231,6 @@ function AppTopBar() {
         >
           <span className="material-symbols-outlined text-[18px]">logout</span>
         </button>
-        <div className="w-px h-5 bg-outline-variant/30" />
-        <button
-          type="button"
-          onClick={() => navigate('/profile')}
-          className="flex items-center gap-2 rounded px-2 py-1 text-left transition-colors hover:bg-surface-variant"
-          title={t('layout.myProfile')}
-        >
-          <div className="text-right">
-            <p className="text-xs font-semibold leading-none">{displayName}</p>
-            <p className="text-[10px] text-on-surface-variant uppercase tracking-widest leading-none mt-0.5 font-label-mono">
-              {roleName}
-            </p>
-          </div>
-          <div className="w-8 h-8 rounded border border-outline-variant overflow-hidden">
-            <img
-              src={avatarUrl}
-              alt="avatar"
-              className="w-full h-full object-cover"
-            />
-          </div>
-        </button>
       </div>
     </header>
   );
@@ -297,7 +239,7 @@ function AppTopBar() {
 // ---------------------------------------------------------------------------
 // Create project dialog
 // ---------------------------------------------------------------------------
-function CreateProjectDialog({
+function ImportProjectDialog({
   onCancel,
   onSubmit,
 }: {
@@ -305,17 +247,31 @@ function CreateProjectDialog({
   onSubmit: (name: string) => Promise<void>;
 }) {
   const { t } = useTranslation();
-  const [value, setValue] = useState('New Project');
+  const [value, setValue] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const validateUrl = (urlStr: string) => {
+    if (!urlStr) return t('layout.projectNameLabel', 'Repository URL is required');
+    const regex = /^(https?:\/\/)?(www\.)?(github|gitlab)\.com\/[\w-]+\/[\w.-]+(\.git)?\/?$/i;
+    if (!regex.test(urlStr)) {
+      return t('layout.createProjectFailed', 'Please enter a valid GitHub or GitLab URL');
+    }
+    return '';
+  };
+
   const handleSubmit = async () => {
-    const name = value.trim();
-    if (!name || submitting) return;
+    const urlStr = value.trim();
+    const validationError = validateUrl(urlStr);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
-      await onSubmit(name);
+      const repoName = urlStr.replace(/\.git\/?$/, '').split('/').pop() || 'Imported Project';
+      await onSubmit(repoName);
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { message?: string } } })?.response?.data?.message ??
@@ -427,9 +383,10 @@ export const AppShell: React.FC = () => {
   const isProjectSettingsRoute = location.pathname.startsWith('/projects/') && location.pathname.endsWith('/settings');
   const isAuditRoute = location.pathname === '/sdlc/audit' || location.pathname === '/sdlc/audit/';
   const isOutputsRoute = location.pathname === '/sdlc/outputs' || location.pathname === '/sdlc/outputs/';
+  const isHitlRoute = location.pathname === '/sdlc/hitl' || location.pathname === '/sdlc/hitl/';
   const isUnknownAppRoute = location.pathname.startsWith('/sdlc/')
     && location.pathname !== '/sdlc/' && location.pathname !== '/sdlc'
-    && !isAuditRoute && !isOutputsRoute;
+    && !isAuditRoute && !isOutputsRoute && !isHitlRoute;
 
   const [panelCollapsed, setPanelCollapsed] = useState(() => {
     return localStorage.getItem('project-panel-collapsed') === 'true';
@@ -438,7 +395,6 @@ export const AppShell: React.FC = () => {
   const [pendingDeleteProjectId, setPendingDeleteProjectId] = useState<string | null>(null);
   const [projectActionMessage, setProjectActionMessage] = useState<string | null>(null);
 
-  const navigate = useNavigate();
 
   useEffect(() => {
     if (!treeLoaded) void fetchTree();
@@ -494,16 +450,12 @@ export const AppShell: React.FC = () => {
       <QuotaWarningBanner />
 
       <div className="flex flex-1 min-h-0">
-        <ProjectPanel
+        <AppSidebar
           projects={panelProjects}
           activeProjectId={currentProjectId}
           onSelectProject={setCurrentProject}
           onCreateProject={() => setCreateProjectDialogOpen(true)}
           onDeleteProject={setPendingDeleteProjectId}
-          onOpenSettings={(id) => {
-            setCurrentProject(id);
-            navigate(`/projects/${id}/settings`);
-          }}
           deletingProjectId={deletingProjectId}
           collapsed={panelCollapsed}
           onToggleCollapse={handleToggleCollapse}
@@ -525,6 +477,10 @@ export const AppShell: React.FC = () => {
               <div className="flex flex-col h-full bg-background">
                 <OutputsPage />
               </div>
+            ) : isHitlRoute ? (
+              <div className="flex flex-col h-full bg-background">
+                <HitlDashboard />
+              </div>
             ) : (
               <div className="flex flex-col h-full bg-background">
                 <SdlcDashboard />
@@ -535,7 +491,7 @@ export const AppShell: React.FC = () => {
       </div>
 
       {isCreateProjectDialogOpen && (
-        <CreateProjectDialog
+        <ImportProjectDialog
           onCancel={() => setCreateProjectDialogOpen(false)}
           onSubmit={handleCreateProject}
         />

@@ -10,7 +10,7 @@ export default function RepoInput() {
 
   const validateUrl = (value: string) => {
     if (!value) return 'Repository URL is required';
-    const regex = /^(https?:\/\/)?(www\.)?(github|gitlab)\.com\/[\w\-]+\/[\w\-\.]+(\.git)?\/?$/i;
+    const regex = /^(https?:\/\/)?(www\.)?(github|gitlab)\.com\/[\w-]+\/[\w.-]+(\.git)?\/?$/i;
     if (!regex.test(value)) {
       return 'Please enter a valid GitHub or GitLab repository URL (e.g., https://github.com/user/repo.git)';
     }

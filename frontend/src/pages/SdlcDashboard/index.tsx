@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Workflow } from 'lucide-react';
 import { useSdlcStore } from '@/store/useSdlcStore';
-import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import RepoInput from './components/RepoInput';
 import PipelineStepper from './components/PipelineStepper';
 import GatePanel from './components/GatePanel';
@@ -12,7 +12,6 @@ import FinalApproval from './components/FinalApproval';
 import DetailModal from './components/DetailModal';
 
 export default function SdlcDashboard() {
-  const { t } = useTranslation();
   const {
     status,
     error,
@@ -21,6 +20,8 @@ export default function SdlcDashboard() {
   } = useSdlcStore();
 
   const [activeDetailType, setActiveDetailType] = useState<'prd' | 'ux_spec' | 'code_diff' | 'qa_report' | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const highlightGate = searchParams.get('highlightGate');
 
   // Poll status occasionally as a robust fallback to SSE
   useEffect(() => {
@@ -32,6 +33,27 @@ export default function SdlcDashboard() {
       return () => window.clearInterval(interval);
     }
   }, [workflowId, status, pollStatus]);
+
+  // Scroll to targeted gate and trigger highlight effect
+  useEffect(() => {
+    if (!highlightGate) return;
+    const timer = setTimeout(() => {
+      // Find element by gate id attribute
+      const el = document.querySelector(`[data-gate-id="${highlightGate}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('hitl-highlight-pulse');
+        setTimeout(() => {
+          el.classList.remove('hitl-highlight-pulse');
+        }, 3000);
+      }
+      
+      // Clean up search parameter after highlighting
+      searchParams.delete('highlightGate');
+      setSearchParams(searchParams, { replace: true });
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [highlightGate, searchParams, setSearchParams]);
 
   return (
     <main className="sdlc-dashboard" style={{ maxWidth: '1000px', margin: '0 auto', padding: '24px 16px' }}>

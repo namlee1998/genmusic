@@ -5,20 +5,31 @@ import { ShieldAlert, HelpCircle, Check, X, FileText, Lock } from 'lucide-react'
 
 export default function GatePanel() {
   const { pendingGates, resolveGate, isLoading } = useSdlcStore();
+  const activeGate = pendingGates[0];
+
+  if (!activeGate) return null;
+
+  return (
+    <GateForm
+      key={activeGate.id}
+      activeGate={activeGate}
+      resolveGate={resolveGate}
+      isLoading={isLoading}
+    />
+  );
+}
+
+interface GateFormProps {
+  activeGate: any;
+  resolveGate: any;
+  isLoading: boolean;
+}
+
+function GateForm({ activeGate, resolveGate, isLoading }: GateFormProps) {
   const [comment, setComment] = useState('');
   
   // State for PO Clarification answers
   const [poAnswers, setPoAnswers] = useState<Record<number, string>>({});
-
-  const activeGate = pendingGates[0];
-
-  useEffect(() => {
-    // Reset inputs when gate changes
-    setComment('');
-    setPoAnswers({});
-  }, [activeGate]);
-
-  if (!activeGate) return null;
 
   const handleResolve = async (action: 'approve' | 'reject') => {
     if (action === 'reject' && !comment.trim()) {
@@ -56,7 +67,10 @@ export default function GatePanel() {
   };
 
   return (
-    <div className={`gate-panel-card ${activeGate.status !== 'PENDING' ? 'gate-panel-card--resolved' : ''}`}>
+    <div 
+      data-gate-id={activeGate.id}
+      className={`gate-panel-card ${activeGate.status !== 'PENDING' ? 'gate-panel-card--resolved' : ''}`}
+    >
       <div className="gate-panel-card__header">
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {activeGate.type === 'DEV_FILE_GATE' ? (
@@ -105,12 +119,12 @@ export default function GatePanel() {
             <div className="gate-info-box" style={{ background: 'rgba(245, 158, 11, 0.03)', borderColor: 'rgba(245, 158, 11, 0.15)' }}>
               <div className="gate-info-box__title" style={{ color: '#fbbf24' }}>REQUIREMENTS CLARIFICATION</div>
               <p style={{ margin: 0, fontSize: '12px', color: '#cbd5e1' }}>
-                To create a comprehensive PRD, the PO agent requests choices on the following assumptions. 
+                To create a comprehensive PRD, the PO agent requests choices on the assumptions. 
                 Unselected options will assume default behavior.
               </p>
             </div>
 
-            {activeGate.payload.questions?.map((question, qIdx) => {
+            {activeGate.payload.questions?.map((question: string, qIdx: number) => {
               const options = getMockQuestionOptions(question);
               const selectedValue = poAnswers[qIdx] || options[0];
 
