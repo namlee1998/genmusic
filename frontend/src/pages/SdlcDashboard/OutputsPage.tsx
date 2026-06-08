@@ -1,7 +1,7 @@
 import './sdlc.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, FileText, History, RefreshCw, Workflow } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { RefreshCw, Workflow } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { useSdlcStore } from '@/store/useSdlcStore';
 import * as sdlcApi from '@/services/api/sdlcApi';
@@ -10,7 +10,7 @@ import EmptyProjectState from './components/EmptyProjectState';
 import DeliveryErrorBanner from './components/DeliveryErrorBanner';
 
 export default function OutputsPage() {
-  const navigate = useNavigate();
+
   const [searchParams] = useSearchParams();
   const { currentProjectId } = useAppStore();
   const {
@@ -49,7 +49,7 @@ export default function OutputsPage() {
       selectArtifact(nextSelection || result.artifacts[0] || null);
       loadedContextRef.current = contextKey;
     } catch (requestError) {
-      setError(sdlcApi.parseApiError(requestError, 'Could not load worker outputs.'));
+      setError(sdlcApi.parseApiError(requestError, 'Could not load worker outputs.').message);
     } finally {
       setLoading(false);
     }
@@ -67,27 +67,21 @@ export default function OutputsPage() {
   if (!projectId) return <EmptyProjectState />;
 
   return (
-    <main className="sdlc-dashboard">
-      <header className="delivery-header">
+    <main className="sdlc-dashboard" style={{ maxWidth: '1000px', margin: '0 auto', padding: '24px 16px' }}>
+      <header className="delivery-header" style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <p className="delivery-header__eyebrow"><Workflow size={14} /> AIDLC delivery workspace</p>
+          <p className="delivery-header__eyebrow" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Workflow size={14} className="text-indigo-400" />
+            <span>AIDLC delivery workspace</span>
+          </p>
           <h1>Worker Outputs</h1>
-          <p>Full project history is preserved. Open each A2A handoff to compare the approved contract between workers.</p>
+          <p style={{ margin: '4px 0 0 0', color: '#908fa0', fontSize: '13px' }}>
+            Full project history is preserved. Open each A2A handoff to compare the approved contract between workers.
+          </p>
         </div>
-        <div className="delivery-subnav">
-          <button className="delivery-subnav__btn" onClick={() => navigate('/sdlc')}>
-            <ArrowLeft size={15} /> Build
-          </button>
-          <button className="delivery-subnav__btn" onClick={() => navigate('/sdlc/audit')}>
-            <History size={15} /> Audit
-          </button>
-          <button className="delivery-subnav__btn is-active">
-            <FileText size={15} /> Outputs
-          </button>
-          <button className="delivery-header__cta" onClick={() => void refreshOutputs()} disabled={loading}>
-            <RefreshCw size={16} className={loading ? 'spin' : ''} /> Refresh
-          </button>
-        </div>
+        <button className="delivery-header__cta" onClick={() => void refreshOutputs()} disabled={loading}>
+          <RefreshCw size={16} className={loading ? 'spin' : ''} /> Refresh
+        </button>
       </header>
 
       <DeliveryErrorBanner error={error} onDismiss={() => setError(null)} />

@@ -84,7 +84,7 @@ export default function ReleaseGatePanel({ releaseGate, onDecide }: Props) {
 
           {!!evidence.open_blockers?.length && (
             <ul className="release-evidence__blockers">
-              {evidence.open_blockers.map((blocker, i) => (
+              {evidence.open_blockers.map((blocker: any, i: number) => (
                 <li key={`${blocker.code || 'blocker'}:${i}`} className={`release-evidence__blocker release-evidence__blocker--${(blocker.severity || 'high').toLowerCase()}`}>
                   <span>{blocker.severity || 'HIGH'}</span>
                   <small>{blocker.detail || blocker.code}</small>

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import SdlcDashboard from '@/pages/SdlcDashboard';
@@ -17,17 +17,12 @@ vi.mock('@/store/useSdlcStore', () => ({
 
 // Mock API
 vi.mock('@/services/api/sdlcApi', () => ({
-  getWorkflowStatus: vi.fn(),
-  getAuditTrail: vi.fn(),
-  getFinalReviewPacket: vi.fn(),
-  subscribeTaskSSE: vi.fn(),
-  getBacklogs: vi.fn(),
-  moveBacklog: vi.fn(),
-  createBacklog: vi.fn(),
-  submitGateDecision: vi.fn(),
-  releaseToProduction: vi.fn(),
+  getPipelineStatus: vi.fn(),
+  resolveGate: vi.fn(),
+  releaseDecision: vi.fn(),
+  subscribeWorkflowSSE: vi.fn(),
+  startPipeline: vi.fn(),
 }));
-
 
 describe('SdlcDashboard Component', () => {
   const mockUseAppStore = useAppStore as unknown as Mock;
@@ -44,69 +39,81 @@ describe('SdlcDashboard Component', () => {
 
     mockUseSdlcStore.mockReturnValue({
       projectId: 'project-123',
-      workflowStatus: {
-        projectId: 'project-123',
-        currentPhase: 'po-agent',
-        phases: {
-          intent: null,
-          po: null,
-          ux: null,
-          dev: null,
-          qa: null,
-        },
-      },
-      workflowLoading: false,
-      activePhase: null,
-      sseLogs: [],
-      sseActive: false,
-      artifacts: [],
-      selectedArtifact: null,
-      auditEvents: [],
-      isFeatureRequestFormOpen: false,
-      isAuditSidebarOpen: false,
+      workflowId: 'project-123',
+      status: 'idle',
+      routeType: 'FULLSTACK',
+      pipelinePhases: [
+        { agent: 'PO', status: 'pending' },
+        { agent: 'UX', status: 'pending' },
+        { agent: 'DEV', status: 'pending' },
+        { agent: 'QA', status: 'pending' }
+      ],
+      pendingGates: [],
+      gateHistory: [],
+      auditLog: [],
+      qaResult: null,
+      releaseStatus: 'pending',
+      repoUrl: '',
+      featureRequest: 'add google login',
+      isLoading: false,
+      error: null,
+      pollStatus: vi.fn(),
+      startPipeline: vi.fn(),
+      resolveGate: vi.fn(),
+      releaseDecision: vi.fn(),
       setProjectId: vi.fn(),
-      setWorkflowStatus: vi.fn(),
-      setWorkflowLoading: vi.fn(),
-      setActiveTask: vi.fn(),
-      appendSseLog: vi.fn(),
-      setSseActive: vi.fn(),
-      setArtifacts: vi.fn(),
-      selectArtifact: vi.fn(),
-      setAuditEvents: vi.fn(),
       setError: vi.fn(),
-      setFeatureRequestFormOpen: vi.fn(),
-      setAuditSidebarOpen: vi.fn(),
     });
-
-    (sdlcApi.getWorkflowStatus as Mock).mockResolvedValue({
-      projectId: 'project-123',
-      currentPhase: 'po-agent',
-      phases: {
-        intent: null,
-        po: null,
-        ux: null,
-        dev: null,
-        qa: null,
-      },
-    });
-
-    (sdlcApi.getAuditTrail as Mock).mockResolvedValue({
-      events: [],
-    });
-
-    (sdlcApi.getBacklogs as Mock).mockResolvedValue([]);
   });
 
+  it('renders the core dashboard header when loaded', () => {
+    render(
+      <MemoryRouter>
+        <SdlcDashboard />
+      </MemoryRouter>
+    );
+    expect(screen.getByText('SDLC Control Center')).toBeInTheDocument();
+    expect(screen.getByText(/Risk-based pipeline control with autonomous developer agents/i)).toBeInTheDocument();
+  });
 
-  it('renders empty state when no projectId is selected', () => {
-    mockUseAppStore.mockReturnValue({
-      currentProjectId: null,
-      treeLoaded: true,
-      fetchTree: vi.fn(),
-    });
+  it('renders the Repository & Feature Integration input form', () => {
+    render(
+      <MemoryRouter>
+        <SdlcDashboard />
+      </MemoryRouter>
+    );
+    expect(screen.getByText('Repository & Feature Integration')).toBeInTheDocument();
+    expect(screen.getByText('🔗 TARGET REPOSITORY URL')).toBeInTheDocument();
+    expect(screen.getByText('📝 FEATURE SPECIFICATION / REQUEST')).toBeInTheDocument();
+  });
+
+  it('renders the Pipeline Stepper when pipeline starts running', () => {
     mockUseSdlcStore.mockReturnValue({
-      projectId: null,
+      projectId: 'project-123',
+      workflowId: 'project-123',
+      status: 'dev_running',
+      routeType: 'BACKEND',
+      pipelinePhases: [
+        { agent: 'PO', status: 'completed' },
+        { agent: 'UX', status: 'skipped' },
+        { agent: 'DEV', status: 'running' },
+        { agent: 'QA', status: 'pending' }
+      ],
+      pendingGates: [],
+      gateHistory: [],
+      auditLog: [],
+      qaResult: null,
+      releaseStatus: 'pending',
+      repoUrl: 'https://github.com/test/repo.git',
+      featureRequest: 'add google login',
+      isLoading: false,
+      error: null,
+      pollStatus: vi.fn(),
+      startPipeline: vi.fn(),
+      resolveGate: vi.fn(),
+      releaseDecision: vi.fn(),
       setProjectId: vi.fn(),
+      setError: vi.fn(),
     });
 
     render(
@@ -114,34 +121,42 @@ describe('SdlcDashboard Component', () => {
         <SdlcDashboard />
       </MemoryRouter>
     );
-    expect(screen.getByText('Welcome to Autonomous Factory')).toBeInTheDocument();
+
+    expect(screen.getByText('AIFA Execution Route')).toBeInTheDocument();
+    expect(screen.getByText('ROUTE TYPE: BACKEND')).toBeInTheDocument();
+    expect(screen.getByText('DEV RUNNING')).toBeInTheDocument();
   });
 
-  it('renders sub-navigation when a project is selected', async () => {
-    render(
-      <MemoryRouter>
-        <SdlcDashboard />
-      </MemoryRouter>
-    );
+  it('calls pollStatus on mount when a workflow is active', async () => {
+    const pollStatusSpy = vi.fn();
+    mockUseSdlcStore.mockReturnValue({
+      projectId: 'project-123',
+      workflowId: 'project-123',
+      status: 'po_running',
+      routeType: 'FULLSTACK',
+      pipelinePhases: [
+        { agent: 'PO', status: 'running' },
+        { agent: 'UX', status: 'pending' },
+        { agent: 'DEV', status: 'pending' },
+        { agent: 'QA', status: 'pending' }
+      ],
+      pendingGates: [],
+      gateHistory: [],
+      auditLog: [],
+      qaResult: null,
+      releaseStatus: 'pending',
+      repoUrl: 'https://github.com/test/repo.git',
+      featureRequest: 'add google login',
+      isLoading: false,
+      error: null,
+      pollStatus: pollStatusSpy,
+      startPipeline: vi.fn(),
+      resolveGate: vi.fn(),
+      releaseDecision: vi.fn(),
+      setProjectId: vi.fn(),
+      setError: vi.fn(),
+    });
 
-    expect(screen.getByText('Build a feature with four AI workers')).toBeInTheDocument();
-    expect(screen.getByText('Build')).toBeInTheDocument();
-    expect(screen.getByText('Audit')).toBeInTheDocument();
-    expect(screen.getByText('Outputs')).toBeInTheDocument();
-  });
-
-  it('renders the Build tab as active by default', () => {
-    render(
-      <MemoryRouter>
-        <SdlcDashboard />
-      </MemoryRouter>
-    );
-
-    const buildBtn = screen.getByText('Build');
-    expect(buildBtn).toHaveClass('is-active');
-  });
-
-  it('calls getWorkflowStatus and getAuditTrail on mount', async () => {
     render(
       <MemoryRouter>
         <SdlcDashboard />
@@ -149,8 +164,7 @@ describe('SdlcDashboard Component', () => {
     );
 
     await waitFor(() => {
-      expect(sdlcApi.getWorkflowStatus).toHaveBeenCalledWith('project-123');
-      expect(sdlcApi.getAuditTrail).toHaveBeenCalledWith('project-123');
+      expect(pollStatusSpy).toHaveBeenCalled();
     });
   });
 });

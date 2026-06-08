@@ -1,92 +1,108 @@
 import React from 'react';
-import { useSdlcStore, type PipelineStatus } from '@/store/useSdlcStore';
-import { Check, Loader2, AlertCircle, Clock, PlayCircle } from 'lucide-react';
+import { useSdlcStore } from '@/store/useSdlcStore';
+import { Check, Loader2, AlertCircle, Clock, PlayCircle, SkipForward } from 'lucide-react';
 
-interface StepInfo {
-  index: number;
+interface AgentDetails {
   title: string;
   description: string;
 }
 
-const STEPS: StepInfo[] = [
-  { index: 1, title: 'Clone & Analyze', description: 'Repository source retrieval and scanning' },
-  { index: 2, title: 'Product (PO)', description: 'PRD document and user stories generation' },
-  { index: 3, title: 'Design (UX)', description: 'Design assets and layout specification' },
-  { index: 4, title: 'Build (DEV)', description: 'Code implementation and unified patching' },
-  { index: 5, title: 'Sandbox Gate', description: 'Docker local sandbox automated testing' },
-  { index: 6, title: 'QA Audit', description: 'Agent validation and final QA report creation' }
-];
+const AGENT_META: Record<'PO' | 'UX' | 'DEV' | 'QA', AgentDetails> = {
+  PO: { title: 'Product Phase (PO)', description: 'Requirement classification, PRD, and risk profiling' },
+  UX: { title: 'Design Phase (UX)', description: 'Design layouts, component markup, and wireframe specs' },
+  DEV: { title: 'Development Phase (DEV)', description: 'Code modifications, security checks, and sandbox testing' },
+  QA: { title: 'Verification Phase (QA)', description: 'Coverage metrics validation, regression test audit, and compliance' }
+};
 
 export default function PipelineStepper() {
-  const { pipelineStatus, currentStep } = useSdlcStore();
+  const { pipelinePhases, routeType, status } = useSdlcStore();
 
-  const getStepState = (stepIndex: number): 'pending' | 'running' | 'awaiting_approval' | 'complete' | 'failed' => {
-    if (pipelineStatus === 'idle') return 'pending';
-    if (pipelineStatus === 'failed' && stepIndex === currentStep) return 'failed';
-    if (pipelineStatus === 'qa_complete') return 'complete';
-
-    if (stepIndex < currentStep) return 'complete';
-    if (stepIndex === currentStep) {
-      if (pipelineStatus === 'awaiting_approval') return 'awaiting_approval';
-      return 'running';
-    }
-    return 'pending';
-  };
-
-  const getStepIcon = (state: string) => {
-    switch (state) {
-      case 'complete':
+  const getStepIcon = (phaseStatus: string) => {
+    switch (phaseStatus) {
+      case 'completed':
         return <Check size={16} className="text-emerald-500" />;
       case 'running':
         return <Loader2 size={16} className="animate-spin text-blue-500" />;
-      case 'awaiting_approval':
+      case 'gate_pending':
         return <Clock size={16} className="text-amber-500" />;
       case 'failed':
         return <AlertCircle size={16} className="text-rose-500" />;
+      case 'skipped':
+        return <SkipForward size={16} className="text-slate-500" />;
       default:
         return <PlayCircle size={16} className="text-gray-500" />;
     }
   };
 
-  const getStepClass = (state: string) => {
-    switch (state) {
-      case 'complete':
+  const getStepClass = (phaseStatus: string) => {
+    switch (phaseStatus) {
+      case 'completed':
         return 'is-complete';
       case 'running':
         return 'is-running';
-      case 'awaiting_approval':
+      case 'gate_pending':
         return 'is-awaiting-approval';
       case 'failed':
         return 'is-failed';
+      case 'skipped':
+        return 'is-skipped';
       default:
         return 'is-pending';
     }
   };
 
-  if (pipelineStatus === 'idle') return null;
+  if (status === 'idle') return null;
 
   return (
     <div className="pipeline-stepper-card">
-      <div className="pipeline-stepper-card__header">
-        <h3>SDLC Execution Pipeline</h3>
-        <span className={`status-badge status-badge--${pipelineStatus}`}>
-          {pipelineStatus.replace('_', ' ').toUpperCase()}
+      <div className="pipeline-stepper-card__header" style={{ justifyContent: 'space-between' }}>
+        <div>
+          <h3>AIFA Execution Route</h3>
+          {routeType && (
+            <span style={{ fontSize: '11px', color: '#a5b4fc', fontWeight: 600, display: 'block', marginTop: '2px' }}>
+              ROUTE TYPE: {routeType}
+            </span>
+          )}
+        </div>
+        <span className={`status-badge status-badge--${status}`}>
+          {status.replace('_', ' ').toUpperCase()}
         </span>
       </div>
       <div className="pipeline-stepper-card__body">
         <div className="stepper-timeline">
-          {STEPS.map((step) => {
-            const state = getStepState(step.index);
+          {pipelinePhases.map((phase, index) => {
+            const meta = AGENT_META[phase.agent];
+            const stepClass = getStepClass(phase.status);
+            
             return (
-              <div key={step.index} className={`stepper-node ${getStepClass(state)}`}>
+              <div key={phase.agent} className={`stepper-node ${stepClass}`}>
                 <div className="stepper-node__icon-container">
-                  {getStepIcon(state)}
+                  {getStepIcon(phase.status)}
                 </div>
-                <div className="stepper-node__content">
-                  <span className="stepper-node__title">{step.title}</span>
-                  <p className="stepper-node__desc">{step.description}</p>
+                <div className="stepper-node__content" style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span className="stepper-node__title" style={{ textDecoration: phase.status === 'skipped' ? 'line-through' : 'none' }}>
+                      {meta?.title || phase.agent}
+                    </span>
+                    {phase.duration && (
+                      <span style={{ fontSize: '10px', color: '#64748b', fontFamily: 'JetBrains Mono, monospace' }}>
+                        ({phase.duration})
+                      </span>
+                    )}
+                  </div>
+                  <p className="stepper-node__desc" style={{ color: phase.status === 'skipped' ? '#475569' : '#908fa0' }}>
+                    {phase.status === 'skipped' ? 'Skipped for backend routes.' : meta?.description}
+                  </p>
                 </div>
-                {step.index < STEPS.length && <div className="stepper-node__connector" />}
+                {index < pipelinePhases.length - 1 && (
+                  <div 
+                    className="stepper-node__connector" 
+                    style={{ 
+                      opacity: phase.status === 'skipped' ? 0.3 : 1,
+                      borderStyle: phase.status === 'skipped' ? 'dashed' : 'solid'
+                    }} 
+                  />
+                )}
               </div>
             );
           })}

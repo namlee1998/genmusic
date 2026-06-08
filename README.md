@@ -386,10 +386,12 @@ optional.
 
 ```env
 VITE_API_URL=http://localhost:3000/api/v1
+VITE_USE_MOCK=true
 ```
 
-In local development this value is optional because Vite proxies `/api` to the
-backend. Set it explicitly for deployed environments.
+- `VITE_USE_MOCK=true` (Default for local UI demo) runs the frontend with a complete client-side AIFA v3 mock simulation of PO clarifications (Gate B), DEV file risk diff overrides (Gate A), real-time SSE audit logs, and final release gates.
+- Set `VITE_USE_MOCK=false` to connect directly with the Node.js backend integration APIs.
+- In local development `VITE_API_URL` is optional because Vite proxies `/api` to the backend. Set it explicitly for deployed environments.
 
 ## 5. Install Dependencies
 
