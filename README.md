@@ -67,6 +67,9 @@ output van phai qua output contract, validation ba lop va A2A integrity check.
 - Path `langchain` duoc giu de tuong thich, nhung khong phai path phat trien chinh.
 
 
+
+The competitor analysis report file is located at /docs/archive/week-1/Team6_RPWeek1.pdf.  Section 2
+
 ## 1. Repository Structure
 
 ```text
