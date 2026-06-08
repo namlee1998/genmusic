@@ -289,27 +289,25 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
       </div>
 
       {/* 2. Launcher Action (New Feature Request) */}
-      {activeProjectId && (
-        <div className={`p-3 shrink-0 ${collapsed ? 'text-center' : ''}`}>
-          {collapsed ? (
-            <button
-              onClick={() => setFeatureRequestFormOpen(true)}
-              title={t('layout.newFeatureRequest')}
-              className="w-10 h-10 rounded-xl bg-primary hover:bg-primary/95 text-on-primary flex items-center justify-center transition-all shadow-[0_0_10px_rgba(99,102,241,0.2)] hover:scale-105 mx-auto"
-            >
-              <Rocket size={18} />
-            </button>
-          ) : (
-            <button
-              onClick={() => setFeatureRequestFormOpen(true)}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-primary hover:bg-primary/95 text-on-primary text-xs font-bold transition-all shadow-[0_0_12px_rgba(99,102,241,0.2)] hover:scale-[1.01]"
-            >
-              <Rocket size={14} className="animate-bounce" />
-              <span>{t('layout.newFeatureRequest')}</span>
-            </button>
-          )}
-        </div>
-      )}
+      <div className={`p-3 shrink-0 ${collapsed ? 'text-center' : ''}`}>
+        {collapsed ? (
+          <button
+            onClick={() => setFeatureRequestFormOpen(true)}
+            title={t('layout.newFeatureRequest')}
+            className="w-10 h-10 rounded-xl bg-primary hover:bg-primary/95 text-on-primary flex items-center justify-center transition-all shadow-[0_0_10px_rgba(99,102,241,0.2)] hover:scale-105 mx-auto"
+          >
+            <Rocket size={18} />
+          </button>
+        ) : (
+          <button
+            onClick={() => setFeatureRequestFormOpen(true)}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-primary hover:bg-primary/95 text-on-primary text-xs font-bold transition-all shadow-[0_0_12px_rgba(99,102,241,0.2)] hover:scale-[1.01]"
+          >
+            <Rocket size={14} className="animate-bounce" />
+            <span>{t('layout.newFeatureRequest')}</span>
+          </button>
+        )}
+      </div>
 
       {/* 3. Navigation Links List */}
       <div className="flex-1 overflow-y-auto custom-scrollbar px-3 py-2 space-y-1">

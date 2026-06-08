@@ -1,12 +1,39 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useSdlcStore } from '@/store/useSdlcStore';
+import { useAppStore } from '@/store';
 import { GitBranch, Loader2, BarChart2, Terminal, Sparkles } from 'lucide-react';
 
 export default function RepoInput() {
   const { startPipeline, repoInfo, isLoading, error } = useSdlcStore();
+  const { currentProjectId } = useAppStore();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
   const [url, setUrl] = useState('');
   const [request, setRequest] = useState('add google login');
   const [validationError, setValidationError] = useState('');
+
+  // Prefill the repository URL based on the selected project from localStorage
+  useEffect(() => {
+    const savedUrl = currentProjectId ? localStorage.getItem(`repoUrl_${currentProjectId}`) || '' : '';
+    const timer = setTimeout(() => {
+      setUrl(savedUrl);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [currentProjectId]);
+
+  // Focus request input if focusRequest query parameter is set
+  useEffect(() => {
+    if (searchParams.get('focusRequest') === 'true') {
+      setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 100);
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.delete('focusRequest');
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const validateUrl = (value: string) => {
     if (!value) return 'Repository URL is required';
@@ -65,6 +92,7 @@ export default function RepoInput() {
             
             <div className="repo-input-card__textarea-wrapper">
               <textarea
+                ref={textareaRef}
                 placeholder="Describe the feature request, code changes, or guidelines for the AIFA worker agents (e.g. add google login)..."
                 value={request}
                 onChange={(e) => setRequest(e.target.value)}

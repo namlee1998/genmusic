@@ -3,11 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useTheme } from '@/theme';
-import { useAppStore } from '@/store';
 import { getProfile, type Profile } from '@/services/api';
 import { useQuotaStore } from '@/store/useQuotaStore';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
-import { useSdlcStore } from '@/store/useSdlcStore';
 import { QuotaBadge } from './QuotaBadge';
 import { InvitationsBell } from './InvitationsBell';
 
@@ -18,8 +16,7 @@ export function AppTopBar() {
   const navigate = useNavigate();
   const [profile, setProfile] = useState<Profile | null>(null);
   const fetchQuota = useQuotaStore((s) => s.fetch);
-  const { currentProjectId } = useAppStore();
-  const setFeatureRequestFormOpen = useSdlcStore((s) => s.setFeatureRequestFormOpen);
+
 
   useEffect(() => { void fetchQuota(); }, [fetchQuota]);
 
@@ -84,16 +81,6 @@ export function AppTopBar() {
       </div>
 
       <div className="flex items-center gap-3">
-        <button
-          onClick={() => setFeatureRequestFormOpen(true)}
-          disabled={!currentProjectId}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-primary hover:bg-primary/95 text-on-primary text-xs font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_10px_rgba(99,102,241,0.2)]"
-          title={!currentProjectId ? t('layout.chooseProjectFirst') : ""}
-        >
-          <span>🚀</span>
-          <span>{t('layout.newFeatureRequest')}</span>
-        </button>
-        <div className="w-px h-5 bg-outline-variant/30 mx-1" />
         <LanguageSwitcher />
         <QuotaBadge />
         <button

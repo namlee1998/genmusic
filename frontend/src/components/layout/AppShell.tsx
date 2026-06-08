@@ -1,240 +1,118 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { useAuthStore } from '@/store/useAuthStore';
-import { useTheme } from '@/theme';
 import { AppSidebar } from './AppSidebar';
 import { useApiActions } from '@/hooks/useApiActions';
 import { useAppStore } from '@/store';
 import { ProfilePage } from '@/pages/Profile';
 import { ProjectSettings } from '@/pages/ProjectSettings';
 import { NotFoundPage } from '@/pages/NotFound';
-import { listMyInvitations, acceptInvitation, type ProjectInvitationItem } from '@/services/api';
-import { useQuotaStore } from '@/store/useQuotaStore';
-import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 import SdlcDashboard from '@/pages/SdlcDashboard';
 import AuditPage from '@/pages/SdlcDashboard/AuditPage';
 import OutputsPage from '@/pages/SdlcDashboard/OutputsPage';
 import HitlDashboard from '@/pages/SdlcDashboard/HitlDashboard';
-import { useHitlStore } from '@/store/useHitlStore';
+import { AppTopBar } from './AppTopBar';
+import { QuotaWarningBanner } from './QuotaWarningBanner';
+import { useSdlcStore } from '@/store/useSdlcStore';
+
+
 
 // ---------------------------------------------------------------------------
-// Invitations bell
+// Feature Request Project Selection Dialog
 // ---------------------------------------------------------------------------
-function InvitationsBell() {
+function FeatureRequestProjectDialog({
+  projects,
+  onCancel,
+  onSelect,
+}: {
+  projects: Array<{ id: string; name: string; role?: string }>;
+  onCancel: () => void;
+  onSelect: (projectId: string) => void;
+}) {
   const { t } = useTranslation();
-  const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
-  const [invitations, setInvitations] = useState<ProjectInvitationItem[]>([]);
-  const [accepting, setAccepting] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const { fetchTree, setCurrentProject } = useAppStore();
+  const [searchQuery, setSearchQuery] = useState('');
 
-  const load = async () => {
-    try {
-      const rows = await listMyInvitations();
-      setInvitations(rows);
-    } catch { /* non-fatal */ }
-  };
-
-  useEffect(() => {
-    const timeout = window.setTimeout(() => void load(), 0);
-    return () => window.clearTimeout(timeout);
-  }, []);
-  useEffect(() => {
-    if (!message) return;
-    const timeout = window.setTimeout(() => setMessage(null), 4000);
-    return () => window.clearTimeout(timeout);
-  }, [message]);
-
-  const handleAccept = async (inv: ProjectInvitationItem) => {
-    setAccepting(inv.invitation_id);
-    setMessage(null);
-    try {
-      const accepted = await acceptInvitation({ invitation_id: inv.invitation_id });
-      await fetchTree();
-      setCurrentProject(inv.project_id);
-      await load();
-      setMessage(t('layout.bellJoinedProject', { name: accepted.project_name || inv.project_name || 'project' }));
-      setOpen(false);
-      navigate('/app');
-    } catch {
-      setMessage(t('layout.bellAcceptFailed'));
-    } finally {
-      setAccepting(null);
-    }
-  };
-
-  const count = invitations.length;
+  const filtered = projects.filter((p) =>
+    p.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
-    <div className="relative">
-      <button
-        onClick={() => { setOpen((v) => !v); if (!open) void load(); }}
-        className="relative w-8 h-8 rounded-xl border border-outline-variant/20 bg-surface-container-low flex items-center justify-center text-on-surface-variant hover:text-primary transition-colors"
-      >
-        <span className="material-symbols-outlined text-[18px]">notifications</span>
-        {count > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-[16px] h-4 rounded-full bg-error text-white text-[9px] font-bold flex items-center justify-center px-1">
-            {count}
-          </span>
-        )}
-      </button>
-
-      {message && (
-        <div className="absolute right-0 top-10 z-50 w-72 rounded-xl border border-primary/20 bg-surface-container-lowest px-3 py-2 text-xs font-semibold text-on-surface shadow-xl">
-          {message}
+    <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center px-4">
+      <div className="w-full max-w-md rounded-2xl border border-outline-variant bg-surface-container-lowest p-6 shadow-2xl flex flex-col max-h-[85vh]">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-bold text-on-surface flex items-center gap-2">
+            <span>🚀</span>
+            <span>{t('layout.newFeatureRequest', 'New Feature Request')}</span>
+          </h2>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="text-on-surface-variant hover:text-on-surface transition-colors p-1 rounded-lg hover:bg-surface-variant/40"
+          >
+            <span className="material-symbols-outlined text-[20px]">close</span>
+          </button>
         </div>
-      )}
 
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-10 z-50 w-80 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-outline-variant/20">
-              <span className="text-sm font-bold text-on-surface">{t('layout.bellTitle')}</span>
-              <button onClick={() => setOpen(false)} className="text-on-surface-variant hover:text-on-surface">
-                <span className="material-symbols-outlined text-[16px]">close</span>
-              </button>
-            </div>
-            {invitations.length === 0 ? (
-              <p className="px-4 py-6 text-center text-xs text-on-surface-variant">{t('layout.bellNoInvitations')}</p>
-            ) : (
-              <ul className="max-h-72 overflow-y-auto divide-y divide-outline-variant/20">
-                {invitations.map((inv) => (
-                  <li key={inv.invitation_id} className="flex items-center gap-3 px-4 py-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-on-surface truncate">
-                        {inv.project_name || `Project ${inv.project_id.slice(0, 8)}`}
-                      </p>
-                      <p className="text-[10px] text-on-surface-variant">{t('layout.bellRole')} <span className="uppercase">{inv.role}</span></p>
-                    </div>
-                    <button
-                      disabled={accepting === inv.invitation_id}
-                      onClick={() => void handleAccept(inv)}
-                      className="shrink-0 rounded-lg bg-primary px-2 py-1 text-[10px] font-bold text-on-primary disabled:opacity-50"
-                    >
-                      {accepting === inv.invitation_id ? t('layout.bellAccepting') : t('layout.bellAcceptBtn')}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
+        <p className="text-xs text-on-surface-variant mb-4">
+          {t('layout.chooseProjectFirst', 'Please choose a project to request a feature for:')}
+        </p>
 
-// ---------------------------------------------------------------------------
-// Quota badge
-// ---------------------------------------------------------------------------
-function QuotaBadge() {
-  const { t } = useTranslation();
-  const { summary, isBlocked, isNearLimit } = useQuotaStore();
-  const navigate = useNavigate();
-
-  if (!summary) return null;
-
-  const pct = summary.creditsTotal > 0
-    ? Math.min(100, Math.round((summary.creditsUsed / summary.creditsTotal) * 100))
-    : 0;
-
-  const color = isBlocked
-    ? 'bg-error/10 border-error/30 text-error'
-    : isNearLimit
-    ? 'bg-warning/10 border-warning/30 text-warning'
-    : 'bg-surface-container border-outline-variant/30 text-on-surface-variant';
-
-  const barColor = isBlocked ? 'bg-error' : isNearLimit ? 'bg-yellow-400' : 'bg-primary';
-
-  return (
-    <button
-      onClick={() => navigate('/upgrade')}
-      title={t('layout.quotaViewUpgrade')}
-      className={`flex items-center gap-2 rounded-xl border px-2.5 py-1.5 text-xs font-semibold transition-colors hover:opacity-80 ${color}`}
-    >
-      <span className="material-symbols-outlined text-[14px]">toll</span>
-      <span>{summary.creditsRemaining}<span className="font-normal opacity-60">/{summary.creditsTotal}</span></span>
-      <div className="w-16 h-1.5 rounded-full bg-outline-variant/20 overflow-hidden">
-        <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${pct}%` }} />
-      </div>
-    </button>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Top bar (standalone, in-flow — not fixed)
-// ---------------------------------------------------------------------------
-function AppTopBar() {
-  const { t } = useTranslation();
-  const { resolvedMode, toggleMode } = useTheme();
-  const { signOut } = useAuthStore();
-  const navigate = useNavigate();
-
-  const fetchQuota = useQuotaStore((s) => s.fetch);
-  const fetchInterventions = useHitlStore((s) => s.fetchInterventions);
-
-  useEffect(() => {
-    void fetchQuota();
-  }, [fetchQuota]);
-
-  useEffect(() => {
-    void fetchInterventions();
-    const timer = setInterval(() => void fetchInterventions(), 30000);
-    return () => clearInterval(timer);
-  }, [fetchInterventions]);
-
-  const handleSignOut = async () => {
-    await signOut();
-    navigate('/auth');
-  };
-
-  return (
-    <header className="h-16 shrink-0 z-40 border-b border-outline-variant bg-surface-container-lowest/80 backdrop-blur-md flex items-center justify-between px-6">
-      <div className="flex items-center gap-3">
-        <span className="font-headline font-bold text-base text-on-surface tracking-tighter">AIDLC</span>
-        <span className="px-2 py-0.5 rounded bg-surface-variant text-[10px] font-label-mono text-secondary tracking-widest uppercase">Factory</span>
-      </div>
-
-      <div className="flex items-center flex-1 max-w-xs mx-8">
-        <div className="relative w-full">
-          <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-base">
+        {/* Search Input */}
+        <div className="relative mb-4 shrink-0">
+          <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/50 text-base">
             search
           </span>
           <input
             type="text"
-            placeholder={t('layout.searchPlaceholder')}
-            className="w-full pl-9 pr-4 py-1.5 bg-surface-container-lowest border border-outline-variant rounded text-xs focus:border-secondary focus:outline-none focus:ring-1 focus:ring-secondary/40 placeholder:text-on-surface-variant/40"
+            placeholder={t('layout.searchPlaceholder', 'Search...')}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-4 py-2 bg-surface-container border border-outline-variant/40 rounded-xl text-xs focus:outline-none focus:border-primary/50 text-on-surface"
           />
         </div>
-      </div>
 
-      <div className="flex items-center gap-3">
-        <LanguageSwitcher />
-        <QuotaBadge />
-        <button
-          onClick={toggleMode}
-          title="Toggle theme"
-          className="w-8 h-8 rounded border border-outline-variant bg-surface-container-low flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors"
-        >
-          <span className="material-symbols-outlined text-[17px]">
-            {resolvedMode === 'dark' ? 'dark_mode' : 'light_mode'}
-          </span>
-        </button>
-        <InvitationsBell />
-        <button
-          onClick={handleSignOut}
-          title={t('layout.signOut')}
-          className="w-8 h-8 rounded border border-outline-variant bg-surface-container-low flex items-center justify-center text-on-surface-variant hover:text-red-500 transition-colors"
-        >
-          <span className="material-symbols-outlined text-[18px]">logout</span>
-        </button>
+        {/* Projects List */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2 pr-1 min-h-[150px]">
+          {filtered.length === 0 ? (
+            <div className="py-8 text-center text-xs text-on-surface-variant/60 font-medium">
+              {t('layout.noProjects', 'No projects found')}
+            </div>
+          ) : (
+            filtered.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => onSelect(p.id)}
+                className="w-full flex items-center justify-between gap-3 p-3 rounded-xl border border-outline-variant/30 bg-surface-container-low hover:bg-surface-variant hover:border-primary/30 transition-all text-left group"
+              >
+                <div className="min-w-0 flex-1">
+                  <span className="block text-xs font-semibold text-on-surface truncate group-hover:text-primary transition-colors">
+                    {p.name}
+                  </span>
+                </div>
+                {p.role && (
+                  <span className="shrink-0 rounded border px-1.5 py-0.5 text-[8px] uppercase tracking-wider bg-surface-container-highest text-on-surface-variant border-outline-variant/30">
+                    {p.role}
+                  </span>
+                )}
+              </button>
+            ))
+          )}
+        </div>
+
+        <div className="mt-5 pt-3 border-t border-outline-variant/20 flex justify-end">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2 rounded-xl text-xs font-semibold bg-surface-container-high border border-outline-variant text-on-surface hover:bg-surface-variant transition-colors"
+          >
+            {t('layout.cancel', 'Cancel')}
+          </button>
+        </div>
       </div>
-    </header>
+    </div>
   );
 }
+
 
 // ---------------------------------------------------------------------------
 // Create project dialog
@@ -244,7 +122,7 @@ function ImportProjectDialog({
   onSubmit,
 }: {
   onCancel: () => void;
-  onSubmit: (name: string) => Promise<void>;
+  onSubmit: (name: string, url: string) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState('');
@@ -271,7 +149,7 @@ function ImportProjectDialog({
     setError(null);
     try {
       const repoName = urlStr.replace(/\.git\/?$/, '').split('/').pop() || 'Imported Project';
-      await onSubmit(repoName);
+      await onSubmit(repoName, urlStr);
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { message?: string } } })?.response?.data?.message ??
@@ -325,45 +203,6 @@ function ImportProjectDialog({
   );
 }
 
-// ---------------------------------------------------------------------------
-// AppShell
-// ---------------------------------------------------------------------------
-function QuotaWarningBanner() {
-  const { t } = useTranslation();
-  const { summary, isBlocked, isNearLimit } = useQuotaStore();
-  const navigate = useNavigate();
-
-  if (!summary || (!isBlocked && !isNearLimit)) return null;
-
-  return (
-    <div className={`shrink-0 flex items-center justify-between px-6 py-2 text-xs font-semibold border-b ${
-      isBlocked
-        ? 'bg-error/10 border-error/20 text-error'
-        : 'bg-yellow-50 border-yellow-200 text-yellow-800 dark:bg-yellow-900/20 dark:border-yellow-700/30 dark:text-yellow-300'
-    }`}>
-      <div className="flex items-center gap-2">
-        <span className="material-symbols-outlined text-[15px]">
-          {isBlocked ? 'block' : 'warning'}
-        </span>
-        {isBlocked
-          ? t('layout.quotaWarningBlocked', { total: summary.creditsTotal })
-          : t('layout.quotaWarningNearLimit', { used: summary.creditsUsed, total: summary.creditsTotal, pct: Math.round((summary.creditsUsed / summary.creditsTotal) * 100) })
-        }
-      </div>
-      <button
-        onClick={() => navigate('/upgrade')}
-        className={`shrink-0 ml-4 rounded-lg px-2.5 py-1 text-[11px] font-bold border transition-opacity hover:opacity-80 ${
-          isBlocked
-            ? 'bg-error text-white border-error'
-            : 'bg-yellow-500 text-white border-yellow-500'
-        }`}
-      >
-        {t('layout.upgradeNow')}
-      </button>
-    </div>
-  );
-}
-
 export const AppShell: React.FC = () => {
   const { t } = useTranslation();
   const api = useApiActions();
@@ -379,6 +218,9 @@ export const AppShell: React.FC = () => {
     setCreateProjectDialogOpen,
   } = useAppStore();
   const location = useLocation();
+  const navigate = useNavigate();
+  const isFeatureRequestFormOpen = useSdlcStore((s) => s.isFeatureRequestFormOpen);
+  const setFeatureRequestFormOpen = useSdlcStore((s) => s.setFeatureRequestFormOpen);
   const isProfileRoute = location.pathname === '/profile';
   const isProjectSettingsRoute = location.pathname.startsWith('/projects/') && location.pathname.endsWith('/settings');
   const isAuditRoute = location.pathname === '/sdlc/audit' || location.pathname === '/sdlc/audit/';
@@ -406,9 +248,10 @@ export const AppShell: React.FC = () => {
     localStorage.setItem('project-panel-collapsed', String(next));
   }
 
-  async function handleCreateProject(name: string) {
+  async function handleCreateProject(name: string, url: string) {
     const res = await api.createProject(name);
     upsertProject(res.data);
+    localStorage.setItem(`repoUrl_${res.data.project_id}`, url);
     setCurrentProject(res.data.project_id);
     setCreateProjectDialogOpen(false);
     // errors propagate up to CreateProjectDialog which displays them inline
@@ -494,6 +337,18 @@ export const AppShell: React.FC = () => {
         <ImportProjectDialog
           onCancel={() => setCreateProjectDialogOpen(false)}
           onSubmit={handleCreateProject}
+        />
+      )}
+
+      {isFeatureRequestFormOpen && (
+        <FeatureRequestProjectDialog
+          projects={panelProjects}
+          onCancel={() => setFeatureRequestFormOpen(false)}
+          onSelect={(projectId) => {
+            setCurrentProject(projectId);
+            setFeatureRequestFormOpen(false);
+            navigate('/sdlc?focusRequest=true');
+          }}
         />
       )}
 
