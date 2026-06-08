@@ -21,6 +21,20 @@ export default function FeatureRequestForm({ onSubmit, onCancel }: Props) {
     setConstraintInput('');
   };
 
+  const fillGoogleLoginDemo = () => {
+    setTitle('Add Google login');
+    setDescription('Allow users to sign in with their Google account using OAuth 2.0 instead of creating a separate username and password.');
+    setPriority('High');
+    setTargetUser('End user');
+    setBusinessGoal('Increase sign-up conversion and reduce password-reset support tickets by offering one-click Google sign-in.');
+    setConstraints([
+      'Preserve the current email/password sign-in flow',
+      'Use Google OAuth 2.0 with PKCE',
+      'Comply with existing data-privacy policy',
+    ]);
+    setConstraintInput('');
+  };
+
   return (
     <form className="fr-form" onSubmit={(event) => {
       event.preventDefault();
@@ -30,6 +44,12 @@ export default function FeatureRequestForm({ onSubmit, onCancel }: Props) {
       <div className="fr-form-header">
         <h2>New feature request</h2>
         <p>This request goes directly to PO Agent. PO will call its allowed MCP tools and produce the first reviewable output.</p>
+      </div>
+      <div className="fr-demo-row">
+        <button type="button" className="fr-btn-demo" onClick={fillGoogleLoginDemo}>
+          Demo: Add Google login
+        </button>
+        <span className="fr-demo-hint">Điền sẵn nội dung mẫu để demo nhanh</span>
       </div>
       <div className="fr-field">
         <label>Feature title *</label>

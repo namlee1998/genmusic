@@ -7,6 +7,7 @@ const AuthPage = lazy(() => import('@/pages/Auth/AuthPage').then(module => ({ de
 const NotFoundPage = lazy(() => import('@/pages/NotFound').then(module => ({ default: module.NotFoundPage })));
 const UpgradePlanPage = lazy(() => import('@/pages/UpgradePlan').then(module => ({ default: module.UpgradePlanPage })));
 const AdminApp = lazy(() => import('@/pages/Admin').then(module => ({ default: module.AdminApp })));
+const AifaDemo = lazy(() => import('@/pages/AifaDemo'));
 
 const PageLoader = () => (
   <div className="min-h-screen flex items-center justify-center bg-background">
@@ -34,6 +35,7 @@ export default function App() {
             }
           />
           <Route path="/app/*" element={<Navigate to="/sdlc/hitl" replace />} />
+          <Route path="/aifa" element={<AifaDemo />} />
           
           {/* ── AIDLC Control Platform ── */}
           <Route

@@ -12,6 +12,8 @@ const UserSubscription = require('./UserSubscription');
 const UsageLog = require('./UsageLog');
 const AdminUser = require('./AdminUser');
 const HitlDecision = require('./HitlDecision');
+const PendingGate = require('./PendingGate');
+const AgentEvent = require('./AgentEvent');
 
 module.exports = {
   Document,
@@ -28,4 +30,6 @@ module.exports = {
   UsageLog,
   AdminUser,
   HitlDecision,
+  PendingGate,
+  AgentEvent,
 };

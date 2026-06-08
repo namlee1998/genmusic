@@ -30,6 +30,8 @@ export interface PhaseStatus {
   versionStatus: string | null;
   gate: string | null;
   hitlDecision: HitlDecision | null;
+  awaitingReview?: boolean;
+  invalid?: boolean;
   createdAt: string | null;
   updatedAt: string | null;
 }
@@ -81,6 +83,24 @@ export interface AuditEvent {
   retryReason?: string | null;
   blockingIssueCount?: number;
   type: 'agent_run' | 'agent_complete' | 'hitl_decision' | 'a2a_handoff' | 'escalation' | 'release_decision' | 'failure';
+}
+
+export interface PhaseTransition {
+  type: 'PHASE_TRANSITION';
+  from: string;
+  to: string;
+  cause: string;
+  at: string;
+  agent?: string | null;
+  taskId?: string | null;
+  requestId?: string | null;
+}
+
+export interface SdlcError {
+  message: string;
+  code?: string | null;
+  phase?: string | null;
+  requestId?: string | null;
 }
 
 export interface WorkflowMetrics {
@@ -163,6 +183,7 @@ export interface SdlcState {
   artifacts: Artifact[];
   selectedArtifact: Artifact | null;
   auditEvents: AuditEvent[];
+  phaseTransitions: PhaseTransition[];
   isFeatureRequestFormOpen: boolean;
 
   setWorkflowStatus: (ws: WorkflowStatus) => void;
@@ -174,6 +195,7 @@ export interface SdlcState {
   setArtifacts: (artifacts: Artifact[]) => void;
   selectArtifact: (artifact: Artifact | null) => void;
   setAuditEvents: (events: AuditEvent[]) => void;
+  setPhaseTransitions: (transitions: PhaseTransition[]) => void;
   setFeatureRequestFormOpen: (isOpen: boolean) => void;
   clearTask: () => void;
 }
@@ -267,6 +289,7 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
     artifacts: [],
     selectedArtifact: null,
     auditEvents: [],
+    phaseTransitions: [],
     isFeatureRequestFormOpen: false,
 
     setProjectId: (id) => set({ projectId: id }),
@@ -280,6 +303,7 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
     setArtifacts: (artifacts) => set({ artifacts }),
     selectArtifact: (artifact) => set({ selectedArtifact: artifact }),
     setAuditEvents: (events) => set({ auditEvents: events }),
+    setPhaseTransitions: (transitions) => set({ phaseTransitions: transitions }),
     setFeatureRequestFormOpen: (isOpen) => set({ isFeatureRequestFormOpen: isOpen }),
     clearTask: () => set({ activeTaskId: null, activePhase: null, taskStatus: null, sseLogs: [], sseActive: false }),
 

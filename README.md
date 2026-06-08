@@ -1,9 +1,74 @@
-# AIDLC Control Platform - Team 6
+# AIFA Documentation
 
-End-to-End Autonomous Software Factory with four worker agents, Human-in-the-Loop
-(HITL) review gates, sandbox validation, and QA quality gates.
+Thu muc nay mo ta kien truc va trang thai hien tai cua AIFA v3.
 
-This is the single entry point for setup, local development, and testing.
+## Tai lieu chinh
+
+| File | Muc dich |
+| --- | --- |
+| [AIFA_V3_IMPLEMENTATION_SUMMARY.md](AIFA_V3_IMPLEMENTATION_SUMMARY.md) | Nguon su that ve tinh nang da co, hardening da lam va gioi han hien tai |
+| [architecture.md](architecture.md) | Kien truc runtime hien tai va luong PO/UX/DEV/QA |
+| [AIFA_NOTES.md](AIFA_NOTES.md) | Ban do codebase cho developer |
+| [QUALITY_GATE_RULES.md](QUALITY_GATE_RULES.md) | Quy tac validation, risk gate, QA gate va release gate |
+| [AIFA_DEMO_1_WEEK_ROADMAP.md](AIFA_DEMO_1_WEEK_ROADMAP.md) | Ke hoach 1 tuan de persist task/event/gate va recovery |
+| [AIFA_REAL_DATA_3_WEEK_ROADMAP.md](AIFA_REAL_DATA_3_WEEK_ROADMAP.md) | Ke hoach 3 tuan de chuyen tu mock sang controlled real execution |
+| [CHANGELOG.md](CHANGELOG.md) | Lich su thay doi dang chu y |
+
+## Nguyen tac to chuc
+
+- `README`: muc luc va loi vao duy nhat.
+- `AIFA_V3_IMPLEMENTATION_SUMMARY`: current state, bao gom limitations va cac
+  hardening da hoan tat.
+- `architecture`, `AIFA_NOTES`, `QUALITY_GATE_RULES`: tai lieu tham chieu cho
+  developer, moi file co mot chu de rieng.
+- Hai roadmap chi mo ta future work; khong tron voi current state.
+- `CHANGELOG` chi ghi lich su phien ban, khong dung lam roadmap.
+
+## Workflow hien tai
+
+```text
+Open folder / repo
+  -> PO route classification + clarification gate
+  -> UX Penpot mock (neu route co UI)
+  -> DEV question/tool gates + file changes
+  -> QA quality gate + human review
+  -> Owner/Admin release approval
+  -> Release bundle + final.md
+```
+
+Execution path chinh cua demo:
+
+```env
+EXECUTION_PATH=claude-code
+USE_MOCK_CLAUDE_CODE=true
+USE_MOCK_AGENTS=true
+```
+
+Mock Claude Code dung cung interface `onGate` du kien cho runner that. Moi
+output van phai qua output contract, validation ba lop va A2A integrity check.
+
+## Cach doc
+
+1. Doc [AIFA_V3_IMPLEMENTATION_SUMMARY.md](AIFA_V3_IMPLEMENTATION_SUMMARY.md)
+   de nam pham vi da thuc hien va gioi han.
+2. Doc [architecture.md](architecture.md) de hieu luong runtime.
+3. Planning agent doc [AIFA_DEMO_1_WEEK_ROADMAP.md](AIFA_DEMO_1_WEEK_ROADMAP.md)
+   truoc
+   khi bat dau [AIFA_REAL_DATA_3_WEEK_ROADMAP.md](AIFA_REAL_DATA_3_WEEK_ROADMAP.md).
+4. Developer doc [AIFA_NOTES.md](AIFA_NOTES.md) va
+   [QUALITY_GATE_RULES.md](QUALITY_GATE_RULES.md) truoc khi sua runtime.
+
+## Gioi han quan trong
+
+- Claude Code runner that van la stub; demo dang dung mock.
+- Pending gate metadata da persist, nhung continuation van in-memory; backend
+  restart se danh dau gate `interrupted`, chua the resume tu diem gate.
+- Ghi `final.md` vao folder local can Chrome/Edge va quyen `readwrite`.
+- Path `langchain` duoc giu de tuong thich, nhung khong phai path phat trien chinh.
+
+
+
+The competitor analysis report file is located at /docs/archive/week-1/Team6_RPWeek1.pdf.  Section 2
 
 ## 1. Repository Structure
 
@@ -14,8 +79,9 @@ This is the single entry point for setup, local development, and testing.
 |   |-- src/quality_gate/   Quality gate rules and evaluator
 |   `-- tests/              Python unit tests
 |-- backend/                Node.js + Express API gateway
-|   |-- prisma/             Local SQLite schema
-|   |-- src/                Routes, controllers, services, and models
+|   |-- prisma/             Local SQLite schema (env-driven DATABASE_URL)
+|   |-- src/                Routes, controllers, services, middleware, models
+|   |-- scripts/           demoSmoke.js preflight (six deterministic scenarios)
 |   |-- supabase/           Supabase configuration and migrations
 |   `-- tests/              Jest integration tests
 |-- frontend/               React + Vite dashboard
@@ -24,6 +90,7 @@ This is the single entry point for setup, local development, and testing.
 |-- docs/                   Architecture, rules, and project notes
 |-- agents/sandbox/         E2B runtime for Claude Agent SDK DEV execution
 |-- workspace/              Generated project artifacts
+|-- .github/workflows/      CI: backend tests + schema drift + demo preflight
 |-- docker-compose.yml      Local three-service stack
 `-- pytest.ini              Python test discovery configuration
 ```
@@ -37,7 +104,7 @@ Feature request
   -> DEV Agent + sandbox validation
   -> QA Agent + quality gate
   -> QA human approval
-  -> Final release decision
+  -> Final release decision![alt text](image.png)
 ```
 
 The Intent endpoint remains available only as a compatibility adapter for
@@ -45,6 +112,8 @@ older local data. New workflow runs start directly at PO Agent.
 
 For design details, see [docs/architecture.md](docs/architecture.md). For agent
 roles and required models, see [AGENTS.md](AGENTS.md).
+
+
 
 ## 2. Current Implementation Status
 
@@ -57,6 +126,10 @@ The repository includes an end-to-end local workflow demo:
   `>= 0.80`, schema and evidence validation pass, and no warning or security
   issue remains, the backend auto-approves the output, persists an
   `a2a_handoff.v1` envelope, and starts the next worker.
+- Every worker output is validated against a versioned, per-role output
+  contract (`OUTPUT_CONTRACTS`, `gate-output.v1`). A blocking violation marks the
+  run's artifacts `INVALID`, emits no handoff, and keeps the phase at review. A
+  committed-but-`INVALID` upstream can never hand off downstream.
 - When an intermediate output is held, the review modal opens automatically.
   Direct approval is disabled for that held output. The reviewer must send a
   concrete comment, blocking issue, expected fix, and at least one acceptance
@@ -73,7 +146,8 @@ The repository includes an end-to-end local workflow demo:
   feedback-driven `reject`. They use idempotency keys and output-version checks.
 - Approved worker outputs and A2A handoffs remain available in Outputs
   (`/sdlc/outputs`). Audit (`/sdlc/audit`) shows the run timeline, HITL
-  decisions, handoffs, escalations, and workflow metrics.
+  decisions, handoffs, escalations, workflow metrics, and a frontend mock of
+  the GitHub Actions CI preflight gate.
 - The Build page includes an MCP/HTTPS activity visualization for the
   allow-listed tools used by PO, UX, DEV, and QA. Its lane state is currently
   derived from worker task status (`Waiting`, `Calling MCP`, result received,
@@ -86,12 +160,33 @@ The repository includes an end-to-end local workflow demo:
 - Owners can delete a project from the sidebar. Deletion removes its workflow
   tasks, artifacts, HITL decisions, backlog items, folders, invitations, and
   memberships.
-- Local mock mode is available through `USE_MOCK_AGENTS=true`. Set
-  `MOCK_LOW_CONFIDENCE_STAGE` to `po-agent`, `ux-agent`, or `dev-agent` to
-  choose which intermediate worker pauses at confidence `0.58`. The default is
-  `dev-agent`.
+- The demo runtime intentionally supports one polished deterministic
+  `happy_path`: PO clarification, UX Penpot mock, DEV clarification and tool
+  approval, QA review, release approval, then `final.md`.
+- Failure-handling mechanisms remain in product code, but synthetic bad-case
+  switching is not exposed during the happy-path demo.
+- Run `cd backend && npm run demo:smoke` as the complete happy-path preflight.
 - Local JWT sign-in works without hosted authentication. Development CORS
   accepts local frontend ports such as `5173` and `5174`.
+- Resilience: errors return a stable `{status, code, message, phase, requestId}`
+  envelope (`ARTIFACT_MISSING`, `HASH_MISMATCH`, `MOCK_PARSE_ERROR`, ...). A
+  malformed mock file fails its task cleanly instead of silently falling back to
+  a real agent. `unhandledRejection`/`uncaughtException` keep the server alive in
+  dev/demo and log-and-exit in production for a clean supervised restart.
+- Observability: an AsyncLocalStorage `requestId` is assigned per request, echoed
+  on the response header, returned in error responses, and threaded into pino
+  JSON logs (with `taskId`/`phase`) so a log line can be matched to an error.
+  In the UI, structured API failures render a rich error banner with
+  `code`, `phase`, and `requestId`; workflow state banners such as
+  `DEV output is INVALID` are status summaries and may not include a request id.
+- Agent I/O contract: the mock implements a small `run({task, context}) -> output`
+  contract (`agent-io.v1`) verified by a shared conformance suite, so a future
+  real agent must match the same output shape.
+- CI: `.github/workflows/ci.yml` runs `npm ci` -> prisma generate -> db push to
+  an isolated CI database -> schema drift check (`prisma migrate diff
+  --exit-code`) -> `npm test` -> `npm run demo:smoke`. A broken happy/bad-case
+  branch turns the build red. The Audit page includes a mock CI panel that
+  animates this same sequence for local demos without calling GitHub Actions.
 
 ### MVP Boundaries
 
@@ -111,10 +206,18 @@ The following checks have been run successfully against the current local
 implementation:
 
 - `agents`: `python -m pytest` passes `10/10` tests.
-- `backend`: `npm.cmd test` passes `40/40` Jest tests.
-- `frontend`: `npm.cmd test` passes `21/21` Vitest tests. `npm.cmd run
-  typecheck` and `npm.cmd run build` also pass. ESLint passes for the changed
-  SDLC dashboard files.
+- `backend`: `npm.cmd test` passes `58/58` Jest tests (includes the agent-output
+  contract drift guard, the agent conformance suite, and the INVALID-handoff
+  guard for PO->UX, UX->DEV, DEV->QA).
+- `backend`: `npm.cmd run demo:smoke` verifies the complete deterministic happy
+  path against an isolated smoke database.
+- `backend`: `npx.cmd prisma migrate diff --exit-code` reports no schema drift
+  (the CI drift guard; the repo uses db push, so `migrate diff` replaces the
+  N/A `migrate status`).
+- `frontend`: `npm.cmd run build` passes after the latest SDLC dashboard UI
+  updates, including the Audit CI mock and scrollable phase transitions.
+  Historical local checks also passed the Vitest suite and typecheck; rerun
+  them before merging frontend changes.
 - Mock workflow smoke tests verify prepared PO and UX review paths:
   low-confidence `58/100` -> reviewer comment -> owning worker rerun `92/100`
   -> automatic continuation to `QA_REVIEW`.
@@ -198,6 +301,10 @@ testing hosted storage flows:
 PORT=3000
 NODE_ENV=development
 
+# Prisma datasource (required). Local dev points at dev.db; tests/CI/smoke
+# override DATABASE_URL to an isolated sqlite file so they never touch dev.db.
+DATABASE_URL="file:./dev.db"
+
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_PUBLISHABLE_KEY=sb_publishable_your-project-publishable-key
 SUPABASE_SECRET_KEY=sb_secret_your-project-secret-key
@@ -208,8 +315,9 @@ SUPABASE_AUTH_REDIRECT_URL=http://localhost:5173/auth
 AGENTS_BASE_URL=http://127.0.0.1:8001
 FRONTEND_URL=http://localhost:5173
 
-USE_MOCK_AGENTS=false
-MOCK_LOW_CONFIDENCE_STAGE=dev-agent
+USE_MOCK_AGENTS=true
+EXECUTION_PATH=claude-code
+USE_MOCK_CLAUDE_CODE=true
 ENABLE_LEGACY_WORKFLOWS=false
 
 JWT_SECRET=replace-for-shared-environments
@@ -407,7 +515,8 @@ After signing in:
 7. In the final release gate, review the evidence summary. A project owner or
    admin can choose `Approve release` or `Reject`.
 8. Open `Outputs` to inspect retained artifacts and A2A handoffs. Open `Audit`
-   to inspect the timeline and workflow metrics.
+   to inspect workflow metrics, the mock CI preflight gate, scrollable phase
+   transitions, and the run timeline.
 
 For the clearest local demo, submit `add google login`. PO classifies it as
 `HIGH` risk and PO/UX auto-approve. DEV pauses with confidence `0.58` and the
@@ -476,6 +585,14 @@ npx.cmd prisma db push
 npm.cmd test
 ```
 
+Run the demo scenario preflight before a demo or merge. It drives all six
+deterministic branches through the mock layer and asserts the expected outcome.
+It forces an isolated `smoke.db` (it never touches `dev.db`):
+
+```powershell
+npm.cmd run demo:smoke
+```
+
 ### Frontend
 
 ```powershell
@@ -538,6 +655,28 @@ $env:OPENAI_API_KEY = "your-key"
 python sandbox\test_e2b.py
 ```
 
+### Continuous Integration
+
+`.github/workflows/ci.yml` runs on pushes to `main`, `staging`, `features/**`
+and on pull requests. The backend job, against an isolated CI SQLite database
+(`DATABASE_URL=file:./ci.db`):
+
+1. `npm ci`
+2. `npx prisma generate`
+3. `npx prisma db push --skip-generate --accept-data-loss`
+4. Schema drift guard: `npx prisma migrate diff --exit-code` (exit 2 on drift)
+5. `npm test`
+6. `npm run demo:smoke`
+
+The Prisma datasource reads `env("DATABASE_URL")`, so tests and the smoke run on
+isolated databases and never touch the committed `dev.db`. Jest defaults the
+value via `tests/setupEnv.js`; the smoke forces its own `smoke.db`.
+
+For local demos, the Audit page (`/sdlc/audit`) includes a mock CI preflight
+panel that visualizes the same six steps above and ends in a merge-gate pass
+state. It is a frontend-only demo aid; the real enforcement remains the GitHub
+Actions workflow.
+
 ## 8. API Overview
 
 The backend listens on port `3000` by default. Use the `PORT` value from
@@ -565,15 +704,20 @@ Useful current SDLC endpoints:
 | `POST /api/v1/sdlc/run-dev-agent` | Run DEV from an approved UX handoff |
 | `POST /api/v1/sdlc/run-qa-agent` | Run QA from an approved DEV handoff |
 | `POST /api/v1/sdlc/tasks/:task_id/decision` | Submit a structured HITL decision |
+| `GET /api/v1/sdlc/status/:task_id` | SSE task status stream |
+| `GET /api/v1/sdlc/workflow-status?project_id=...` | Current workflow state (phases, `awaitingReview`, release gate) |
 | `POST /api/v1/sdlc/projects/:project_id/release-decision` | Approve or reject the final release after QA approval |
 | `GET /api/v1/sdlc/projects/:project_id/artifacts` | Load retained worker outputs and A2A handoffs |
-| `GET /api/v1/sdlc/audit-trail/:project_id` | Load worker, handoff, and HITL audit events |
+| `GET /api/v1/sdlc/audit-trail/:project_id` | Audit events plus a synthesized `phaseTransitions` chain |
+| `GET /api/v1/sdlc/workflow/:id/timeline` | Alias of the audit trail (UI-friendly path) |
+| `GET /api/v1/sdlc/projects/:project_id/metrics` | Workflow health metrics |
 | `DELETE /api/v1/projects/:id` | Delete an owned project and its workflow data |
 
 ## 9. Documentation Map
 
 | Document | Purpose |
 | --- | --- |
+| [CURRENT_WORKFLOW.md](CURRENT_WORKFLOW.md) | Detailed current PO-first workflow: state machine, validation/INVALID, gates, A2A handoffs, output contracts, resilience, observability, mock scenarios, and CI |
 | [docs/architecture.md](docs/architecture.md) | High-level system architecture |
 | [docs/QUALITY_GATE_RULES.md](docs/QUALITY_GATE_RULES.md) | Quality gate rules and scoring |
 | [docs/backend/agent-artifact-flow.md](docs/backend/agent-artifact-flow.md) | Backend artifact persistence flow |

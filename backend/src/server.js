@@ -6,6 +6,10 @@ const routes = require('./routes');
 const { startBatchJobs } = require('./jobs/batchJob');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { requestLogger } = require('./middleware/logger');
+const { requestContextMiddleware } = require('./middleware/requestContext');
+const gateBridge = require('./services/gateBridge');
+const taskWorker = require('./services/taskWorkerService');
+const SdlcWorkflowService = require('./services/SdlcWorkflowService');
 
 const app = express();
 const PRISMA_CONNECT_TIMEOUT_MS = 5_000;
@@ -47,6 +51,9 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// I2: assign a request id before anything else so logs + errors can correlate.
+app.use(requestContextMiddleware);
+
 if (NODE_ENV === 'development') {
   app.use(requestLogger);
 }
@@ -70,6 +77,23 @@ const startServer = async () => {
     try {
       await connectPrismaWithTimeout();
       console.log('[Prisma] Connection verified.');
+      const interrupted = await gateBridge.markOrphanedPendingInterrupted();
+      if (interrupted.count > 0) {
+        console.warn(`[GateBridge] Marked ${interrupted.count} orphaned pending gate(s) as interrupted.`);
+      }
+      // DMO-001: reclaim tasks left `running` by a crashed/restarted process so
+      // they don't hang forever, then start the periodic stale-task sweeper.
+      const reclaimed = await taskWorker.sweepStale({ reason: 'orphaned by backend restart' });
+      if (reclaimed > 0) {
+        console.warn(`[TaskWorker] Reclaimed ${reclaimed} orphaned running task(s) on boot.`);
+      }
+      taskWorker.startSweeper();
+      // DMO-003: re-dispatch tasks stuck at an interrupted gate so a restart does
+      // not force the user to re-run the workflow (only the interrupted stage re-runs).
+      const resumed = await SdlcWorkflowService.recoverInterruptedGates();
+      if (resumed > 0) {
+        console.warn(`[Recovery] Re-dispatched ${resumed} interrupted-gate stage(s).`);
+      }
     } catch (dbError) {
       console.error('[Prisma] Connection test failed:', dbError.message);
       console.warn('[Prisma] Ensure database exists and schema is pushed');
@@ -87,6 +111,23 @@ const startServer = async () => {
     process.exit(1);
   }
 };
+
+// T4/I7: process-level safety net, behaviour split by environment.
+// - dev/demo: keep the server alive so a single bad request/agent run does not
+//   end the demo.
+// - production: the process state is undefined after an uncaught exception, so
+//   serving further requests is unsafe. Log and exit non-zero; the supervisor
+//   (Docker/PM2/k8s) restarts a clean process.
+const isProduction = () => NODE_ENV === 'production';
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[Process] Unhandled promise rejection:', reason);
+  if (isProduction()) process.exit(1);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[Process] Uncaught exception:', err);
+  if (isProduction()) process.exit(1);
+});
 
 startServer();
 

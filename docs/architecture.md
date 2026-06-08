@@ -1,137 +1,194 @@
-# System Architecture
+# AIFA v3 System Architecture
 
-> **Kiến trúc hiện tại:** Multica + Claude Code CLI (không dùng API key)
-> **Cập nhật:** Đã thay thế LangChain/E2B/LangGraph bằng Multica platform
-> **Plan chi tiết:** [project/MULTICA_INTEGRATION_PLAN.md](project/MULTICA_INTEGRATION_PLAN.md)
+## 1. Muc tieu
 
----
+AIFA la software factory co bon worker PO, UX, DEV va QA. Backend giu state
+workflow, kiem soat handoff va tam dung tai cac diem can human. Demo hien tai
+mock toan bo Claude Code, Penpot va QA execution nhung van di qua interface va
+gate giong duong tich hop that.
 
-## Core Flow
+## 2. Core flow
 
-```
-Repo URL → Clone → Analyze → PO Agent → UX Agent → DEV Agent → Sandbox Gate → QA Agent → QA.md commit
-                                   ↑ HITL         ↑ HITL      ↑ HITL                   ↑ HITL
-```
-
----
-
-## Components
-
-### 1. Frontend (React + TypeScript)
-
-Dashboard tập trung vào **approval workflow** — hiện rõ agent nào cần approve và cần approve gì.
-
-4 components chính:
-- **RepoInput** — User paste GitHub/GitLab URL → trigger pipeline
-- **PipelineStepper** — Hiện tiến trình 6 bước real-time
-- **ApprovalQueue** — Danh sách các items cần human review (confidence < 80%)
-- **QAResultCard** — Kết quả QA cuối cùng + approve/reject release
-
-### 2. Backend (Node.js)
-
-Owns toàn bộ workflow state, HITL decisions, artifact storage.
-
-Services chính:
-- **GitService** — Clone repo, analyze codebase, commit QA.md
-- **MulticaClient** — Tạo issue/task trên Multica, poll status
-- **SdlcWorkflowService** — Orchestrate pipeline: PO → UX → DEV → Sandbox Gate → QA
-
-### 3. Multica Platform (Self-hosted Docker)
-
-Task management cho multi-agent workflow. Chạy trên `localhost:8080`.
-
-- **Multica Server** — PostgreSQL-backed task queue + REST API
-- **Multica Daemon** — Local daemon: nhận tasks, spawn agent CLI processes
-- **Claude Code CLI** — Được daemon spawn với prompt template → thực thi qua session login
-
-```
-Backend → POST /api/issues (Multica) → Daemon → spawn `claude -p "..."` → output → done
+```text
+Folder upload / Repo URL
+        |
+        v
+PO Agent -- route has_ui=false --------------------+
+  | route has_ui=true                              |
+  v                                                |
+UX Agent + Penpot SVG                              |
+  |                                                |
+  +-------------------------> DEV Agent <-----------+
+                                |
+                                v
+                         QA Agent + Quality Gate
+                                |
+                                v
+                         Human QA Review
+                                |
+                                v
+                       Owner/Admin Release Gate
+                                |
+                                v
+              branch + commit/diff + final.md + QA report
 ```
 
-### 4. Sandbox Gate (G3)
+Question gate tai PO hoac DEV khoa downstream. QA chi duoc tao khi DEV cua
+dung workflow chain da `completed`, `committed` va khong con gate.
 
-Kiểm thử DEV output trước khi đẩy sang QA. Chạy tests trong Docker container isolated.
+## 3. Components
 
-- **Git Worktree** (`agents/src/tools/sandbox.py`) — Extract patch, validate format, prepare workspace
-- **Docker Sandbox** (`sandbox/docker_sandbox.py`) — Chạy `npm test / pytest` trong container với:
-  - `--network=none` — Cắt internet
-  - `--memory=512m` — Giới hạn RAM
-  - `--read-only` — Không ghi host filesystem
+### Frontend
 
-### 5. Agent Prompt Templates (`agents/`)
+`frontend/src/pages/AifaDemo/index.tsx` cung cap mot man hinh:
 
-Không gọi LLM API trực tiếp. Chỉ chứa:
-- **Prompt templates** — `build_<agent>_prompt()` functions
-- **Output parsers** — `parse_<agent>_output()` functions
-- **Schemas** — Pydantic models cho structured output
+- Open folder va upload repo.
+- Theo doi flow PO/UX/DEV/QA.
+- Hien Penpot mock.
+- Resolve question gate va tool approval gate.
+- Review output theo stage.
+- Approve release, download release bundle.
+- Ghi report vao `final.md` local bang File System Access API.
+- Poll workflow/audit va theo doi SSE.
 
----
+### Backend API
 
-## Data Flow
+Backend Node.js/Express chiu trach nhiem:
 
+- Repo upload/clone va workflow start.
+- Task state va A2A handoff.
+- Gate pending/resolve.
+- Validation va QA quality gate.
+- Audit, release decision va release files.
+
+Endpoint chinh:
+
+```text
+POST /api/v1/sdlc/upload-repo
+POST /api/v1/sdlc/run-po-agent
+GET  /api/v1/sdlc/workflow-status
+GET  /api/v1/sdlc/approvals
+POST /api/v1/sdlc/approvals/:approval_id
+POST /api/v1/sdlc/tasks/:task_id/gate-decision
+POST /api/v1/sdlc/projects/:project_id/release-decision
+GET  /api/v1/sdlc/projects/:project_id/release-files/:file_name
 ```
-1. User: paste repo URL
-2. Backend: git clone --depth 1 → workspace/projects/<id>/repo/
-3. Backend: analyze repo → { techStack, fileCount, components }
-4. Backend: Multica.createIssue() → PO Agent task
-5. Daemon: spawn claude -p "<po_prompt + repo_analysis>"
-6. Claude CLI: → output PRD JSON
-7. Backend: parse output, check confidence → HITL nếu cần
-8. Backend: Multica.createIssue() → UX Agent task
-9. ... (UX → DEV tương tự)
-10. Backend: Sandbox Gate → apply patch → docker run tests
-11. Sandbox fail: tạo DEV retry issue (max 2 lần)
-12. Sandbox pass: Multica.createIssue() → QA Agent task
-13. QA complete: GitService.commitQAReport() → QA.md trong repo
-14. FE: QAResultCard → User approve/reject release
+
+### Orchestrator
+
+`SdlcWorkflowService.js` la state machine trung tam:
+
+- Chon execution path.
+- Chay worker.
+- Validate output.
+- Auto-approve output an toan.
+- Tao A2A handoff.
+- Khoi dong agent tiep theo.
+- Chon mot coherent task chain cho workflow status.
+- Tao final review va release bundle.
+
+### Claude Code path
+
+```text
+mockClaudeCodeScripts
+  -> mockClaudeCodeRunner
+  -> onGate(tool/question)
+  -> riskClassifier + gateBridge
+  -> write file neu allow
+  -> output
+  -> validation + handoff
 ```
 
----
+`claudeCodeRunner.js` that hien la stub. Khi tich hop that, runner phai gan
+`canUseTool=onGate` va giu nguyen contract output.
 
-## Tech Stack
+### Repo and release
 
-| Layer | Technology |
-|---|---|
-| Frontend | React 18, TypeScript, Vite, Zustand |
-| Backend | Node.js, Express |
-| Agent Orchestration | Multica (self-hosted Docker, Go/PostgreSQL) |
-| Agent Execution | Claude Code CLI (subprocess, session login) |
-| Sandbox Testing | Docker Local (`aidlc-sandbox:latest`) |
-| Repo Management | Git CLI via child_process |
-| Agent Prompts | Python (template functions only, no SDK) |
+`repoService.js` quan ly:
 
----
+- Clone/open/uploaded repo.
+- Branch `aifa/<slug>`.
+- Commit va diff.
+- Secret/path safety.
+- Workspace cleanup.
 
-## Environment Variables
+`workflowReport.js` tao:
+
+- `final.md`
+- `qa-report.md`
+- branch/commit metadata
+- release decision
+
+Backend ghi report vao repo copy tren server. Frontend co the ghi noi dung
+`final.md` ve file local da ton tai neu user cap quyen folder.
+
+## 4. Validation and gates
+
+Moi output di qua:
+
+```text
+agent-io output
+  -> schema validation
+  -> semantic validation
+  -> risk validation
+  -> artifact VALID / INVALID
+  -> gate policy
+  -> approved handoff
+```
+
+Gate modes:
+
+- PO, UX, DEV: confidence gate, auto-approve khi PASS va an toan.
+- QA: strict-manual, luon can human review.
+- Final release: owner/admin only.
+
+Tool actions duoc phan loai:
+
+- `auto`: cho phep va audit.
+- `approval`: tam dung cho human.
+- `block`: tu choi ngay.
+
+## 5. State and observability
+
+- Task/artifact/HITL decision duoc luu qua model backend.
+- Pending gate metadata duoc persist, nhung live continuation cua `onGate` van
+  phu thuoc Promise trong process.
+- Restart backend danh dau gate dang cho thanh `interrupted`; chua full-resume.
+- SSE phat `progress`, `completed`, `error`, `gate_pending` va heartbeat.
+- UI poll workflow status, pending gate, artifact va audit.
+
+## 6. Environment
 
 ```env
-# Multica
-MULTICA_URL=http://localhost:8080
-
-# Git workspace
-GIT_WORKSPACE=workspace/projects
-
-# Sandbox (Docker)
-AGENT_REAL_SANDBOX=true
-SANDBOX_DOCKER_IMAGE=aidlc-sandbox:latest
-SANDBOX_MEMORY_LIMIT=512m
-SANDBOX_CPU_LIMIT=1
-
-# Pipeline
-AGENT_TEST_COMMANDS=npm test
-CONFIDENCE_THRESHOLD=80
-MAX_DEV_RETRIES=2
-
-# Development
-USE_MOCK_AGENTS=false
+EXECUTION_PATH=claude-code
+USE_MOCK_CLAUDE_CODE=true
+USE_MOCK_AGENTS=true
+MAX_PARALLEL_WORKFLOWS=3
 ```
 
----
+## 7. Boundaries
 
-## Xem thêm
+- Khong tu dong chay script trong uploaded repo.
+- Khong doc secret-like files.
+- Browser folder upload tao ban sao tren server.
+- Ghi nguoc file local chi hoat dong khi co File System Access API va quyen
+  `readwrite`.
 
-- [project/MULTICA_INTEGRATION_PLAN.md](project/MULTICA_INTEGRATION_PLAN.md) — Kế hoạch tích hợp chi tiết 7 ngày
-- [project/TASK_GIANG_FE.md](project/TASK_GIANG_FE.md) — Công việc Frontend (Giang)
-- [project/TASK_MINH_BE.md](project/TASK_MINH_BE.md) — Công việc Backend (Minh)
-- [project/TASK_NAM_AGENT.md](project/TASK_NAM_AGENT.md) — Công việc Agent (Nam)
-- [core/AGENTS.md](core/AGENTS.md) — Chi tiết từng agent
+## 8. Kien truc dich tiep theo
+
+Kien truc hien tai la baseline demo, khong phai kien truc execution cuoi cung.
+
+1. [AIFA_DEMO_1_WEEK_ROADMAP.md](AIFA_DEMO_1_WEEK_ROADMAP.md) se chuan hoa
+   persisted `AgentTask`, `AgentEvent`, state machine, worker heartbeat va
+   DB-driven gate recovery.
+2. [AIFA_REAL_DATA_3_WEEK_ROADMAP.md](AIFA_REAL_DATA_3_WEEK_ROADMAP.md) se them
+   `AgentRunner` adapter, real Claude Code child process, filesystem/git/test
+   evidence va hardening.
+
+Kien truc dich tach ro:
+
+```text
+Backend Control Plane -> persisted task/gate/event
+Internal Worker       -> claim, heartbeat, recovery
+AgentRunner adapter   -> mock hoac real execution, normalized AgentEvent
+```

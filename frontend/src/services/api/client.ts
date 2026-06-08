@@ -15,6 +15,13 @@ const api = axios.create({
 });
 
 api.interceptors.request.use(async (config) => {
+  // Let the browser set multipart/form-data with its generated boundary.
+  // Keeping the instance's default application/json header makes multer see
+  // an empty request even though FormData contains files.
+  if (config.data instanceof FormData) {
+    config.headers.delete('Content-Type');
+  }
+
   const session = getStoredAuthSession();
   if (session?.access_token) {
     config.headers.Authorization = `Bearer ${session.access_token}`;

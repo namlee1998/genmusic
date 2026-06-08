@@ -7,6 +7,7 @@ import { useSdlcStore } from '@/store/useSdlcStore';
 import * as sdlcApi from '@/services/api/sdlcApi';
 import ArtifactViewer from './components/ArtifactViewer';
 import EmptyProjectState from './components/EmptyProjectState';
+import DeliveryErrorBanner from './components/DeliveryErrorBanner';
 
 export default function OutputsPage() {
 
@@ -47,8 +48,8 @@ export default function OutputsPage() {
         : requestedSelection || retainedSelection;
       selectArtifact(nextSelection || result.artifacts[0] || null);
       loadedContextRef.current = contextKey;
-    } catch {
-      setError('Could not load worker outputs.');
+    } catch (requestError) {
+      setError(sdlcApi.parseApiError(requestError, 'Could not load worker outputs.').message);
     } finally {
       setLoading(false);
     }
@@ -83,7 +84,7 @@ export default function OutputsPage() {
         </button>
       </header>
 
-      {error && <div className="delivery-error">{error}</div>}
+      <DeliveryErrorBanner error={error} onDismiss={() => setError(null)} />
 
       <div className="delivery-history-note">
         <strong>{artifacts.length}</strong> artifacts retained across workers

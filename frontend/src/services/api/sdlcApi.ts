@@ -32,6 +32,8 @@ export interface PhaseStatus {
   agent: 'PO' | 'UX' | 'DEV' | 'QA';
   status: 'pending' | 'running' | 'gate_pending' | 'completed' | 'failed' | 'skipped';
   duration?: string;
+  awaitingReview?: boolean;
+  invalid?: boolean;
 }
 
 export interface QAResult {
@@ -65,6 +67,28 @@ const BASE = '/sdlc';
 
 export const startPipelineReal = (repoUrl: string, request: string): Promise<{ workflowId: string; status: string }> =>
   api.post(`${BASE}/run-po-agent`, { repo_url: repoUrl, request }).then((r) => r.data);
+
+export interface SdlcError {
+  message: string;
+  code?: string | null;
+  phase?: string | null;
+  requestId?: string | null;
+}
+
+export const parseApiError = (error: unknown, fallback: string): SdlcError => {
+  if (typeof error !== 'object' || error === null) return { message: fallback };
+  const candidate = error as {
+    response?: { data?: { message?: string; code?: string; phase?: string; requestId?: string }; headers?: Record<string, string> };
+    message?: string;
+  };
+  const data = candidate.response?.data;
+  return {
+    message: data?.message || candidate.message || fallback,
+    code: data?.code ?? null,
+    phase: data?.phase ?? null,
+    requestId: data?.requestId ?? candidate.response?.headers?.['x-request-id'] ?? null,
+  };
+};
 
 export const getPipelineStatusReal = (workflowId: string): Promise<PipelineResponse> =>
   api.get(`${BASE}/pipeline/${workflowId}`).then((r) => r.data.data);
@@ -608,6 +632,167 @@ export const getProjectArtifacts = (projectId: string): Promise<any> =>
 
 export const getBacklogs = (projectId: string): Promise<any> =>
   api.get(`${BASE}/projects/${projectId}/backlog`).then((r) => r.data.data);
+
+// AIFA demo board API
+
+export interface GateDecisionPayload {
+  decision: 'APPROVE' | 'REJECT' | 'REQUEST_CHANGES';
+  comment?: string;
+}
+
+export const submitGateDecision = (taskId: string, payload: GateDecisionPayload) =>
+  api.post(`${BASE}/tasks/${taskId}/gate-decision`, payload).then((r) => r.data);
+
+export const submitReleaseDecision = (
+  projectId: string,
+  body: { decision_id: string; decision: 'APPROVE' | 'REJECT'; comment?: string },
+) => api.post(`${BASE}/projects/${projectId}/release-decision`, body).then((r) => r.data);
+
+export const uploadRepoFolder = (
+  projectId: string,
+  files: Array<File & { relativePath?: string }>,
+  request = '',
+  onProgress?: (pct: number) => void,
+) => {
+  const form = new FormData();
+  form.append('project_id', projectId);
+  if (request) form.append('request', request);
+  for (const f of files) {
+    form.append('files', f);
+    form.append('paths', f.relativePath || (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name);
+  }
+  return api.post(`${BASE}/upload-repo`, form, {
+    timeout: 10 * 60 * 1000,
+    onUploadProgress: (e) => {
+      if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100));
+    },
+  }).then((r) => r.data.data as { repo_path: string; base_branch: string; file_count: number });
+};
+
+export interface PendingGate {
+  approvalId: string;
+  taskId: string;
+  projectId?: string | null;
+  role: string;
+  kind: 'tool' | 'question';
+  status?: 'pending' | 'interrupted';
+  payload: {
+    tool?: string;
+    file_path?: string | null;
+    diff?: string | null;
+    reason?: string;
+    category?: string;
+    questions?: Array<{ question: string; header?: string; options?: Array<{ label: string; description?: string }> }>;
+  };
+  createdAt?: string;
+}
+
+export const resolveApproval = (
+  approvalId: string,
+  body: { action?: 'approve' | 'reject'; comment?: string; answers?: string[] },
+) => api.post(`${BASE}/approvals/${approvalId}`, body).then((r) => r.data.data);
+
+export const downloadReleaseFile = (projectId: string, fileName: 'final.md' | 'qa-report.md') =>
+  api.get(`${BASE}/projects/${projectId}/release-files/${fileName}`, { responseType: 'blob' })
+    .then((r) => r.data as Blob);
+
+export interface BoardCard {
+  label: string;
+  agent: string;
+  title: string;
+  description: string;
+  whatsIncluded: string[];
+  taskId: string;
+  invalid: boolean;
+}
+
+export interface BoardPhase {
+  stage: string;
+  status: string;
+  committed: boolean;
+  awaitingReview: boolean;
+  invalid: boolean;
+  error?: string | null;
+}
+
+export interface BoardReleaseGate {
+  eligible: boolean;
+  status: string;
+  canDecide: boolean;
+  approvalBlocked: boolean;
+}
+
+export interface BoardFlow {
+  flowNo: number;
+  target: string;
+  projectId?: string;
+  active?: boolean;
+  status: 'seeding' | 'ready' | 'error' | 'unavailable';
+  repo?: string;
+  branch?: string;
+  progress?: { done: number; total: number };
+  currentPhase?: string;
+  waitingFor?: string | null;
+  reviewStage?: string | null;
+  phases?: BoardPhase[];
+  card?: BoardCard | null;
+  failure?: {
+    stage: string;
+    error: string;
+    code?: string | null;
+    recoverable?: boolean | null;
+  } | null;
+  pendingGates?: PendingGate[];
+  releaseGate?: BoardReleaseGate | null;
+  released?: string | null;
+}
+
+export interface DemoBoard {
+  id?: string;
+  mode?: 'three_flow' | 'real_single';
+  status: string;
+  error?: string | null;
+  flows: BoardFlow[];
+}
+
+export interface WorkflowTimelineEvent {
+  timestamp: string;
+  actor: string;
+  action: string;
+  type: string;
+  taskId?: string | null;
+  agent?: string | null;
+  status?: string | null;
+  decision?: string | null;
+  comment?: string | null;
+  reason?: string | null;
+  gate?: string | null;
+  stateFrom?: string | null;
+  stateTo?: string | null;
+  fromAgent?: string | null;
+  toAgent?: string | null;
+  versionTag?: string | null;
+  severity?: string | null;
+}
+
+export interface WorkflowTimeline {
+  projectId: string;
+  events: WorkflowTimelineEvent[];
+  phaseTransitions?: Array<Record<string, unknown>>;
+}
+
+export const seedDemoBoard = (
+  reset = false,
+  sourceRepoPath?: string,
+  mode: 'three_flow' | 'real_single' = 'three_flow',
+): Promise<DemoBoard> =>
+  api.post(`${BASE}/demo/seed-board`, { reset, sourceRepoPath, mode }).then((r) => r.data.data);
+
+export const getDemoBoard = (): Promise<DemoBoard> =>
+  api.get(`${BASE}/demo/board`).then((r) => r.data.data);
+
+export const getWorkflowTimeline = (projectId: string): Promise<WorkflowTimeline> =>
+  api.get(`${BASE}/workflow/${projectId}/timeline`).then((r) => r.data.data);
 
 // ── Global HITL Interventions ──
 

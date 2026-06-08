@@ -26,6 +26,7 @@ class AgentArtifactModel {
       artifactType: data.artifactType || data.artifact_type,
       artifactKey: data.artifactKey || data.artifact_key,
       title: data.title ?? null,
+      status: (data.status ?? 'VALID'),
       contentJson: serializeJson((data.contentJson || data.content_json) ?? null),
       contentText: (data.contentText || data.content_text) ?? null,
       ordinal: data.ordinal ?? index,
@@ -108,6 +109,26 @@ class AgentArtifactModel {
     });
   }
 
+  /**
+   * T1: mark all (or selected) artifacts of a task with a validation status.
+   * Used after the role validator finds BLOCKER violations.
+   */
+  static async setStatusByTaskId(taskId, status, { artifactTypes = null } = {}) {
+    const where = { taskId };
+    if (Array.isArray(artifactTypes) && artifactTypes.length > 0) {
+      where.artifactType = { in: artifactTypes };
+    }
+    await prisma.agentArtifact.updateMany({ where, data: { status } });
+  }
+
+  /** T6: true if the task has at least one INVALID artifact. */
+  static async hasInvalid(taskId) {
+    const count = await prisma.agentArtifact.count({
+      where: { taskId, status: 'INVALID' },
+    });
+    return count > 0;
+  }
+
   static _map(row) {
     if (!row) return null;
     return {
@@ -118,6 +139,7 @@ class AgentArtifactModel {
       artifactType: row.artifactType,
       artifactKey: row.artifactKey,
       title: row.title,
+      status: row.status ?? 'VALID',
       contentJson: parseJson(row.contentJson),
       contentText: row.contentText,
       ordinal: row.ordinal,

@@ -22,15 +22,7 @@ class ProjectService {
     }
     if (!user?.id) throw new ApiError(401, 'Authenticated user is required');
 
-    const sub = await QuotaService.getOrProvisionSubscription(user.id);
-    const { Plan } = require('../models');
-    const plan = await Plan.findById(sub.planId);
-    if (plan?.maxProjects !== null && plan?.maxProjects !== undefined) {
-      const ownedCount = await ProjectMember.countOwnedByUser(user.id);
-      if (ownedCount >= plan.maxProjects) {
-        throw new ApiError(403, `Gói ${plan.name} chỉ cho phép tạo tối đa ${plan.maxProjects} project. Hãy nâng cấp lên Pro để tạo thêm.`);
-      }
-    }
+    // Auth/quota gating disabled for local execution — no plan project cap.
 
     const project = await Project.create({
       id: uuidv4(),

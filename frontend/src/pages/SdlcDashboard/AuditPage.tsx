@@ -6,6 +6,9 @@ import { useAppStore } from '@/store/useAppStore';
 import * as sdlcApi from '@/services/api/sdlcApi';
 import AuditTimeline from './components/AuditTimeline';
 import WorkflowMetricsPanel from './components/WorkflowMetricsPanel';
+import PhaseTransitionStrip from './components/PhaseTransitionStrip';
+import CiPreflightPanel from './components/CiPreflightPanel';
+import DeliveryErrorBanner from './components/DeliveryErrorBanner';
 import EmptyProjectState from './components/EmptyProjectState';
 import type { WorkflowMetrics } from '@/store/useSdlcStore';
 
@@ -19,8 +22,8 @@ import type { WorkflowMetrics } from '@/store/useSdlcStore';
 export default function AuditPage() {
   const { currentProjectId } = useAppStore();
   const {
-    projectId, auditEvents, error,
-    setProjectId, setAuditEvents, setError,
+    projectId, auditEvents, phaseTransitions, error,
+    setProjectId, setAuditEvents, setPhaseTransitions, setError,
   } = useSdlcStore();
 
   const [loading, setLoading] = useState(false);
@@ -40,13 +43,14 @@ export default function AuditPage() {
         sdlcApi.getWorkflowMetrics(projectId).catch(() => null),
       ]);
       setAuditEvents(trail.events);
+      setPhaseTransitions(trail.phaseTransitions || []);
       setMetrics(projectMetrics);
-    } catch {
-      setError('Could not load the audit trail.');
+    } catch (requestError) {
+      setError(sdlcApi.parseApiError(requestError, 'Could not load the audit trail.').message);
     } finally {
       setLoading(false);
     }
-  }, [projectId, setAuditEvents, setError]);
+  }, [projectId, setAuditEvents, setPhaseTransitions, setError]);
 
   useEffect(() => {
     void Promise.resolve().then(refreshAudit);
@@ -72,12 +76,16 @@ export default function AuditPage() {
         </button>
       </header>
 
-      {error && <div className="delivery-error">{error}</div>}
+      <DeliveryErrorBanner error={error} onDismiss={() => setError(null)} />
 
       <section className="delivery-output delivery-output--fullpage">
         <div className="delivery-output__body">
           <h2 className="delivery-section-title">Workflow metrics</h2>
           <WorkflowMetricsPanel metrics={metrics} />
+          <h2 className="delivery-section-title">CI preflight mock</h2>
+          <CiPreflightPanel />
+          <h2 className="delivery-section-title">Phase transitions</h2>
+          <PhaseTransitionStrip transitions={phaseTransitions} />
           <h2 className="delivery-section-title">Run timeline</h2>
           <AuditTimeline events={auditEvents} />
         </div>
