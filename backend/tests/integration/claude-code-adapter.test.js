@@ -44,6 +44,21 @@ describe('Claude Code SDK adapter contracts', () => {
     });
   });
 
+  test('tool payload remains valid when decision metadata is unavailable', () => {
+    const payload = claudePermissionDispatcher._internal.toolPayload({
+      taskId: 'task-dev',
+      role: 'dev-agent',
+      toolName: 'Write',
+      input: { file_path: 'src/auth/google.js' },
+    });
+
+    expect(payload).toMatchObject({
+      category: 'unknown',
+      reason: 'Tool action requires approval',
+      riskLevel: 'medium',
+    });
+  });
+
   test('question answers use the object shape AskUserQuestion expects', () => {
     const answers = claudePermissionDispatcher._internal.normalizeQuestionAnswers({
       questions: [

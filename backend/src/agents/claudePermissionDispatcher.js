@@ -63,7 +63,7 @@ function questionPayload({ taskId, role, input = {}, options = {} }) {
   };
 }
 
-function toolPayload({ taskId, role, toolName, input = {}, options = {}, decision }) {
+function toolPayload({ taskId, role, toolName, input = {}, options = {}, decision = {} }) {
   return {
     type: 'tool_permission',
     taskId,
@@ -82,8 +82,8 @@ function toolPayload({ taskId, role, toolName, input = {}, options = {}, decisio
       diffPreview: input.diff || input.content || null,
       prompt: options.title || options.displayName || null,
     },
-    reason: decision.reason,
-    category: decision.category,
+    reason: decision.reason || 'Tool action requires approval',
+    category: decision.category || 'unknown',
     actions: ['approve', 'deny'],
   };
 }
@@ -222,7 +222,7 @@ async function handleTool(ctx, decision) {
     projectId,
     role,
     kind: 'tool',
-    payload: toolPayload(ctx, decision),
+    payload: toolPayload({ ...ctx, decision }),
     timeoutMs: Number(process.env.TOOL_PERMISSION_TIMEOUT_MS) || undefined,
   });
   const result = await waitForGate(taskId, gate);
