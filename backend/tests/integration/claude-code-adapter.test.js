@@ -1,22 +1,24 @@
 jest.mock('uuid', () => ({ v4: () => 'approval-id' }));
 
+const path = require('path');
 const claudePermissionDispatcher = require('../../src/agents/claudePermissionDispatcher');
 const claudeCodeRunner = require('../../src/agents/claudeCodeRunner');
 
 describe('Claude Code SDK adapter contracts', () => {
   test('runner forwards canUseTool context and adapts absolute paths for the UI gate', async () => {
     const onGate = jest.fn(async (_toolName, input) => ({ behavior: 'allow', updatedInput: input }));
-    const canUseTool = claudeCodeRunner._internal.makeCanUseTool(onGate, 'C:\\repo');
+    const repoPath = path.resolve('repo');
+    const canUseTool = claudeCodeRunner._internal.makeCanUseTool(onGate, repoPath);
     const options = { toolUseID: 'tool-1', title: 'Claude wants to edit src/app.js' };
 
     await canUseTool('Edit', {
-      file_path: 'C:\\repo\\src\\app.js',
+      file_path: path.join(repoPath, 'src', 'app.js'),
       old_string: 'old',
       new_string: 'new',
     }, options);
 
     expect(onGate).toHaveBeenCalledWith('Edit', expect.objectContaining({
-      file_path: 'src\\app.js',
+      file_path: path.join('src', 'app.js'),
       diff: expect.stringContaining('+ new'),
     }), options);
   });
