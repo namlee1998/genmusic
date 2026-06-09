@@ -6,7 +6,7 @@
 //
 // IMPORTANT: the actual agent OUTPUT is still produced by the existing, fully
 // validated mock builder (SdlcWorkflowService._buildMockOutput) so every
-// scenario keeps passing _validateGateOutput / agent-io.v1 with zero regression.
+// scenario keeps passing _validateGateOutput / agent-io.v3 with zero regression.
 // These scripts only choreograph the gate-driving side-effects.
 
 // DEV writes one auto-safe file (test) and one approval-gated file (auth code),

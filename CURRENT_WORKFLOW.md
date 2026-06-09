@@ -169,7 +169,7 @@ Hai thuộc tính derived hỗ trợ UI và độ bền (không lưu cột mới
 ### 6.1 Output Validation Và Trạng Thái INVALID
 
 Sau khi worker tạo output, backend chạy `_validateGateOutput(role, output)` dựa
-trên **output contract có version** (`OUTPUT_CONTRACTS`, version `gate-output.v1`)
+trên **output contract có version** (`OUTPUT_CONTRACTS`, version `gate-output.v4`)
 — một nơi khai báo tường minh field bắt buộc theo từng vai, mức `BLOCKER` hoặc
 `WARNING`. (Không dùng Ajv; predicate viết tay nhưng gom về một chỗ; có drift
 test bắt thay đổi shape.)
@@ -302,7 +302,7 @@ trong `backend/src/services/agentContract.js`:
 
 ```text
 agent: run({ task, context }) -> output
-version: agent-io.v1
+version: agent-io.v3
 REQUIRED_OUTPUT_KEYS:
   po-agent : prd, acceptance_criteria
   ux-agent : ux_spec
@@ -452,7 +452,7 @@ Legacy compatibility: `POST /api/v1/sdlc/run-intent-agent`.
 | File | Trách nhiệm |
 | --- | --- |
 | `backend/src/services/SdlcWorkflowService.js` | State machine, gates, validation/INVALID, rerun, A2A handoff, artifact persistence, release evidence, mock builder, phaseTransitions |
-| `backend/src/services/agentContract.js` | Agent I/O contract (`agent-io.v1`) + conformance checker |
+| `backend/src/services/agentContract.js` | Agent I/O contract (`agent-io.v3`) + conformance checker |
 | `backend/src/middleware/errorHandler.js` | Error envelope `{code,message,phase,requestId}` + `ERROR_CODES` |
 | `backend/src/middleware/requestContext.js` | AsyncLocalStorage requestId context |
 | `backend/src/config/logger.js` | pino structured logger (auto requestId/taskId/phase) |

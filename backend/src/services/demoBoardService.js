@@ -275,7 +275,9 @@ async function buildFlowCard(f) {
   const failedPhase = failedStage ? ws.phases[failedStage] : null;
   const card = reviewStage ? await buildReviewCard(reviewStage, ws.phases[reviewStage]) : null;
   const released = ['RELEASED', 'RELEASE_REJECTED'].includes(ws.currentPhase) ? ws.currentPhase : null;
-  const pendingGates = await svc.listPendingGates({ projectId: f.projectId }).catch(() => []);
+  const pendingGates = process.env.CLAUDE_CODE_INTERACTIVE_GATES === 'true'
+    ? await svc.listPendingGates({ projectId: f.projectId }).catch(() => [])
+    : [];
 
   return {
     flowNo: f.flowNo,
@@ -349,8 +351,12 @@ function buildBullets(o, stage) {
     if (o.patch_diff || o.mock_code_diff) out.push('Code diff attached');
   } else if (stage === 'qa') {
     const tr = o.test_run_report || {};
-    if (tr.total != null) out.push(`${tr.total} test cases executed`);
-    else if (len(o.test_cases) != null) out.push(`${len(o.test_cases)} test cases executed`);
+    const detailedCount = len(o.test_cases);
+    if (detailedCount > 0) {
+      out.push(`${detailedCount} detailed test cases supplied`);
+    } else if (tr.total != null) {
+      out.push(`${tr.total} tests reported, but no detailed test cases supplied`);
+    }
     if (tr.failed != null) out.push(`${tr.failed} failing test(s)`);
     if (len(o.ac_coverage_matrix) != null) out.push(`${len(o.ac_coverage_matrix)} AC coverage rows`);
     if (o.qa_report) out.push('QA report');
@@ -359,6 +365,40 @@ function buildBullets(o, stage) {
 }
 
 // ── Reset / teardown ────────────────────────────────────────────────────────
+// Re-run the failed agent of a flow from its committed upstream task, so a
+// transient worker failure (e.g. a killed/locked Claude run) is recoverable
+// without re-seeding the whole board. PO re-runs from the feature request.
+const RETRY_SOURCE_STAGE = { ux: 'po', dev: 'ux', qa: 'dev' };
+const RETRY_RUN_FN = { ux: 'runUXAgent', dev: 'runDEVAgent', qa: 'runQAAgent' };
+
+async function retryFlow(projectId) {
+  const ws = await svc.getWorkflowStatus(projectId, null).catch(() => null);
+  if (!ws) return { retried: false, reason: 'no workflow' };
+  const failedStage = STAGES.find((s) => ws.phases?.[s]?.status === 'failed');
+  if (!failedStage) return { retried: false, reason: 'no failed stage' };
+
+  if (failedStage === 'po') {
+    await svc.runPOAgent({ projectId, featureRequest: FEATURE, request: FEATURE.title, newWorkflow: false, user: null });
+    return { retried: true, stage: 'po' };
+  }
+  const sourceTaskId = ws.phases?.[RETRY_SOURCE_STAGE[failedStage]]?.taskId;
+  if (!sourceTaskId) return { retried: false, reason: 'no committed source task' };
+  await svc[RETRY_RUN_FN[failedStage]]({ projectId, sourceTaskId, user: null });
+  return { retried: true, stage: failedStage };
+}
+
+// Return the UX agent's markdown design doc for a flow so the UI can write it as
+// a .md file into the user's opened folder. Null until UX has produced a spec.
+async function getUxDoc(projectId) {
+  const ws = await svc.getWorkflowStatus(projectId, null).catch(() => null);
+  const taskId = ws?.phases?.ux?.taskId;
+  if (!taskId) return null;
+  const out = (await Task.findById(taskId).catch(() => null))?.agentOutput || {};
+  const markdown = typeof out.ux_spec === 'string' && out.ux_spec.trim() ? out.ux_spec : null;
+  if (!markdown) return null;
+  return { taskId, fileName: 'google-login-ux.md', markdown };
+}
+
 async function teardown() {
   if (drainTimer) { clearInterval(drainTimer); drainTimer = null; }
   if (board) {
@@ -381,6 +421,8 @@ loadFromDisk();
 module.exports = {
   seedBoard,
   getBoard,
+  getUxDoc,
+  retryFlow,
   resetBoard,
   FLOW_TARGETS,
   // exposed for tests

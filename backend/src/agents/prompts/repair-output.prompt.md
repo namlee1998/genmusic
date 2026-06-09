@@ -4,7 +4,7 @@ Validator owner: backend workflow team
 
 # Repair Output Prompt
 
-Convert the provided raw Claude output into a valid `agent-io.v1` JSON object for
+Convert the provided raw Claude output into a valid `agent-io.v3` JSON object for
 the requested AIFA stage.
 
 Rules:

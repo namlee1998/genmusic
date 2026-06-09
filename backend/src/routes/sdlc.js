@@ -63,6 +63,10 @@ router.get('/dev/mock-scenario',  SdlcController.getMockScenario.bind(SdlcContro
 // GET  /api/v1/sdlc/demo/board                     aggregated board state
 router.post('/demo/seed-board', SdlcController.seedDemoBoard.bind(SdlcController));
 router.get('/demo/board',       SdlcController.getDemoBoard.bind(SdlcController));
+// GET /api/v1/sdlc/demo/flow/:project_id/ux-doc  → UX markdown to write into the opened folder
+router.get('/demo/flow/:project_id/ux-doc', SdlcController.getDemoUxDoc.bind(SdlcController));
+// POST /api/v1/sdlc/demo/flow/:project_id/retry  → re-run a failed agent from its committed source
+router.post('/demo/flow/:project_id/retry', SdlcController.retryDemoFlow.bind(SdlcController));
 
 // ── Backlog / Kanban ──────────────────────────────────────────────────────
 router.get('/projects/:project_id/backlog',           SdlcController.getBacklogs.bind(SdlcController));

@@ -14,6 +14,9 @@
 process.env.USE_MOCK_AGENTS = 'true';
 process.env.EXECUTION_PATH = 'claude-code';
 process.env.USE_MOCK_CLAUDE_CODE = 'true';
+// This preflight explicitly proves the question/tool gate bridge. Production
+// remains non-interactive unless its own environment enables these gates.
+process.env.CLAUDE_CODE_INTERACTIVE_GATES = 'true';
 process.env.NODE_ENV = process.env.NODE_ENV || 'development';
 process.env.DATABASE_URL = process.env.SMOKE_DATABASE_URL || 'file:./smoke.db';
 process.env.GATE_TIMEOUT_MS = process.env.GATE_TIMEOUT_MS || '30000';

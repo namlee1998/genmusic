@@ -11,11 +11,12 @@ const QualityGateService = require('./QualityGateService');
 const fs = require('fs/promises');
 const path = require('path');
 const { ApiError, ERROR_CODES } = require('../middleware/errorHandler');
-const { assertOutputConforms } = require('./agentContract');
+const { assertOutputConforms, hasContent } = require('./agentContract');
 const repoService = require('./repoService');
 const riskClassifier = require('./riskClassifier');
 const gateBridge = require('./gateBridge');
 const claudeCodeRunner = require('../agents/claudeCodeRunner');
+const mockClaudeCodeRunner = require('../agents/mockClaudeCodeRunner');
 const claudePermissionDispatcher = require('../agents/claudePermissionDispatcher');
 const workflowReport = require('./workflowReport');
 const logger = require('../config/logger');
@@ -120,14 +121,21 @@ const AUTO_APPROVE_CONFIDENCE = GATE_CONFIG.AUTO_APPROVE_CONFIDENCE;
 //              when?(out) -> bool }  (no Ajv — predicates stay hand-written).
 // ---------------------------------------------------------------------------
 // v2 (T5.1): added the layer-2 semantic `ac_testable` BLOCKER to PO/intent.
-const OUTPUT_CONTRACT_VERSION = 'gate-output.v2';
+const OUTPUT_CONTRACT_VERSION = 'gate-output.v4';
 
 const _acList = (o) => (Array.isArray(o.acceptance_criteria) ? o.acceptance_criteria : []);
 const _matrix = (o) => (Array.isArray(o.ac_coverage_matrix) ? o.ac_coverage_matrix : []);
 
+const INTENT_RULES = [
+  { rule: 'intent_assumptions_present', severity: 'BLOCKER', detail: 'Intent assumptions are empty',
+    check: (o) => hasContent(o.intent_assumptions) },
+];
+
 const PO_RULES = [
   { rule: 'prd_present', severity: 'BLOCKER', detail: 'PRD is empty',
     check: (o) => typeof o.prd === 'string' && o.prd.trim().length > 0 },
+  { rule: 'user_stories_present', severity: 'BLOCKER', detail: 'No user stories',
+    check: (o) => Array.isArray(o.user_stories) && o.user_stories.length > 0 },
   { rule: 'ac_present', severity: 'BLOCKER', detail: 'No acceptance criteria',
     check: (o) => _acList(o).length > 0 },
   // T5.1 layer 2 (semantic): at least one AC must be concrete enough to test.
@@ -138,21 +146,37 @@ const PO_RULES = [
   { rule: 'ac_measurable', severity: 'WARNING',
     detail: (o) => `${_acList(o).filter((a) => String(a).trim().length < 12).length} acceptance criteria look too vague to test`,
     check: (o) => _acList(o).every((a) => String(a).trim().length >= 12) },
+  { rule: 'scope_present', severity: 'BLOCKER', detail: 'Scope is empty',
+    check: (o) => hasContent(o.scope) },
+  { rule: 'out_of_scope_present', severity: 'BLOCKER', detail: 'Out-of-scope boundaries are empty',
+    check: (o) => hasContent(o.out_of_scope) },
+  { rule: 'risk_classification_present', severity: 'BLOCKER', detail: 'Risk classification is incomplete',
+    check: (o) => hasContent(o.risk_classification?.level) && Array.isArray(o.risk_classification?.required_gates) && o.risk_classification.required_gates.length > 0 },
 ];
 
 const OUTPUT_CONTRACTS = {
   version: OUTPUT_CONTRACT_VERSION,
-  'intent-agent': PO_RULES,
+  'intent-agent': INTENT_RULES,
   'po-agent': PO_RULES,
   'ux-agent': [
     { rule: 'ux_spec_present', severity: 'BLOCKER', detail: 'UX spec is empty',
       check: (o) => typeof o.ux_spec === 'string' && o.ux_spec.trim().length > 0 },
-    { rule: 'screens_present', severity: 'BLOCKER', detail: 'No screens or wireframes',
-      check: (o) => !!((o.screens && o.screens.length) || (o.wireframe_spec || '').trim()) },
+    { rule: 'user_flow_present', severity: 'BLOCKER', detail: 'User flow is empty',
+      check: (o) => hasContent(o.user_flow) },
+    { rule: 'wireframe_present', severity: 'BLOCKER', detail: 'Wireframe specification is empty',
+      check: (o) => hasContent(o.wireframe_spec) },
+    { rule: 'screens_present', severity: 'BLOCKER', detail: 'No screens supplied',
+      check: (o) => Array.isArray(o.screens) && o.screens.length > 0 },
+    { rule: 'components_present', severity: 'BLOCKER', detail: 'Component inventory is empty',
+      check: (o) => hasContent(o.component_inventory) },
   ],
   'dev-agent': [
+    { rule: 'implementation_plan_present', severity: 'BLOCKER', detail: 'Implementation plan is empty',
+      check: (o) => hasContent(o.implementation_plan) },
     { rule: 'patch_present', severity: 'BLOCKER', detail: 'No code patch produced',
       check: (o) => (o.patch_diff || o.mock_code_diff || '').trim().length > 0 },
+    { rule: 'changed_files_present', severity: 'BLOCKER', detail: 'No changed files supplied',
+      check: (o) => Array.isArray(o.changed_files) && o.changed_files.length > 0 },
     { rule: 'patch_format', severity: 'WARNING', detail: 'patch_format is not defined',
       check: (o) => !!o.patch_format },
     { rule: 'build_ok', severity: 'BLOCKER', detail: 'Sandbox build did not pass',
@@ -160,9 +184,13 @@ const OUTPUT_CONTRACTS = {
     { rule: 'sandbox_tests', severity: 'BLOCKER', detail: 'Sandbox test execution evidence is missing',
       check: (o) => (o.sandbox_result || {}).tests_ran === true },
     { rule: 'self_test_report', severity: 'BLOCKER', detail: 'DEV self-test report is missing',
-      check: (o) => !!o.self_test_report },
-    { rule: 'linked_ac', severity: 'WARNING', detail: 'Patch is not linked to any AC',
+      check: (o) => hasContent(o.self_test_report) },
+    { rule: 'linked_ac', severity: 'BLOCKER', detail: 'Patch is not linked to any AC',
       check: (o) => Array.isArray(o.linked_ac_ids) && o.linked_ac_ids.length > 0 },
+    { rule: 'risk_assessment_present', severity: 'BLOCKER', detail: 'Risk assessment is empty',
+      check: (o) => hasContent(o.risk_assessment) },
+    { rule: 'risk_classification_present', severity: 'BLOCKER', detail: 'Risk classification is incomplete',
+      check: (o) => hasContent(o.risk_classification?.level) && Array.isArray(o.risk_classification?.required_gates) && o.risk_classification.required_gates.length > 0 },
     { rule: 'security_notes', severity: 'BLOCKER', detail: 'High-risk DEV output is missing security notes',
       when: (o) => !!o.risk_classification?.required_gates?.includes('security'),
       check: (o) => !!o.security_notes },
@@ -171,6 +199,9 @@ const OUTPUT_CONTRACTS = {
       check: (o) => o.security_gate?.recommendation === 'PASS' },
   ],
   'qa-agent': [
+    { rule: 'test_cases_present', severity: 'BLOCKER',
+      detail: (o) => `${Array.isArray(o.test_cases) ? o.test_cases.length : 0} detailed test cases supplied`,
+      check: (o) => Array.isArray(o.test_cases) && o.test_cases.length > 0 },
     { rule: 'coverage_present', severity: 'BLOCKER', detail: 'No AC coverage matrix',
       check: (o) => _matrix(o).length > 0 },
     { rule: 'coverage_complete', severity: 'BLOCKER',
@@ -178,13 +209,21 @@ const OUTPUT_CONTRACTS = {
       check: (o) => _matrix(o).every((r) => r.covered === true) },
     { rule: 'tests_executed', severity: 'BLOCKER', detail: 'Tests were not actually executed',
       check: (o) => (o.test_run_report || {}).executed === true },
+    { rule: 'test_count_consistent', severity: 'BLOCKER', detail: 'Detailed test case count does not match the test run total',
+      check: (o) => Array.isArray(o.test_cases) && Number(o.test_run_report?.total) === o.test_cases.length },
+    { rule: 'test_evidence_present', severity: 'BLOCKER', detail: 'Test execution evidence/logs are empty',
+      check: (o) => hasContent(o.test_run_report?.logs || o.test_run_report?.evidence) },
     { rule: 'tests_passed', severity: 'BLOCKER',
       detail: (o) => `${(o.test_run_report || {}).failed || 0} test(s) failed`,
       check: (o) => ((o.test_run_report || {}).failed || 0) === 0 },
     { rule: 'no_blockers', severity: 'BLOCKER',
       detail: (o) => `${o.blocker_count || 0} blocker(s) present`,
       check: (o) => (o.blocker_count || 0) === 0 },
-    { rule: 'release_reason', severity: 'WARNING', detail: 'Release decision has no justification',
+    { rule: 'qa_report_present', severity: 'BLOCKER', detail: 'QA report is empty',
+      check: (o) => hasContent(o.qa_report) },
+    { rule: 'release_decision_present', severity: 'BLOCKER', detail: 'Release decision is empty or invalid',
+      check: (o) => ['approve', 'reject', 'needs_changes'].includes(String(o.release_decision || '').toLowerCase()) },
+    { rule: 'release_reason', severity: 'BLOCKER', detail: 'Release decision has no justification',
       check: (o) => !!(o.release_reason && o.release_reason.trim()) },
     { rule: 'quality_gate_pass', severity: 'BLOCKER',
       detail: (o, task) => `Quality gate is ${(task?.result?.gateRecommendation) || o.gate_evaluation?.recommendation || 'unknown'}, expected PASS`,
@@ -1017,7 +1056,11 @@ class SdlcWorkflowService {
     }
 
     if (gate.kind === 'question') {
-      const result = { answers: Array.isArray(answers) ? answers : (answers ? [answers] : []) };
+      const result = {
+        answers: answers && typeof answers === 'object'
+          ? answers
+          : (Array.isArray(answers) ? answers : (answers ? [answers] : [])),
+      };
       const woke = await gateBridge.resolveGate(approvalId, result);
       return { approvalId, resolved: woke, kind: 'question' };
     }
@@ -2161,6 +2204,18 @@ class SdlcWorkflowService {
     if (['intent-agent', 'po-agent'].includes(task.type) && context.featureRequest) {
       completedData.feature_request = context.featureRequest;
     }
+    if (task.type === 'intent-agent' && !hasContent(completedData.intent_assumptions)) {
+      const feature = context.featureRequest || {};
+      completedData.intent_assumptions = [
+        `# Intent assumptions: ${feature.title || 'Requested feature'}`,
+        '',
+        feature.description || 'The requested feature must be clarified before implementation.',
+        '',
+        '- Preserve existing behavior outside the requested scope.',
+        '- Validate assumptions at the PO review gate.',
+      ].join('\n');
+      completedData.clarifying_questions = completedData.clarifying_questions || [];
+    }
     // T4.1 — PO classifies the request route (decides whether UX runs).
     if (task.type === 'po-agent') {
       completedData.route_classification = classifyRoute(context.featureRequest || {});
@@ -2225,6 +2280,7 @@ class SdlcWorkflowService {
       };
     }
     if (task.type === 'qa-agent') {
+      completedData.blocker_count = completedData.blocker_count ?? 0;
       completedData.ac_coverage_matrix = (completedData.ac_coverage_matrix || []).map((row) => ({
         requirement_id: row.requirement_id || row.ac_id,
         requirement: row.requirement || row.ac,
@@ -2265,17 +2321,24 @@ class SdlcWorkflowService {
   async _runClaudeCodePath(task, context) {
     const repoContext = context.repoContext || await this._getRepoContext(task.projectId);
     const repoPath = repoContext?.repoPath || null;
+    const useMockClaudeCode = process.env.USE_MOCK_CLAUDE_CODE === 'true';
     const onGate = this._makeOnGate(task.id, task.type, {
       projectId: task.projectId,
       scope: { featurePaths: ['src/', 'tests/', 'docs/'] },
     });
 
-    const { output } = await claudeCodeRunner.runAgent({
+    const runner = useMockClaudeCode ? mockClaudeCodeRunner : claudeCodeRunner;
+    const { output } = await runner.runAgent({
       role: task.type,
       repoPath,
       taskId: task.id,
       context,
       onGate,
+      ...(useMockClaudeCode ? {
+        scenario: process.env.MOCK_SCENARIO || 'happy_path',
+        buildOutput: () => this._buildMockOutput(task, context),
+        sandboxDir: path.join(repoService.WORKSPACE_DIR, task.projectId, 'sandbox', task.type),
+      } : {}),
     });
     return output;
   }
@@ -2384,16 +2447,19 @@ class SdlcWorkflowService {
             completedData.feature_request = context.featureRequest;
           }
 
-          // I4: warn (non-fatal) if a real agent output diverges from the
-          // contract the mock satisfies. Surfaces drift the moment a real agent
-          // is wired, without blocking the run.
+          // I4: every execution path must satisfy the same non-empty contract.
+          // Saving partial output as "completed" creates misleading review cards
+          // and downstream handoffs with missing evidence.
           const conformance = assertOutputConforms(task.type, completedData);
           if (!conformance.ok) {
-            logger.warn('agent output missing contract keys', {
-              taskId: task.id,
-              phase: task.type,
-              missing: conformance.missing,
-            });
+            const parts = [
+              conformance.missing.length ? `missing: ${conformance.missing.join(', ')}` : null,
+              conformance.empty.length ? `empty: ${conformance.empty.join(', ')}` : null,
+            ].filter(Boolean);
+            const err = new Error(`Agent output violates ${task.type} contract (${parts.join('; ')})`);
+            err.code = 'AGENT_OUTPUT_CONTRACT_INVALID';
+            err.recoverable = true;
+            throw err;
           }
 
           await this._saveAgentData(task, completedData, userId);
@@ -2432,6 +2498,9 @@ class SdlcWorkflowService {
         code: error.code || null,
         message: error.message,
         recoverable: error.recoverable ?? null,
+        subtype: error.subtype || null,
+        numTurns: error.numTurns ?? null,
+        stopReason: error.stopReason || null,
         exitCode: error.exitCode ?? null,
         signal: error.signal || null,
         stderrPreview: typeof error.stderr === 'string' ? error.stderr.slice(0, 2000) : null,
@@ -2459,6 +2528,9 @@ class SdlcWorkflowService {
       payload: {
         code: error.code || null,
         recoverable: error.recoverable ?? null,
+        subtype: error.subtype || null,
+        numTurns: error.numTurns ?? null,
+        stopReason: error.stopReason || null,
         exitCode: error.exitCode ?? null,
       },
     });
