@@ -16,6 +16,7 @@ const repoService = require('./repoService');
 const riskClassifier = require('./riskClassifier');
 const gateBridge = require('./gateBridge');
 const claudeCodeRunner = require('../agents/claudeCodeRunner');
+const mockClaudeCodeRunner = require('../agents/mockClaudeCodeRunner');
 const claudePermissionDispatcher = require('../agents/claudePermissionDispatcher');
 const workflowReport = require('./workflowReport');
 const logger = require('../config/logger');
@@ -2320,17 +2321,24 @@ class SdlcWorkflowService {
   async _runClaudeCodePath(task, context) {
     const repoContext = context.repoContext || await this._getRepoContext(task.projectId);
     const repoPath = repoContext?.repoPath || null;
+    const useMockClaudeCode = process.env.USE_MOCK_CLAUDE_CODE === 'true';
     const onGate = this._makeOnGate(task.id, task.type, {
       projectId: task.projectId,
       scope: { featurePaths: ['src/', 'tests/', 'docs/'] },
     });
 
-    const { output } = await claudeCodeRunner.runAgent({
+    const runner = useMockClaudeCode ? mockClaudeCodeRunner : claudeCodeRunner;
+    const { output } = await runner.runAgent({
       role: task.type,
       repoPath,
       taskId: task.id,
       context,
       onGate,
+      ...(useMockClaudeCode ? {
+        scenario: process.env.MOCK_SCENARIO || 'happy_path',
+        buildOutput: () => this._buildMockOutput(task, context),
+        sandboxDir: path.join(repoService.WORKSPACE_DIR, task.projectId, 'sandbox', task.type),
+      } : {}),
     });
     return output;
   }
