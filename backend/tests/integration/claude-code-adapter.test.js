@@ -3,6 +3,7 @@ jest.mock('uuid', () => ({ v4: () => 'approval-id' }));
 const path = require('path');
 const claudePermissionDispatcher = require('../../src/agents/claudePermissionDispatcher');
 const claudeCodeRunner = require('../../src/agents/claudeCodeRunner');
+const gateBridge = require('../../src/services/gateBridge');
 
 describe('Claude Code SDK adapter contracts', () => {
   test('runner forwards canUseTool context and adapts absolute paths for the UI gate', async () => {
@@ -57,6 +58,39 @@ describe('Claude Code SDK adapter contracts', () => {
       reason: 'Tool action requires approval',
       riskLevel: 'medium',
     });
+  });
+
+  test('interactive auth write reaches the approval gate with risk metadata', async () => {
+    process.env.CLAUDE_CODE_INTERACTIVE_GATES = 'true';
+    const requestGate = jest.spyOn(gateBridge, 'requestGate').mockReturnValue({
+      approvalId: 'approval-id',
+      ready: Promise.resolve(),
+      promise: Promise.resolve({ action: 'approve' }),
+    });
+
+    try {
+      const result = await claudePermissionDispatcher.dispatch({
+        toolName: 'Write',
+        input: { file_path: 'src/auth/google.js', content: 'module.exports = {};' },
+        taskId: 'task-dev',
+        role: 'dev-agent',
+        scope: { featurePaths: ['src/', 'tests/', 'docs/'] },
+        audit: jest.fn(),
+      });
+
+      expect(result.behavior).toBe('allow');
+      expect(requestGate).toHaveBeenCalledWith(expect.objectContaining({
+        kind: 'tool',
+        payload: expect.objectContaining({
+          category: 'security',
+          reason: expect.stringContaining('auth/security/payment'),
+          riskLevel: 'high',
+        }),
+      }));
+    } finally {
+      requestGate.mockRestore();
+      delete process.env.CLAUDE_CODE_INTERACTIVE_GATES;
+    }
   });
 
   test('question answers use the object shape AskUserQuestion expects', () => {
