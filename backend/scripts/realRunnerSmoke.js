@@ -6,7 +6,7 @@
  * AIFA-shaped onGate, and verifies:
  *   1. canUseTool is wired to onGate (questions answered, tools gated),
  *   2. file paths reaching onGate are repo-RELATIVE (the Windows abs-path fix),
- *   3. the final output parses to agent-io.v1 with the role's required keys.
+ *   3. the final output parses to agent-io.v3 with the role's required non-empty keys.
  *
  * Uses your local Claude Code login. Run: node scripts/realRunnerSmoke.js
  */

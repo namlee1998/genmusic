@@ -6,13 +6,16 @@
 jest.mock('uuid', () => ({ v4: jest.fn(() => 'test-uuid') }));
 
 const SdlcWorkflowService = require('../../src/services/SdlcWorkflowService');
-const { assertOutputConforms, REQUIRED_OUTPUT_KEYS, AGENT_CONTRACT_VERSION } = require('../../src/services/agentContract');
+const {
+  assertOutputConforms, REQUIRED_OUTPUT_KEYS, AGENT_CONTRACT_VERSION, hasContent,
+} = require('../../src/services/agentContract');
 
 // Happy-path so the high-risk DEV security gate passes on the first run.
 beforeAll(() => { process.env.MOCK_SCENARIO = 'happy_path'; });
 afterAll(() => { delete process.env.MOCK_SCENARIO; });
 
 const CONTEXT = {
+  'intent-agent': { featureRequest: { title: 'Add Google login', description: 'OAuth 2.0 sign-in' } },
   'po-agent': { featureRequest: { title: 'Add Google login', description: 'OAuth 2.0 sign-in' } },
   'ux-agent': {},
   'dev-agent': {},
@@ -21,7 +24,7 @@ const CONTEXT = {
 
 describe('I4 — agent output contract', () => {
   test('contract version is pinned', () => {
-    expect(AGENT_CONTRACT_VERSION).toBe('agent-io.v1');
+    expect(AGENT_CONTRACT_VERSION).toBe('agent-io.v3');
   });
 
   test.each(Object.keys(REQUIRED_OUTPUT_KEYS))(
@@ -39,5 +42,19 @@ describe('I4 — agent output contract', () => {
     const result = assertOutputConforms('po-agent', {});
     expect(result.ok).toBe(false);
     expect(result.missing).toEqual(expect.arrayContaining(['prd', 'acceptance_criteria']));
+  });
+
+  test.each(Object.keys(REQUIRED_OUTPUT_KEYS))('%s rejects present-but-empty required fields', (role) => {
+    const emptyOutput = Object.fromEntries(REQUIRED_OUTPUT_KEYS[role].map((key) => [key, '']));
+    const result = assertOutputConforms(role, emptyOutput);
+    expect(result.ok).toBe(false);
+    expect(result.empty).toEqual(expect.arrayContaining(REQUIRED_OUTPUT_KEYS[role]));
+  });
+
+  test('nested placeholder values are not meaningful content', () => {
+    expect(hasContent([''])).toBe(false);
+    expect(hasContent([{}])).toBe(false);
+    expect(hasContent({ title: '', details: [] })).toBe(false);
+    expect(hasContent({ executed: false, failed: 0 })).toBe(true);
   });
 });

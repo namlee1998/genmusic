@@ -18,11 +18,19 @@
 
 const fs = require('fs/promises');
 const path = require('path');
-const { REQUIRED_OUTPUT_KEYS, AGENT_CONTRACT_VERSION } = require('../services/agentContract');
+const { REQUIRED_OUTPUT_KEYS, AGENT_CONTRACT_VERSION, assertOutputConforms } = require('../services/agentContract');
 
 const PROMPT_DIR = path.join(__dirname, 'prompts');
 const DEFAULT_TIMEOUT_MS = Number(process.env.CLAUDE_CODE_TIMEOUT_MS) || 30 * 60 * 1000;
-const ALLOWED_TOOLS = ['Read', 'Glob', 'Grep', 'LS', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'AskUserQuestion'];
+// The SDK caps a run at maxTurns; its default is low for a multi-step coding
+// agent. DEV (read → plan → write several files → test) exhausts it and the run
+// ends mid-tool with subtype=error_max_turns / stop_reason=tool_use. Give every
+// role a generous ceiling; the gate-aware compute timeout still bounds runaways.
+const configuredMaxTurns = Number(process.env.CLAUDE_CODE_MAX_TURNS);
+const DEFAULT_MAX_TURNS = Number.isFinite(configuredMaxTurns) && configuredMaxTurns > 0
+  ? Math.floor(configuredMaxTurns)
+  : 200;
+const ALLOWED_TOOLS = ['Read', 'Glob', 'Grep', 'LS', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash'];
 const ROLE_LABEL = {
   'po-agent': 'Product Owner',
   'ux-agent': 'UX Designer',
@@ -71,6 +79,42 @@ function parseJsonObject(text) {
   return null;
 }
 
+// Gate validators (_validateGateOutput) count these per-role keys as ARRAYS
+// (e.g. PO `acceptance_criteria` via Array.isArray). Real Claude often returns
+// them as a single multi-line string ("AC-1: …\n\nAC-2: …"), which the array
+// check reads as empty → BLOCKER → output flagged INVALID even though the
+// content is fine. Coerce string→array here so a well-formed real run conforms
+// without weakening the gate. Object-array fields (e.g. qa `ac_coverage_matrix`,
+// rows with `covered`) are intentionally left to the prompt — we never fabricate
+// evidence objects from prose.
+const STRING_LIST_KEYS = {
+  'intent-agent': ['acceptance_criteria', 'user_stories'],
+  'po-agent': ['acceptance_criteria', 'user_stories'],
+  'ux-agent': ['screens', 'component_inventory'],
+  'dev-agent': ['changed_files', 'linked_ac_ids'],
+  'qa-agent': ['test_cases'],
+};
+
+function toStringArray(value) {
+  if (value == null || Array.isArray(value)) return value;
+  if (typeof value !== 'string') return value; // placeholder/object → leave as-is
+  const s = value.trim();
+  if (!s) return [];
+  // Prefer splitting on blank lines (paragraph items); fall back to single lines.
+  let parts = s.split(/\n\s*\n+/).map((x) => x.trim()).filter(Boolean);
+  if (parts.length <= 1) parts = s.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+  // Strip leading list markers ("- ", "* ", "1. "/"1) ") but keep "AC-1:" content.
+  parts = parts.map((p) => p.replace(/^[-*]\s+/, '').replace(/^\d+[.)]\s+/, '')).filter(Boolean);
+  return parts.length ? parts : [s];
+}
+
+function coerceArrayFields(role, output) {
+  for (const key of STRING_LIST_KEYS[role] || []) {
+    if (typeof output[key] === 'string') output[key] = toStringArray(output[key]);
+  }
+  return output;
+}
+
 function normalizeOutput(role, parsed, meta = {}) {
   const envelope = parsed.outputVersion || parsed.schema_version || parsed.stage || parsed.artifact
     ? parsed
@@ -95,23 +139,20 @@ function normalizeOutput(role, parsed, meta = {}) {
     output_contract: AGENT_CONTRACT_VERSION,
   };
 
-  const missing = (REQUIRED_OUTPUT_KEYS[role] || [])
-    .filter((key) => output[key] === undefined || output[key] === null);
-  if (missing.length) {
-    if (process.env.CLAUDE_CODE_LENIENT_CONTRACT === 'true') {
-      for (const key of missing) {
-        output[key] = {
-          status: 'missing_from_claude_output',
-          note: `Claude did not return required key ${key}; AIFA inserted this placeholder so the real demo can continue.`,
-        };
-      }
-      output.observability.contract_warnings = { missing_required_keys: missing };
-      return output;
-    }
-    const err = new Error(`Claude output missing required ${role} key(s): ${missing.join(', ')}`);
+  // Reshape known list fields (string→array) so the gate's array checks pass.
+  coerceArrayFields(role, output);
+
+  const contract = assertOutputConforms(role, output);
+  if (!contract.ok) {
+    const problems = [
+      contract.missing.length ? `missing: ${contract.missing.join(', ')}` : null,
+      contract.empty.length ? `empty: ${contract.empty.join(', ')}` : null,
+    ].filter(Boolean).join('; ');
+    const err = new Error(`Claude output violates ${role} contract (${problems})`);
     err.code = 'CLAUDE_OUTPUT_CONTRACT_INVALID';
     err.recoverable = true;
-    err.missing = missing;
+    err.missing = contract.missing;
+    err.empty = contract.empty;
     throw err;
   }
   return output;
@@ -125,8 +166,8 @@ async function loadPromptTemplate(role) {
     return [
       `You are the ${ROLE_LABEL[role] || role} agent in AIFA.`,
       'Work on the repository in your working directory using the available tools.',
-      'When you need a decision with multiple valid options, use AskUserQuestion.',
-      'Return a valid agent-io.v1 JSON object only as your final message.',
+      'Make reasonable assumptions and continue without asking interactive questions.',
+      `Return a valid ${AGENT_CONTRACT_VERSION} JSON object only as your final message.`,
     ].join('\n');
   }
 }
@@ -142,7 +183,7 @@ async function buildPrompt({ role, repoPath, context }) {
     `- Output contract: ${AGENT_CONTRACT_VERSION}`,
     `- Required artifact keys: ${required.join(', ') || '(none)'}`,
     '- Work inside the working directory only; use repo-relative paths for file operations.',
-    '- When a decision has multiple reasonable options, call AskUserQuestion before proceeding.',
+    '- Make reasonable assumptions and continue without calling AskUserQuestion.',
     '- Your FINAL message must contain exactly one fenced ```json block with this shape:',
     '```json',
     JSON.stringify({
@@ -189,14 +230,19 @@ function adaptGateInput(toolName, input, cwd) {
   return out;
 }
 
-function makeCanUseTool(onGate, cwd) {
-  return async (toolName, input) => {
+function makeCanUseTool(onGate, cwd, gateClock = null) {
+  return async (toolName, input, options = {}) => {
     if (typeof onGate !== 'function') return { behavior: 'allow', updatedInput: input };
     let res;
+    // A tool/question gate may sit paused waiting for a human; bracket the wait so
+    // the runner's safety timeout doesn't count it against the agent's budget.
+    if (gateClock) gateClock.enter();
     try {
-      res = await onGate(toolName, adaptGateInput(toolName, input, cwd));
+      res = await onGate(toolName, adaptGateInput(toolName, input, cwd), options);
     } catch (e) {
       return { behavior: 'deny', message: `Gate error: ${e.message}` };
+    } finally {
+      if (gateClock) gateClock.exit();
     }
     if (!res || res.behavior === 'allow') {
       // AskUserQuestion carries answers in updatedInput; tool gates pass through.
@@ -205,6 +251,16 @@ function makeCanUseTool(onGate, cwd) {
     return { behavior: 'deny', message: res.message || 'Rejected by reviewer' };
   };
 }
+
+// A run can die mid-stream when a corporate proxy drops the long-lived
+// connection to the Anthropic API ("socket connection was closed unexpectedly"),
+// or on a transient 5xx/overload. These are not agent bugs — retrying the run
+// usually succeeds, so we distinguish them from real failures.
+const TRANSIENT_ERROR = /socket connection was closed|socket hang ?up|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|EAI_AGAIN|network error|fetch failed|terminated|connection (error|closed|reset)|premature close|stream (error|closed)|\b(408|425|429|500|502|503|504)\b|overloaded|rate.?limit/i;
+const isTransientError = (err) => TRANSIENT_ERROR.test(String(err?.message || ''));
+const isRetryableToolUseError = (err) => err?.subtype === 'error_during_execution'
+  && err?.stopReason === 'tool_use';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function runAgent({
   role,
@@ -220,57 +276,129 @@ async function runAgent({
   const cwd = repoPath || sandboxDir || process.cwd();
   const prompt = await buildPrompt({ role, repoPath, context });
 
-  const q = query({
-    prompt,
-    options: {
-      cwd,
-      permissionMode: 'default',
-      canUseTool: makeCanUseTool(onGate, cwd),
-      allowedTools: ALLOWED_TOOLS,
-      ...(process.env.CLAUDE_CODE_MODEL ? { model: process.env.CLAUDE_CODE_MODEL } : {}),
-      ...(process.env.CLAUDE_CODE_MAX_TURNS ? { maxTurns: Number(process.env.CLAUDE_CODE_MAX_TURNS) } : {}),
-    },
-  });
+  // One streaming run of the agent. Returns the raw result fields; throws on
+  // error so the retry loop below can decide whether the failure is transient.
+  const attempt = async () => {
+    // Gate-aware safety budget: the timeout should bound the AGENT's own compute,
+    // NOT the wall-clock time a run sits paused waiting for a human to approve a
+    // tool/answer a question. `gateClock` accrues human-wait time and pushes the
+    // deadline out by the same amount; while a gate is open the timer never fires.
+    // (Without this, a DEV run that correctly surfaces an approval gate is killed
+    // at timeoutMs and the SDK reports stop_reason=tool_use.)
+    let gateDepth = 0;
+    let gateWaitStartedAt = 0;
+    let extraBudgetMs = 0;
+    const startedAt = Date.now();
+    const gateClock = {
+      enter() { if (gateDepth++ === 0) gateWaitStartedAt = Date.now(); },
+      exit() { if (gateDepth > 0 && --gateDepth === 0) extraBudgetMs += Date.now() - gateWaitStartedAt; },
+    };
 
-  // Generous safety cap; human gate waits are bounded by gateBridge's own
-  // watchdog (GATE_TIMEOUT_MS), so this only catches a runaway agent.
-  const timer = setTimeout(() => { try { q.interrupt?.(); } catch (_) { /* noop */ } }, timeoutMs);
-  if (typeof timer.unref === 'function') timer.unref();
+    const q = query({
+      prompt,
+      options: {
+        cwd,
+        permissionMode: 'default',
+        canUseTool: makeCanUseTool(onGate, cwd, gateClock),
+        allowedTools: ALLOWED_TOOLS,
+        maxTurns: DEFAULT_MAX_TURNS,
+        ...(process.env.CLAUDE_CODE_MODEL ? { model: process.env.CLAUDE_CODE_MODEL } : {}),
+      },
+    });
 
-  let resultText = '';
-  let sessionId = null;
-  let totalCostUsd = null;
-  let usage = null;
-  let isError = false;
-  const messageTypes = [];
+    let timer;
+    const armTimer = () => {
+      const deadline = startedAt + timeoutMs + extraBudgetMs;
+      timer = setTimeout(() => {
+        // Still paused on a human gate, or the deadline was pushed out → re-check
+        // later instead of killing a run that is legitimately waiting/working.
+        if (gateDepth > 0 || Date.now() < startedAt + timeoutMs + extraBudgetMs) { armTimer(); return; }
+        try { q.interrupt?.(); } catch (_) { /* noop */ }
+      }, Math.max(1000, deadline - Date.now()));
+      if (typeof timer.unref === 'function') timer.unref();
+    };
+    armTimer();
 
-  try {
-    for await (const message of q) {
-      messageTypes.push(message.type);
-      if (message.type === 'assistant') {
-        for (const block of message.message?.content || []) {
-          if (block.type === 'text' && typeof onProgress === 'function') {
-            onProgress({ type: 'text', data: block.text });
+    let resultText = '';
+    let sessionId = null;
+    let totalCostUsd = null;
+    let usage = null;
+    let isError = false;
+    let resultSubtype = null;
+    let numTurns = null;
+    let stopReason = null;
+    let resultErrors = [];
+    const messageTypes = [];
+
+    try {
+      for await (const message of q) {
+        messageTypes.push(message.type);
+        if (message.type === 'assistant') {
+          for (const block of message.message?.content || []) {
+            if (block.type === 'text' && typeof onProgress === 'function') {
+              onProgress({ type: 'text', data: block.text });
+            }
           }
+        } else if (message.type === 'result') {
+          resultText = message.result || '';
+          sessionId = message.session_id || null;
+          totalCostUsd = message.total_cost_usd ?? null;
+          usage = message.usage || null;
+          isError = !!message.is_error;
+          resultSubtype = message.subtype || null;
+          numTurns = message.num_turns ?? null;
+          stopReason = message.stop_reason ?? null;
+          resultErrors = Array.isArray(message.errors) ? message.errors : [];
         }
-      } else if (message.type === 'result') {
-        resultText = message.result || '';
-        sessionId = message.session_id || null;
-        totalCostUsd = message.total_cost_usd ?? null;
-        usage = message.usage || null;
-        isError = !!message.is_error;
       }
+    } finally {
+      clearTimeout(timer);
     }
-  } finally {
-    clearTimeout(timer);
-  }
 
-  if (isError && !resultText) {
-    const err = new Error('Claude Agent SDK run ended with an error');
-    err.code = 'CLAUDE_CODE_RUN_ERROR';
-    err.recoverable = true;
-    throw err;
+    // An error result (e.g. an API/socket error surfaced as a result message)
+    // is thrown so the retry loop can inspect it for transient causes.
+    if (isError) {
+      const detail = resultErrors.filter(Boolean).join('; ');
+      const diagnostic = [
+        resultSubtype || 'unknown_result_error',
+        Number.isFinite(numTurns) ? `turns=${numTurns}` : null,
+        stopReason ? `stop_reason=${stopReason}` : null,
+      ].filter(Boolean).join(', ');
+      const err = new Error(detail || resultText || `Claude Agent SDK run ended with an error (${diagnostic})`);
+      err.code = 'CLAUDE_CODE_RUN_ERROR';
+      err.recoverable = true;
+      err.subtype = resultSubtype;
+      err.numTurns = numTurns;
+      err.stopReason = stopReason;
+      err.sdkErrors = resultErrors;
+      if (resultSubtype === 'error_max_turns') {
+        err.code = 'CLAUDE_CODE_MAX_TURNS';
+        err.message = `Claude Code reached maxTurns=${DEFAULT_MAX_TURNS} before finishing (turns=${numTurns}, stop_reason=${stopReason || 'unknown'})`;
+      }
+      throw err;
+    }
+    return { resultText, sessionId, totalCostUsd, usage, messageTypes, resultSubtype, numTurns, stopReason };
+  };
+
+  const maxAttempts = Math.max(1, Number(process.env.CLAUDE_CODE_MAX_RETRIES ?? 2) + 1);
+  let run;
+  for (let i = 1; i <= maxAttempts; i += 1) {
+    try {
+      run = await attempt();
+      break;
+    } catch (err) {
+      if (i < maxAttempts && (isTransientError(err) || isRetryableToolUseError(err))) {
+        // eslint-disable-next-line no-console
+        console.warn(`[claudeCodeRunner] recoverable error on ${role} attempt ${i}/${maxAttempts}, retrying: ${err.message}`);
+        await sleep(1500 * i);
+        continue;
+      }
+      throw err;
+    }
   }
+  const {
+    resultText, sessionId, totalCostUsd, usage, messageTypes, resultSubtype, numTurns, stopReason,
+  } = run;
 
   const parsed = parseJsonObject(resultText);
   if (!parsed) {
@@ -282,7 +410,21 @@ async function runAgent({
   }
 
   const output = normalizeOutput(role, parsed, { sessionId, totalCostUsd, usage });
+  output.observability.claude_result = {
+    subtype: resultSubtype,
+    num_turns: numTurns,
+    stop_reason: stopReason,
+    max_turns: DEFAULT_MAX_TURNS,
+  };
   return { output, messages: messageTypes, cliSessionId: sessionId, taskId };
 }
 
-module.exports = { runAgent, buildPrompt, parseJsonObject, normalizeOutput };
+module.exports = {
+  runAgent,
+  buildPrompt,
+  parseJsonObject,
+  normalizeOutput,
+  _internal: {
+    adaptGateInput, makeCanUseTool, isRetryableToolUseError, DEFAULT_MAX_TURNS,
+  },
+};

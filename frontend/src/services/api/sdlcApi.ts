@@ -175,10 +175,12 @@ export interface PendingGate {
   status?: 'pending' | 'interrupted';
   payload: {
     tool?: string;
+    toolName?: string;
     file_path?: string | null;
     diff?: string | null;
     reason?: string;
     category?: string;
+    display?: { command?: string | null; filePath?: string | null; diffPreview?: string | null; prompt?: string | null };
     questions?: Array<{ question: string; header?: string; options?: Array<{ label: string; description?: string }> }>;
   };
   createdAt?: string;
@@ -191,7 +193,7 @@ export const listPendingApprovals = (params: { taskId?: string; projectId?: stri
 /** Resolve a tool gate (approve/reject) or a question gate (answers). */
 export const resolveApproval = (
   approvalId: string,
-  body: { action?: 'approve' | 'reject'; comment?: string; answers?: string[] },
+  body: { action?: 'approve' | 'reject'; comment?: string; answers?: string[] | Record<string, string> },
 ) => api.post(`${BASE}/approvals/${approvalId}`, body).then((r) => r.data.data);
 
 export const getWorkflowMetrics = (projectId: string) =>
@@ -300,15 +302,28 @@ export interface WorkflowTimeline {
   phaseTransitions?: Array<Record<string, unknown>>;
 }
 
+// Real Claude Code runs make these board calls slower than ordinary CRUD (the
+// backend reads live workflow status), so override the 30s default to avoid a
+// misleading "timeout exceeded" banner while a real run is provisioning.
+const BOARD_TIMEOUT_MS = 120_000;
+
 export const seedDemoBoard = (
   reset = false,
   sourceRepoPath?: string,
   mode: 'three_flow' | 'real_single' = 'three_flow',
 ): Promise<DemoBoard> =>
-  api.post(`${BASE}/demo/seed-board`, { reset, sourceRepoPath, mode }).then((r) => r.data.data);
+  api.post(`${BASE}/demo/seed-board`, { reset, sourceRepoPath, mode }, { timeout: BOARD_TIMEOUT_MS }).then((r) => r.data.data);
 
 export const getDemoBoard = (): Promise<DemoBoard> =>
-  api.get(`${BASE}/demo/board`).then((r) => r.data.data);
+  api.get(`${BASE}/demo/board`, { timeout: BOARD_TIMEOUT_MS }).then((r) => r.data.data);
+
+export interface UxDoc { taskId: string; fileName: string; markdown: string; }
+
+export const getDemoUxDoc = (projectId: string): Promise<UxDoc | null> =>
+  api.get(`${BASE}/demo/flow/${projectId}/ux-doc`).then((r) => r.data.data);
+
+export const retryDemoFlow = (projectId: string): Promise<{ retried: boolean; stage?: string; reason?: string }> =>
+  api.post(`${BASE}/demo/flow/${projectId}/retry`, {}, { timeout: BOARD_TIMEOUT_MS }).then((r) => r.data.data);
 
 export const getWorkflowTimeline = (projectId: string): Promise<WorkflowTimeline> =>
   api.get(`${BASE}/workflow/${projectId}/timeline`).then((r) => r.data.data);

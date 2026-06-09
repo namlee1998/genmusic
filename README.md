@@ -127,7 +127,7 @@ The repository includes an end-to-end local workflow demo:
   issue remains, the backend auto-approves the output, persists an
   `a2a_handoff.v1` envelope, and starts the next worker.
 - Every worker output is validated against a versioned, per-role output
-  contract (`OUTPUT_CONTRACTS`, `gate-output.v1`). A blocking violation marks the
+  contract (`OUTPUT_CONTRACTS`, `gate-output.v4`). A blocking violation marks the
   run's artifacts `INVALID`, emits no handoff, and keeps the phase at review. A
   committed-but-`INVALID` upstream can never hand off downstream.
 - When an intermediate output is held, the review modal opens automatically.
@@ -180,7 +180,7 @@ The repository includes an end-to-end local workflow demo:
   `code`, `phase`, and `requestId`; workflow state banners such as
   `DEV output is INVALID` are status summaries and may not include a request id.
 - Agent I/O contract: the mock implements a small `run({task, context}) -> output`
-  contract (`agent-io.v1`) verified by a shared conformance suite, so a future
+  contract (`agent-io.v3`) verified by a shared conformance suite, so a future
   real agent must match the same output shape.
 - CI: `.github/workflows/ci.yml` runs `npm ci` -> prisma generate -> db push to
   an isolated CI database -> schema drift check (`prisma migrate diff
@@ -431,29 +431,6 @@ flows.
 
 ## 6. Run The Application
 
-### Option A: Docker Compose
-
-After creating the three service `.env` files:
-
-```powershell
-docker compose up --build
-```
-
-Compose overrides the backend's manual-run agent URL with
-`AGENTS_BASE_URL=http://agents:8001`, using the Docker service hostname.
-
-| Service | URL |
-| --- | --- |
-| Frontend | <http://localhost:5173> |
-| Backend health check | <http://localhost:3000/health> |
-| Agents API docs | <http://localhost:8001/docs> |
-
-Stop the stack:
-
-```powershell
-docker compose down
-```
-
 ### Option B: Run Each Service Manually
 
 Open three terminals from the repository root.
@@ -467,16 +444,16 @@ python main.py
 
 Terminal 2 - backend:
 
-```powershell
-Set-Location backend
-npm.cmd run dev
+```bash
+cd backend
+npm run dev
 ```
 
 Terminal 3 - frontend:
 
-```powershell
-Set-Location frontend
-npm.cmd run dev
+```bash
+cd frontend
+npm run dev
 ```
 
 Open <http://localhost:5173>.

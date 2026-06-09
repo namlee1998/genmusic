@@ -58,6 +58,7 @@ function questionPayload({ taskId, role, input = {}, options = {} }) {
     toolUseID: input.tool_use_id || options.toolUseID || null,
     questions,
     rawInput: input,
+    prompt: options.title || options.displayName || null,
     actions: ['submit_answer', 'cancel'],
   };
 }
@@ -70,6 +71,10 @@ function toolPayload({ taskId, role, toolName, input = {}, options = {}, decisio
     toolUseID: input.tool_use_id || options.toolUseID || null,
     toolName,
     toolInput: input,
+    // Compatibility fields used by the existing AIFA board.
+    tool: toolName,
+    file_path: inputPath(input) || null,
+    diff: input.diff || input.content || null,
     riskLevel: decision.category === 'shell' || decision.category === 'security' ? 'high' : 'medium',
     display: {
       command: input.command || null,
@@ -81,6 +86,60 @@ function toolPayload({ taskId, role, toolName, input = {}, options = {}, decisio
     category: decision.category,
     actions: ['approve', 'deny'],
   };
+}
+
+function normalizeQuestionAnswers(input, answers) {
+  if (answers && !Array.isArray(answers) && typeof answers === 'object') return answers;
+  const values = Array.isArray(answers) ? answers : (answers == null ? [] : [answers]);
+  const questions = Array.isArray(input.questions) ? input.questions : [];
+  return Object.fromEntries(questions.map((question, index) => [
+    question.question,
+    String(values[index] ?? values[0] ?? ''),
+  ]));
+}
+
+function defaultQuestionAnswers(input = {}) {
+  const questions = Array.isArray(input.questions) ? input.questions : [];
+  return Object.fromEntries(questions.map((question) => {
+    const options = Array.isArray(question.options) ? question.options : [];
+    const preferred = options.find((option) => /\brecommended\b/i.test(option.label || option.description || ''))
+      || options[0];
+    return [question.question, preferred?.label || 'Use your best judgment and continue.'];
+  }));
+}
+
+function interactiveGatesEnabled() {
+  return process.env.CLAUDE_CODE_INTERACTIVE_GATES === 'true';
+}
+
+async function handleNonInteractive(ctx) {
+  const { toolName, input, options, role, scope, audit } = ctx;
+  if (toolName === 'AskUserQuestion') {
+    const answers = defaultQuestionAnswers(input);
+    audit({ kind: 'GATE_AUTO', role, toolName, detail: 'question auto-answered in non-interactive mode', answers });
+    return {
+      behavior: 'allow',
+      updatedInput: { ...input, answers },
+      toolUseID: input.tool_use_id || options.toolUseID || undefined,
+    };
+  }
+
+  const readOnly = classifyReadOnly(toolName, input);
+  const decision = readOnly || riskClassifier.classifyAction(toolName, input, scope);
+  if (decision.tier === 'block') {
+    audit({ kind: 'GATE_BLOCK', role, toolName, detail: decision.reason, file: inputPath(input) || null, category: decision.category });
+    return { behavior: 'deny', message: decision.reason, toolUseID: input.tool_use_id || options.toolUseID || undefined };
+  }
+
+  audit({
+    kind: 'GATE_AUTO',
+    role,
+    toolName,
+    detail: `${decision.reason} (auto-allowed; interactive UI gates disabled)`,
+    file: inputPath(input) || null,
+    category: decision.category,
+  });
+  return { behavior: 'allow', updatedInput: input, toolUseID: input.tool_use_id || options.toolUseID || undefined };
 }
 
 async function waitForGate(taskId, gateRequest) {
@@ -105,7 +164,7 @@ async function handleQuestion(ctx) {
     timeoutMs: Number(process.env.CLARIFYING_QUESTION_TIMEOUT_MS) || undefined,
   });
   const result = await waitForGate(taskId, gate);
-  const answers = result.answers || result.updatedInput?.answers || [];
+  const answers = normalizeQuestionAnswers(input, result.answers || result.updatedInput?.answers || []);
   audit({
     kind: 'GATE_ANSWER',
     role,
@@ -192,6 +251,10 @@ async function dispatch({
   scope = {},
   audit = () => {},
 }) {
+  if (!interactiveGatesEnabled()) {
+    return handleNonInteractive({ toolName, input, options, taskId, projectId, role, scope, audit });
+  }
+
   if (toolName === 'AskUserQuestion') {
     return handleQuestion({ toolName, input, options, taskId, projectId, role, scope, audit });
   }
@@ -209,5 +272,9 @@ module.exports = {
     isPathEscape,
     questionPayload,
     toolPayload,
+    normalizeQuestionAnswers,
+    defaultQuestionAnswers,
+    interactiveGatesEnabled,
+    handleNonInteractive,
   },
 };

@@ -15,6 +15,8 @@ import { createProject } from '@/services/api/documentsApi';
 import {
   seedDemoBoard,
   getDemoBoard,
+  getDemoUxDoc,
+  retryDemoFlow,
   getWorkflowTimeline,
   getProjectArtifacts,
   uploadRepoFolder,
@@ -151,6 +153,7 @@ export default function AifaDemo() {
   const dirHandleRef = useRef<LocalDirectoryHandle | null>(null);
   const stagingProjectRef = useRef<string | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
+  const uxDocWrittenRef = useRef<Set<string>>(new Set()); // UX task ids already written to the folder
 
   const refetch = useCallback(async () => {
     try {
@@ -213,6 +216,7 @@ export default function AifaDemo() {
     if (!files.length) { setError('That folder has no uploadable files.'); return; }
     setError(null);
     setSavedFiles({});
+    uxDocWrittenRef.current.clear();
     setTimelineOpen({});
     setTimelines({});
     setUploading(true);
@@ -278,6 +282,42 @@ export default function AifaDemo() {
     return name;
   };
 
+  // When UX finishes, write its Markdown design (the Google login page) as a .md
+  // file into the opened folder — once per UX task. Falls back to a browser
+  // download when there is no writable folder handle (input-upload path).
+  const writeUxDocToFolder = useCallback(async (flow: BoardFlow) => {
+    const taskId = flow.card?.taskId;
+    if (!flow.projectId || !taskId || uxDocWrittenRef.current.has(taskId)) return;
+    uxDocWrittenRef.current.add(taskId); // mark first so polling doesn't re-enter
+    try {
+      const doc = await getDemoUxDoc(flow.projectId);
+      if (!doc?.markdown) { uxDocWrittenRef.current.delete(taskId); return; }
+      const name = `aifa-flow-${flow.flowNo}-${doc.fileName}`;
+      const dir = dirHandleRef.current;
+      if (dir) {
+        const handle = await dir.getFileHandle(name, { create: true });
+        const writable = await handle.createWritable();
+        await writable.write(new Blob([doc.markdown], { type: 'text/markdown' }));
+        await writable.close();
+      } else {
+        const url = URL.createObjectURL(new Blob([doc.markdown], { type: 'text/markdown' }));
+        const a = document.createElement('a');
+        a.href = url; a.download = name; a.click();
+        URL.revokeObjectURL(url);
+      }
+      setSavedFiles((s) => ({ ...s, [flow.flowNo]: name }));
+    } catch {
+      uxDocWrittenRef.current.delete(taskId); // allow a retry on the next poll
+    }
+  }, []);
+
+  // Auto-write the UX design doc the moment a flow parks at its UX review.
+  useEffect(() => {
+    for (const flow of board?.flows || []) {
+      if (flow.reviewStage === 'ux' && flow.card?.taskId) void writeUxDocToFolder(flow as BoardFlow);
+    }
+  }, [board, writeUxDocToFolder]);
+
   // Browser-download fallback for the combined report (no folder handle / re-grab).
   const downloadAndSave = async (flow: BoardFlow) => {
     if (!flow.projectId) return;
@@ -292,6 +332,19 @@ export default function AifaDemo() {
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || 'Download failed');
     }
+  };
+
+  const retryFlow = async (flow: BoardFlow) => {
+    if (!flow.projectId) return;
+    const key = `retry-${flow.flowNo}`;
+    mark(key, true);
+    try {
+      const res = await retryDemoFlow(flow.projectId);
+      if (!res.retried) setError(res.reason || 'Nothing to retry on this flow');
+      await refetch();
+    } catch (e: any) {
+      setError(e?.response?.data?.message || e?.message || 'Retry failed');
+    } finally { mark(key, false); }
   };
 
   const approveReview = async (flow: BoardFlow) => {
@@ -390,7 +443,10 @@ export default function AifaDemo() {
         if (!answer) return;
         await resolveApproval(gate.approvalId, { answers: [answer] });
       } else {
-        await resolveApproval(gate.approvalId, { action });
+        await resolveApproval(gate.approvalId, {
+          action,
+          ...(action === 'reject' ? { comment: 'Rejected by user from the live Claude Code gate.' } : {}),
+        });
       }
       setGateAnswers((current) => {
         const next = { ...current };
@@ -489,6 +545,7 @@ export default function AifaDemo() {
                 onApproveReview={approveReview}
                 onApproveRelease={approveRelease}
                 onRejectRelease={rejectRelease}
+                onRetry={retryFlow}
                 onDownload={(f) => downloadAndSave(f)}
                 onReviewArtifacts={openArtifactReview}
                 gateAnswers={gateAnswers}
@@ -617,7 +674,9 @@ function LiveGateCard({
     <div style={S.liveGateCard}>
       <span style={S.liveGateChip}>{isQuestion ? 'Claude question' : 'Claude tool approval'}</span>
       <div style={S.liveGateTitle}>
-        {isQuestion ? (question?.question || 'Claude needs your input') : `${gate.payload?.tool || 'Tool'} requested`}
+        {isQuestion
+          ? (question?.question || gate.payload?.display?.prompt || 'Claude needs your input')
+          : (gate.payload?.display?.prompt || `${gate.payload?.tool || gate.payload?.toolName || 'Tool'} requested`)}
       </div>
       {!isQuestion && (
         <>
@@ -664,7 +723,7 @@ function LiveGateCard({
 }
 
 function FlowColumn({
-  flow, busy, savedFile, timelineOpen, timeline, onApproveReview, onApproveRelease, onRejectRelease, onDownload, onToggleTimeline, onRequestChanges, onReviewArtifacts, gateAnswers, onGateAnswerChange, onResolveGate,
+  flow, busy, savedFile, timelineOpen, timeline, onApproveReview, onApproveRelease, onRejectRelease, onRetry, onDownload, onToggleTimeline, onRequestChanges, onReviewArtifacts, gateAnswers, onGateAnswerChange, onResolveGate,
 }: {
   flow: BoardFlow;
   busy: Record<string, boolean>;
@@ -675,6 +734,7 @@ function FlowColumn({
   onApproveReview: (f: BoardFlow) => void;
   onApproveRelease: (f: BoardFlow) => void;
   onRejectRelease: (f: BoardFlow) => void;
+  onRetry: (f: BoardFlow) => void;
   onDownload: (f: BoardFlow) => void;
   onToggleTimeline: (f: BoardFlow) => void;
   onRequestChanges: (f: BoardFlow) => void;
@@ -807,8 +867,15 @@ function FlowColumn({
                 <div style={S.failureHint}>
                   {failed.recoverable === false
                     ? 'This failure requires a code or configuration change before rerunning.'
-                    : 'Resolve the local Claude Code issue, then start the workflow again.'}
+                    : 'Re-run this agent from its approved upstream step — earlier stages are kept.'}
                 </div>
+                <button
+                  style={{ ...S.btnApprove, background: accent.solid, marginTop: 12 }}
+                  disabled={!!busy[`retry-${flow.flowNo}`] || !flow.projectId}
+                  onClick={() => onRetry(flow)}
+                >
+                  {busy[`retry-${flow.flowNo}`] ? '↻ Re-running…' : `↻ Retry ${failed.stage.toUpperCase()} Agent`}
+                </button>
               </div>
             ) : released ? (released === 'RELEASED' ? 'This workflow has been released.' : 'This release was rejected.')
               : `${flow.currentPhase || 'Working'} — the next agent is running…`}
