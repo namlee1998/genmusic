@@ -56,7 +56,12 @@ class SdlcController {
         user: req.user,
       });
 
-      return res.status(202).json({ task_id: task.id, status: task.status, type: task.type });
+      return res.status(202).json({ 
+        workflowId: task.projectId, 
+        task_id: task.id, 
+        status: task.status, 
+        type: task.type 
+      });
     } catch (err) { next(err); }
   }
 
@@ -224,6 +229,115 @@ class SdlcController {
       const gates = await SdlcWorkflowService.listPendingGates({ taskId: task_id || null, projectId: project_id || null });
       return res.json({ status: 'success', data: { pending: gates } });
     } catch (err) { next(err); }
+  }
+
+  // ─── V4 Pipeline & Stream ────────────────────────────────────────────────
+
+  async getPipelineStatus(req, res, next) {
+    try {
+      const { workflowId } = req.params;
+      const response = await SdlcWorkflowService.getPipelineResponse(workflowId, req.user);
+      return res.json({ status: 'success', data: response });
+    } catch (err) { next(err); }
+  }
+
+  async streamPipelineStatus(req, res, next) {
+    try {
+      const { workflowId } = req.params;
+
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders?.();
+
+      const sendEvent = (event, data, id = null) => {
+        if (id !== null) res.write(`id: ${id}\n`);
+        res.write(`event: ${event}\n`);
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      };
+
+      const cursorRaw = req.headers['last-event-id'] ?? req.query.after_sequence ?? 0;
+      let lastSeq = Number.isFinite(Number(cursorRaw)) ? Number(cursorRaw) : 0;
+
+      sendEvent('progress', {
+        step: 'connected',
+        resumedFrom: lastSeq,
+        log: 'Connected to SDLC pipeline stream...',
+      });
+
+      const heartbeatInterval = setInterval(() => {
+        res.write(': heartbeat\n\n');
+      }, 15000);
+
+      // We'll poll the overall PipelineResponse every few seconds
+      let pollInterval;
+      
+      const stopAll = () => {
+        clearInterval(pollInterval);
+        clearInterval(heartbeatInterval);
+      };
+
+      let lastStatus = null;
+      const seenGates = new Set();
+
+      pollInterval = setInterval(async () => {
+        try {
+          const pipeline = await SdlcWorkflowService.getPipelineResponse(workflowId, req.user);
+          
+          if (!pipeline) {
+            sendEvent('error', { message: 'Pipeline not found' });
+            stopAll(); res.end(); return;
+          }
+
+          // Emit new gates
+          for (const gate of pipeline.pendingGates || []) {
+            if (seenGates.has(gate.id)) continue;
+            seenGates.add(gate.id);
+            sendEvent('gate_pending', { gate });
+          }
+
+          // Check if resolved
+          for (const seen of seenGates) {
+            if (!pipeline.pendingGates.some(g => g.id === seen)) {
+              seenGates.delete(seen);
+              sendEvent('gate_resolved', { gateId: seen });
+            }
+          }
+
+          if (pipeline.status === 'qa_complete') {
+            sendEvent('completed', { qaResult: pipeline.qaResult });
+            stopAll(); res.end(); return;
+          }
+
+          if (pipeline.status === 'failed') {
+            sendEvent('error', { message: 'Pipeline failed' });
+            stopAll(); res.end(); return;
+          }
+
+          // Avoid spamming progress if unchanged, but for simplicity here we emit
+          if (lastStatus !== pipeline.status) {
+             sendEvent('progress', {
+               status: pipeline.status,
+               pipelinePhases: pipeline.pipelinePhases,
+               auditLog: pipeline.auditLog
+             });
+             lastStatus = pipeline.status;
+          }
+
+        } catch (error) {
+          sendEvent('error', { message: error.message });
+          stopAll();
+          res.end();
+        }
+      }, 2000);
+
+      req.on('close', () => {
+        stopAll();
+        res.end();
+      });
+    } catch (err) {
+      next(err);
+    }
   }
 
   // ─── Status & Data ───────────────────────────────────────────────────────

@@ -38,7 +38,7 @@ Given: PRD, Acceptance Criteria (AC) list, UX Spec, Implementation Plan, Code Di
    - expected_result must describe EXACTLY what happens — not "success message appears" but "Toast shows 'Login successful' and user is redirected to /dashboard"
    - precondition must list full app state: auth state, screen, data, feature flags
    - test_data must use LITERAL values (not "a valid email" but "user@example.com")
-   - If exact text is unknown from documents: use "TODO: confirm exact text with dev"
+   - If exact text is unknown from documents: use "PENDING_CLARIFICATION: confirm exact text with dev"
 
 5. REAL BUG COVERAGE — think about these real failure scenarios:
    - What if the network call fails? (timeout, 500 error)
@@ -77,35 +77,15 @@ covered=false only when zero test cases exist for that AC.
 
 Output ONLY valid JSON. No markdown fences."""
 
-def _get_llm(model_config=None):
-    if model_config is None:
-        model_config = {}
-        
-    model_name = model_config.get("model") or os.getenv("DEFAULT_MODEL", "deepseek-v4-pro")
-    temp = model_config.get("temperature", 0.1)
-    max_tokens = model_config.get("max_tokens", 8192)
-    thinking = model_config.get("thinking", False)
-    
-    kwargs = {
-        "model": model_name,
-        "temperature": temp,
-        "max_tokens": max_tokens,
-        "api_key": os.getenv("OPENAI_API_KEY", ""),
-        "base_url": os.getenv("OPENAI_API_BASE") or None
-    }
-    
-    if thinking:
-        kwargs["model_kwargs"] = {"extra_body": {"thinking": True}}
-        
-    return ChatOpenAI(**kwargs)
+from src.utils.llm_factory import get_llm as _get_llm
 
 def _parse(raw):
     text = raw.strip()
     fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
     if fence: text = fence.group(1).strip()
     try: return json.loads(text)
-    except: return {"test_cases":[], "qa_report": raw, "ac_coverage_matrix":[], "pass_count":0,
-                    "fail_count":0, "blocker_count":0, "release_recommendation":"HOLD", "summary":""}
+    except Exception as e:
+        raise ValueError(f"Agent generated invalid JSON: {str(e)}\nRaw output: {raw}")
 
 def _build_qa_content(input_data: QAAgentInput) -> str:
     """Build the human message content for QA Agent from all input artifacts."""

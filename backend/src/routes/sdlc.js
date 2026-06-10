@@ -43,6 +43,10 @@ router.get('/tasks/:task_id',              SdlcController.getTaskStatus.bind(Sdl
 router.get('/tasks/:task_id/events',       SdlcController.getTaskEvents.bind(SdlcController));
 router.get('/status/:task_id',             SdlcController.streamStatus.bind(SdlcController));   // SSE
 
+// ── V4 Pipeline ──────────────────────────────────────────────────────────
+router.get('/pipeline/:workflowId',        SdlcController.getPipelineStatus.bind(SdlcController));
+router.get('/stream/:workflowId',          SdlcController.streamPipelineStatus.bind(SdlcController));
+
 // ── Workflow-level views ──────────────────────────────────────────────────
 // GET /api/v1/sdlc/workflow-status?project_id=xxx
 router.get('/workflow-status',                        SdlcController.getWorkflowStatus.bind(SdlcController));
