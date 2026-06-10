@@ -45,9 +45,8 @@ def _parse_output(raw: str) -> dict:
         text = fence.group(1).strip()
     try:
         return json.loads(text)
-    except Exception:
-        logger.warning("[UXAgent] Failed to parse JSON")
-        return {"ux_spec": raw, "user_flow": "", "wireframe_spec": "", "component_inventory": "", "screens": [], "summary": ""}
+    except Exception as e:
+        raise ValueError(f"Agent generated invalid JSON: {str(e)}\nRaw output: {raw}")
 
 async def run_ux_agent(
     input_data: UXAgentInput,

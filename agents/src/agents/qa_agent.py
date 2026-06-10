@@ -38,7 +38,7 @@ Given: PRD, Acceptance Criteria (AC) list, UX Spec, Implementation Plan, Code Di
    - expected_result must describe EXACTLY what happens — not "success message appears" but "Toast shows 'Login successful' and user is redirected to /dashboard"
    - precondition must list full app state: auth state, screen, data, feature flags
    - test_data must use LITERAL values (not "a valid email" but "user@example.com")
-   - If exact text is unknown from documents: use "TODO: confirm exact text with dev"
+   - If exact text is unknown from documents: use "PENDING_CLARIFICATION: confirm exact text with dev"
 
 5. REAL BUG COVERAGE — think about these real failure scenarios:
    - What if the network call fails? (timeout, 500 error)
@@ -84,8 +84,8 @@ def _parse(raw):
     fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
     if fence: text = fence.group(1).strip()
     try: return json.loads(text)
-    except: return {"test_cases":[], "qa_report": raw, "ac_coverage_matrix":[], "pass_count":0,
-                    "fail_count":0, "blocker_count":0, "release_recommendation":"HOLD", "summary":""}
+    except Exception as e:
+        raise ValueError(f"Agent generated invalid JSON: {str(e)}\nRaw output: {raw}")
 
 def _build_qa_content(input_data: QAAgentInput) -> str:
     """Build the human message content for QA Agent from all input artifacts."""

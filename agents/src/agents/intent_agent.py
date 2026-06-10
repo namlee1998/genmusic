@@ -37,9 +37,8 @@ def _parse_intent_output(raw: str) -> dict:
         text = fence.group(1).strip()
     try:
         return json.loads(text)
-    except Exception:
-        logger.warning("[IntentAgent] Failed to parse JSON, returning raw as assumptions")
-        return {"intent_assumptions": raw, "clarifying_questions": [], "summary": ""}
+    except Exception as e:
+        raise ValueError(f"Agent generated invalid JSON: {str(e)}\nRaw output: {raw}")
 
 async def run_intent_agent(
     input_data: IntentAgentInput,

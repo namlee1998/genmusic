@@ -112,7 +112,8 @@ def _parse(raw):
     fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
     if fence: text = fence.group(1).strip()
     try: return json.loads(text)
-    except: return {"architecture_ledger_update": "", "implementation_plan": raw, "mock_code_diff": "", "changed_files": [], "risk_assessment": "", "risk_level": "MEDIUM", "summary": ""}
+    except Exception as e:
+        raise ValueError(f"Agent generated invalid JSON: {str(e)}\nRaw output: {raw}")
 
 async def run_dev_agent(input_data: DEVAgentInput, model_config=None, trace_context=None) -> DEVAgentOutput:
     llm = _get_llm(model_config)

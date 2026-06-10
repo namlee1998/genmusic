@@ -60,10 +60,8 @@ def _parse_po_output(raw: str) -> dict:
         text = fence.group(1).strip()
     try:
         return json.loads(text)
-    except Exception:
-        # Best-effort: return minimal structure
-        logger.warning("[POAgent] Failed to parse JSON, returning raw as prd")
-        return {"prd": raw, "user_stories": [], "acceptance_criteria": [], "scope": "", "out_of_scope": "", "summary": ""}
+    except Exception as e:
+        raise ValueError(f"Agent generated invalid JSON: {str(e)}\nRaw output: {raw}")
 
 async def run_po_agent(
     input_data: POAgentInput,
