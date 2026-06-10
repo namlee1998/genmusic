@@ -1,5 +1,8 @@
-"""
-QA Agent — Test Cases, QA Report, AC Coverage Matrix from all upstream artifacts.
+"""QA worker: turn approved upstream evidence into test and release artifacts.
+
+Beginner reading guide: _build_qa_content limits and organizes upstream context,
+the model produces structured QA evidence, and the Node backend applies the
+authoritative quality/release gates.
 """
 from __future__ import annotations
 import json, logging, os, re

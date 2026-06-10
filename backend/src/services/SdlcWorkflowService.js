@@ -1,3 +1,15 @@
+// Central SDLC orchestrator.
+//
+// Beginner reading guide:
+// 1. runPO/UX/DEV/QAAgent create stage tasks and assemble upstream context.
+// 2. _runAgent selects mock, Claude Agent SDK, or Python/LangChain execution.
+// 3. _saveAgentData persists output and validates gate-output.v4.
+// 4. _recordApprovedHandoff and _startNextAgentIfAvailable advance the chain.
+// 5. getWorkflowStatus derives the user-facing phase from persisted data.
+//
+// Keep transport logic in SdlcController and low-level lifecycle/gate mechanics
+// in taskLifecycleService, taskWorkerService, and gateBridge.
+
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
 const { Task, AgentArtifact, HitlDecision, AgentEvent } = require('../models');
@@ -13,7 +25,6 @@ const path = require('path');
 const { ApiError, ERROR_CODES } = require('../middleware/errorHandler');
 const { assertOutputConforms, hasContent } = require('./agentContract');
 const repoService = require('./repoService');
-const riskClassifier = require('./riskClassifier');
 const gateBridge = require('./gateBridge');
 const claudeCodeRunner = require('../agents/claudeCodeRunner');
 const mockClaudeCodeRunner = require('../agents/mockClaudeCodeRunner');
@@ -21,11 +32,12 @@ const claudePermissionDispatcher = require('../agents/claudePermissionDispatcher
 const workflowReport = require('./workflowReport');
 const logger = require('../config/logger');
 
-// T2.3 — in-memory onGate audit (taskId -> entries[]). Single-process demo store;
-// surfaced through getAuditTrail so the UI sees auto/approval/block events.
+// Hot in-memory cache for onGate audit entries. New entries are also persisted
+// as AgentEvent; this cache mainly supports the current process efficiently.
 const GATE_AUDIT = new Map();
 
-// AIFA v3 execution-path flags (plan T0.2). Defaults keep the old behaviour.
+// Execution adapter and concurrency switches. Non-Claude execution remains the
+// default for backward-compatible local environments.
 const EXECUTION_PATH = () => (process.env.EXECUTION_PATH || 'langchain');
 const MAX_PARALLEL_WORKFLOWS = () => Math.max(1, Number(process.env.MAX_PARALLEL_WORKFLOWS) || 3);
 
@@ -120,7 +132,7 @@ const AUTO_APPROVE_CONFIDENCE = GATE_CONFIG.AUTO_APPROVE_CONFIDENCE;
 // Each rule: { rule, severity, check(out, task) -> bool, detail(out)|string,
 //              when?(out) -> bool }  (no Ajv — predicates stay hand-written).
 // ---------------------------------------------------------------------------
-// v2 (T5.1): added the layer-2 semantic `ac_testable` BLOCKER to PO/intent.
+// Bump this version whenever the rule set or required output behavior changes.
 const OUTPUT_CONTRACT_VERSION = 'gate-output.v4';
 
 const _acList = (o) => (Array.isArray(o.acceptance_criteria) ? o.acceptance_criteria : []);
@@ -1923,70 +1935,6 @@ class SdlcWorkflowService {
     });
   }
 
-  _makeOnGateLegacyUnused(taskId, role, { projectId = null, scope = {} } = {}) {
-    return async (toolName, input = {}) => {
-      // Type B — PO clarification question.
-      if (toolName === 'AskUserQuestion') {
-        this._recordGateAudit(taskId, { kind: 'GATE_QUESTION', role, detail: 'asked clarifying questions', toolName });
-        const { approvalId, promise, ready } = gateBridge.requestGate({
-          taskId, projectId, role, kind: 'question',
-          payload: { questions: input.questions || [] },
-        });
-        taskWorker.pauseBudget(taskId); // human gate wait does not consume the run budget
-        let result;
-        try {
-          await ready;
-          result = await promise;
-        } finally {
-          taskWorker.resumeBudget(taskId);
-        }
-        const answers = result.answers || result.updatedInput?.answers || [];
-        this._recordGateAudit(taskId, { kind: 'GATE_ANSWER', role, approvalId, detail: result.timedOut ? 'defaults used (timeout)' : 'human answered', answers });
-        return { behavior: 'allow', updatedInput: { questions: input.questions || [], answers, timedOut: !!result.timedOut } };
-      }
-
-      // Type A — file write/edit. Classify by risk.
-      const decision = riskClassifier.classifyAction(toolName, input, scope);
-      if (decision.tier === 'auto') {
-        this._recordGateAudit(taskId, { kind: 'GATE_AUTO', role, toolName, detail: decision.reason, file: input.file_path || null, category: decision.category });
-        return { behavior: 'allow', auto: true };
-      }
-      if (decision.tier === 'block') {
-        this._recordGateAudit(taskId, { kind: 'GATE_BLOCK', role, toolName, detail: decision.reason, file: input.file_path || null, category: decision.category });
-        return { behavior: 'deny', message: decision.reason };
-      }
-      // approval — pause for a human.
-      this._recordGateAudit(taskId, { kind: 'GATE_REQUEST', role, toolName, detail: decision.reason, file: input.file_path || null, category: decision.category });
-      const { approvalId, promise, ready } = gateBridge.requestGate({
-        taskId, projectId, role, kind: 'tool',
-        payload: {
-          tool: toolName,
-          file_path: input.file_path || null,
-          diff: input.diff || input.content || null,
-          reason: decision.reason,
-          category: decision.category,
-        },
-      });
-      taskWorker.pauseBudget(taskId); // human gate wait does not consume the run budget
-      let result;
-      try {
-        await ready;
-        result = await promise;
-      } finally {
-        taskWorker.resumeBudget(taskId);
-      }
-      const approved = result.action === 'approve' && !result.timedOut;
-      this._recordGateAudit(taskId, {
-        kind: 'GATE_DECISION', role, approvalId, toolName,
-        detail: approved ? 'approved' : `denied${result.timedOut ? ' (timeout)' : ''}`,
-        comment: result.comment || null, file: input.file_path || null,
-      });
-      return approved
-        ? { behavior: 'allow' }
-        : { behavior: 'deny', message: result.comment || 'Rejected by reviewer' };
-    };
-  }
-
   /** Append an onGate audit entry (in-memory, surfaced by getAuditTrail). */
   _recordGateAudit(taskId, entry) {
     const list = GATE_AUDIT.get(taskId) || [];
@@ -2362,8 +2310,8 @@ class SdlcWorkflowService {
 
     const executionPath = EXECUTION_PATH();
 
-    // T3.4 — claude-code path (mock): drive the run through onGate, then build
-    // the (validated) output with the existing builder. Opt-in via EXECUTION_PATH.
+    // Both mock and real Claude SDK runners use the same onGate and validated
+    // persistence path. Opt in with EXECUTION_PATH=claude-code.
     if (executionPath === 'claude-code') {
       try {
         const completedData = await this._runClaudeCodePath(task, context);

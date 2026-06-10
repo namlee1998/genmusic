@@ -1,17 +1,11 @@
-// AIFA Demo Board — provisions 3 independent happy_path workflows, each PARKED at
-// a different agent's review (Flow 1 → PO, Flow 2 → DEV, Flow 3 → QA), so opening
-// the product shows the multi-agent approval board immediately.
+// Backend view-model/orchestrator for the primary /aifa board.
 //
-// Design (FE mockup + 1-week roadmap):
-//  - All 3 flows run the SAME feature ("Add Google login") through the real engine.
-//  - PO & DEV are forced to STRICT_MANUAL (svc.setReviewHolds) so every flow parks
-//    at a UNIFORM stage review, never a raw diff/question. A background gate drainer
-//    silently resolves the in-execution gates (PO clarifying question, DEV tool
-//    writes) so the human only ever sees the uniform "needs your approval" card.
-//  - Seeding drives each flow to its target stage then stops; the human then walks
-//    each flow review-by-review to the final release.
-//  - Board membership persists to a JSON file so a page refresh / backend restart
-//    re-attaches without re-seeding. Parked state itself is DB-backed (task review).
+// Beginner reading guide:
+// - real_single mode exposes one interactive workflow and its live gates.
+// - three_flow mode stages separate PO/DEV/QA review examples and auto-drains
+//   in-execution gates so reviewers see uniform stage cards.
+// - Board membership persists in workspace/demo-board.json; task/review state
+//   remains database-backed and is rebuilt through SdlcWorkflowService.
 
 const fs = require('fs');
 const fsp = require('fs').promises;

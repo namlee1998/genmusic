@@ -1,3 +1,9 @@
+// Backend composition root.
+//
+// Beginner reading guide: this file wires middleware/routes and performs boot
+// recovery. Business workflow logic belongs in SdlcWorkflowService, while task
+// lifecycle and gate recovery belong to their dedicated services.
+
 const express = require('express');
 const cors = require('cors');
 const { PORT, NODE_ENV, FRONTEND_URL } = require('./config/environment');
@@ -51,7 +57,7 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// I2: assign a request id before anything else so logs + errors can correlate.
+// Assign a request id before request logging/routes so logs and errors correlate.
 app.use(requestContextMiddleware);
 
 if (NODE_ENV === 'development') {
@@ -81,15 +87,13 @@ const startServer = async () => {
       if (interrupted.count > 0) {
         console.warn(`[GateBridge] Marked ${interrupted.count} orphaned pending gate(s) as interrupted.`);
       }
-      // DMO-001: reclaim tasks left `running` by a crashed/restarted process so
-      // they don't hang forever, then start the periodic stale-task sweeper.
+      // Reclaim tasks left running by a crashed process, then keep sweeping.
       const reclaimed = await taskWorker.sweepStale({ reason: 'orphaned by backend restart' });
       if (reclaimed > 0) {
         console.warn(`[TaskWorker] Reclaimed ${reclaimed} orphaned running task(s) on boot.`);
       }
       taskWorker.startSweeper();
-      // DMO-003: re-dispatch tasks stuck at an interrupted gate so a restart does
-      // not force the user to re-run the workflow (only the interrupted stage re-runs).
+      // Re-dispatch only stages whose live gate continuation was lost on restart.
       const resumed = await SdlcWorkflowService.recoverInterruptedGates();
       if (resumed > 0) {
         console.warn(`[Recovery] Re-dispatched ${resumed} interrupted-gate stage(s).`);

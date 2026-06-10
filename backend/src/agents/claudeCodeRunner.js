@@ -1,4 +1,8 @@
-// Real Claude Code runner for AIFA — Claude Agent SDK adapter.
+// Real local Claude Agent SDK execution adapter.
+//
+// Beginner reading guide: runAgent() builds the role prompt, calls SDK query(),
+// sends permission callbacks through AIFA onGate, parses the final JSON, and
+// enforces agent-io.v3 before returning to SdlcWorkflowService.
 //
 // Drives the LOCAL Claude Code (via @anthropic-ai/claude-agent-sdk `query()`,
 // using your local `claude login` — no ANTHROPIC_API_KEY required) and routes
@@ -8,7 +12,7 @@
 // So a real run behaves like normal Claude Code, but its prompts render on the
 // AIFA board instead of a terminal. Enabled when USE_MOCK_CLAUDE_CODE=false.
 //
-// Phase-0 spike findings baked in:
+// Runtime constraints handled by this adapter:
 //   * canUseTool fires for Write/Edit/AskUserQuestion; read-only Bash (pwd/ls)
 //     can auto-run without hitting canUseTool — that's fine, AIFA only needs to
 //     gate writes + questions.

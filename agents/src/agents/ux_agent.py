@@ -1,6 +1,7 @@
-"""
-UX Agent — Generates UX Spec, User Flow, Wireframe Spec and Component Inventory
-from approved PRD + User Stories.
+"""UX worker: turn approved product artifacts into design artifacts.
+
+Beginner reading guide: this module owns prompt/model/parsing concerns only.
+The Node orchestrator supplies approved upstream context and controls handoff.
 """
 from __future__ import annotations
 import json

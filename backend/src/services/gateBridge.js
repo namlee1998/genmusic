@@ -1,4 +1,11 @@
-// AIFA PHASE 2 — gateBridge (T2.2).
+// Bridge between a live agent permission wait and persisted human approval.
+//
+// Beginner reading guide:
+// - requestGate() persists PendingGate, moves the Task to awaiting_gate, and
+//   returns an in-memory Promise awaited by the running agent.
+// - resolveGate() resolves exactly once, persists the decision, and resumes Task.
+// - after restart the Promise is gone; server boot marks old gates interrupted
+//   and SdlcWorkflowService re-dispatches the affected stage.
 //
 // In-memory registry of pending HITL gates. The claude-code runner calls
 // requestGate() and AWAITS the returned promise; the HTTP approvals endpoint

@@ -1,18 +1,15 @@
-// I4: the small, explicit agent I/O contract.
+// Small, explicit agent I/O boundary shared by every execution adapter.
 //
-// An agent (mock OR real) is anything that implements:
-//     run({ task, context }) -> Promise<output>
-// where `output` is a plain object containing at least the role's required
-// output keys below. Today the only implementation is the mock builder
-// (`SdlcWorkflowService._buildMockOutput`); when a real agent is wired, it must
-// produce the same shape and is checked by the same conformance suite
-// (tests/integration/agent-contract.test.js) — so divergence is caught at the
-// boundary instead of mid-pipeline.
+// Beginner reading guide: REQUIRED_OUTPUT_KEYS is the minimum shape accepted
+// from deterministic mock output, the real Claude Agent SDK runner, and the
+// Python/LangChain service. Detailed semantic/risk rules live in
+// SdlcWorkflowService.OUTPUT_CONTRACTS (gate-output.v4).
 //
-// Deliberately tiny: this is the minimal handoff shape, NOT a full schema (the
-// richer per-field validation lives in OUTPUT_CONTRACTS / _validateGateOutput).
-// Do not grow this into a 6-connector abstraction until a real second
-// implementation exists and the real pattern is visible.
+// An adapter returns a plain object containing at least the role's required
+// output keys below. tests/integration/agent-contract.test.js catches drift at
+// this boundary before incomplete output reaches persistence or downstream.
+//
+// Keep this contract deliberately small. Do not duplicate richer gate rules.
 
 const AGENT_CONTRACT_VERSION = 'agent-io.v3';
 

@@ -1,11 +1,11 @@
-// AIFA — Multi-Agent Workflows board.
+// Primary /aifa workflow board.
 //
-// The user opens a cloned-repo folder; AIFA spins up three independent workflows
-// on that repo, each PARKED at a different agent's review (Flow 1 → PO, Flow 2 →
-// DEV, Flow 3 → QA). Every flow is then walked review-by-review to the final
-// release; on release the combined run report (4 agents + audit trail) is written
-// back into the opened folder as a distinct file per flow. Audit trail is also
-// collected in the system but intentionally hidden from this view.
+// Beginner reading guide:
+// - refetch() polls the backend board view-model every 2.5 seconds.
+// - uploadAndSeed() copies the selected folder to the backend and starts a board.
+// - review/release handlers call sdlcApi and then refresh the board.
+// - real_single mode shows one interactive run; staged demo mode can show three
+//   independent review flows.
 //
 // Self-contained inline styles (light theme) so the board never collides with
 // the dashboard CSS. Route: /aifa.

@@ -1,3 +1,10 @@
+// Typed frontend boundary for /api/v1/sdlc.
+//
+// Beginner reading guide: this file contains transport helpers only. Components
+// call these functions; backend workflow behavior lives in SdlcWorkflowService.
+// The primary /aifa UI polls getDemoBoard(), while subscribeTaskSSE remains
+// available for task-level clients and the legacy dashboard.
+
 import api, { getBaseURL } from './client';
 import { getStoredAuthSession } from './authStorage';
 
@@ -79,7 +86,7 @@ export const runQAAgent = (sourceTaskId: string, feedbackPrompt = '') =>
 export const submitGateDecision = (taskId: string, payload: GateDecisionPayload) =>
   api.post(`${BASE}/tasks/${taskId}/gate-decision`, payload).then((r) => r.data);
 
-// Structured HITL decision (plan section 2.3 / 2.8) — idempotent, optimistic-locked.
+// Structured stage-review decision: idempotent and optimistic-locked.
 export interface StructuredDecisionBody {
   decision_id: string;
   base_output_version: number;
@@ -117,7 +124,7 @@ export const submitReleaseDecision = (
 export const getAuditTrail = (projectId: string) =>
   api.get(`${BASE}/audit-trail/${projectId}`).then((r) => r.data.data);
 
-// ── AIFA v3: repo-aware workflow start + onGate approvals (T1.4 / T2.4) ────
+// ── Repo-aware workflow start and live onGate approvals ────────────────────
 
 /**
  * Start a repo-aware, PO-first workflow (applies the 429 cap).
@@ -219,7 +226,7 @@ export interface MockScenarioState {
 export const getMockScenario = (): Promise<MockScenarioState> =>
   api.get(`${BASE}/dev/mock-scenario`).then((r) => r.data.data);
 
-// ── Demo board: 3 independent flows parked at PO / DEV / QA ────────────────
+// ── Primary /aifa board: real_single or staged three_flow mode ─────────────
 
 export interface BoardCard {
   label: string;

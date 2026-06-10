@@ -1,13 +1,14 @@
-// AIFA PHASE 1 — repo input & clone (mặt nối đầu vào).
+// Repository workspace and git boundary.
+//
+// Beginner reading guide: this service imports/clones a repo into an isolated
+// project workspace, creates a working branch, captures commit/diff evidence,
+// and enforces path/secret safety. It never executes scripts from uploaded repos.
 //
 // Clone a repo into an isolated per-project workspace, cut a working branch,
 // commit + diff agent changes, enforce repo safety (no secret reads, no script
 // execution), and clean the workspace up when a workflow ends.
 //
-// NOTE: the plan calls for `simple-git`, but it cannot be installed in this
-// environment (TLS cert error). We use the git CLI via child_process instead.
-// The public interface mirrors what the plan describes so swapping to simple-git
-// later is a localised change.
+// Git operations use execFile with an argument array, avoiding shell expansion.
 
 const { execFile } = require('child_process');
 const fs = require('fs/promises');
