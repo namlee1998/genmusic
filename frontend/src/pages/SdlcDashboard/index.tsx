@@ -16,21 +16,23 @@ export default function SdlcDashboard() {
     status,
     error,
     pollStatus,
-    workflowId
+    workflowId,
+    cleanupConnections
   } = useSdlcStore();
 
   const [activeDetailType, setActiveDetailType] = useState<'prd' | 'ux_spec' | 'code_diff' | 'qa_report' | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const highlightGate = searchParams.get('highlightGate');
 
-  // Poll status occasionally as a robust fallback to SSE
+  // Ensure polling and SSE are cleaned up when the dashboard unmounts
+  useEffect(() => {
+    return () => cleanupConnections();
+  }, [cleanupConnections]);
+
+  // Initial poll to ensure state is fresh on mount
   useEffect(() => {
     if (workflowId && status !== 'idle' && status !== 'failed') {
       void pollStatus();
-      const interval = window.setInterval(() => {
-        void pollStatus();
-      }, 5000);
-      return () => window.clearInterval(interval);
     }
   }, [workflowId, status, pollStatus]);
 

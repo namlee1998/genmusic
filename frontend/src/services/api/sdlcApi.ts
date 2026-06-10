@@ -109,8 +109,9 @@ export const subscribeWorkflowSSEReal = (
   }
 ): AbortController => {
   const abort = new AbortController();
+  let retryCount = 0;
 
-  (async () => {
+  const connect = async () => {
     try {
       const session = getStoredAuthSession();
       const headers: Record<string, string> = {};
@@ -129,8 +130,9 @@ export const subscribeWorkflowSSEReal = (
       const decoder = new TextDecoder();
       let buffer = '';
       let currentEvent: string | null = null;
+      retryCount = 0; // Reset retry count on successful connection
 
-      while (true) {
+      while (!abort.signal.aborted) {
         const { value, done } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
@@ -154,8 +156,15 @@ export const subscribeWorkflowSSEReal = (
         handlers.onError?.(err);
       }
     }
-  })();
 
+    if (!abort.signal.aborted) {
+      const delay = Math.min(1000 * Math.pow(2, retryCount), 10000);
+      retryCount++;
+      setTimeout(connect, delay);
+    }
+  };
+
+  connect();
   return abort;
 };
 

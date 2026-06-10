@@ -50,16 +50,7 @@ Output ONLY valid JSON with keys: prd, user_stories, acceptance_criteria, scope,
 No extra text outside the JSON block.
 """
 
-def _get_llm(model_config: dict | None = None) -> ChatOpenAI:
-    model_config = model_config or {}
-    model_name = model_config.get("model") or os.getenv("DEFAULT_MODEL", "gpt-4o-mini")
-    return ChatOpenAI(
-        model=model_name,
-        temperature=model_config.get("temperature", 0.2),
-        max_tokens=model_config.get("max_tokens", 8192),
-        api_key=os.getenv("OPENAI_API_KEY", ""),
-        base_url=os.getenv("OPENAI_API_BASE") or None,
-    )
+from src.utils.llm_factory import get_llm as _get_llm
 
 def _parse_po_output(raw: str) -> dict:
     """Extract JSON from LLM output, stripping markdown fences."""

@@ -163,6 +163,7 @@ export interface SdlcState {
   pollStatus: () => Promise<void>;
   setError: (msg: string | null) => void;
   resetState: () => void;
+  cleanupConnections: () => void;
 
   // ── Backward Compatibility Properties/Actions (Legacy mapping) ────────
   projectId: string | null;
@@ -265,6 +266,7 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
     status: 'idle',
     isLoading: false,
     error: null,
+    cleanupConnections,
     pendingGates: [],
     gateHistory: [],
     auditLog: [],

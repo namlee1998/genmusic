@@ -1791,6 +1791,99 @@ class SdlcWorkflowService {
   }
 
   // =========================================================================
+  // V4 Pipeline Response API
+  // =========================================================================
+
+  /**
+   * Fetches the workflow status and maps it to the PipelineResponse format
+   * expected by the v4 SDLC Dashboard frontend.
+   */
+  async getPipelineResponse(projectId, user) {
+    const legacyStatus = await this.getWorkflowStatus(projectId, user);
+    
+    const tasks = await Task.findByProjectId(projectId);
+    const { poTask, qaTask } = this._selectCurrentTaskChain(tasks);
+    const skipsUx = this._routeSkipsUx(poTask);
+
+    // Determine overall status
+    let overallStatus = 'idle';
+    if (qaTask?.status === 'completed' || legacyStatus.releaseGate?.status === 'released') {
+      overallStatus = 'qa_complete';
+    } else if (legacyStatus.currentPhase !== 'draft') {
+      if (legacyStatus.currentPhase.endsWith('_REVIEW')) overallStatus = 'awaiting_approval';
+      else if (legacyStatus.currentPhase.endsWith('_RUNNING')) overallStatus = legacyStatus.currentPhase.toLowerCase();
+      else if (legacyStatus.currentPhase === 'QA_FAILED') overallStatus = 'failed';
+      else overallStatus = legacyStatus.currentPhase.toLowerCase();
+    }
+
+    const toPhaseStatus = (agentName, phaseData, isSkipped) => {
+      if (isSkipped && !phaseData) return { agent: agentName, status: 'skipped' };
+      if (!phaseData) return { agent: agentName, status: 'pending' };
+      let status = phaseData.status; // pending, running, completed, failed
+      if (phaseData.awaitingReview) status = 'gate_pending';
+      return {
+        agent: agentName,
+        status,
+        awaitingReview: phaseData.awaitingReview,
+        invalid: phaseData.invalid
+      };
+    };
+
+    const pipelinePhases = [
+      toPhaseStatus('PO', legacyStatus.phases.po, false),
+      toPhaseStatus('UX', legacyStatus.phases.ux, skipsUx),
+      toPhaseStatus('DEV', legacyStatus.phases.dev, false),
+      toPhaseStatus('QA', legacyStatus.phases.qa, false),
+    ];
+
+    const pendingRaw = await this.listPendingGates({ projectId });
+    const pendingGates = pendingRaw.map(g => ({
+      id: g.approvalId,
+      type: g.kind === 'question' ? 'PO_CLARIFY' : 'DEV_FILE_GATE',
+      status: g.status === 'interrupted' ? 'PENDING' : 'PENDING',
+      payload: g.payload || {},
+      createdAt: g.createdAt
+    }));
+
+    const auditEvents = await this.getAuditTrail(projectId, user);
+    const auditLog = auditEvents.map(ev => ({
+      timestamp: ev.timestamp || ev.createdAt,
+      actor: ev.actor || (ev.agent ? ev.agent.replace('-agent', '').toUpperCase() : 'SYSTEM'),
+      action: ev.action,
+      status: ev.severity === 'ERROR' || ev.type === 'failure' ? 'error' : (ev.severity === 'WARNING' ? 'warning' : 'ok')
+    }));
+
+    let qaResult = null;
+    if (qaTask?.result) {
+      qaResult = {
+        status: qaTask.result.gateRecommendation === 'PASS' ? 'passed' : 'failed',
+        coverage: qaTask.result.qa_report?.coverage || 100,
+        blockers: qaTask.result.blocker_count || 0,
+        warnings: 0,
+        reportUrl: `/api/v1/sdlc/projects/${projectId}/release-files/qa-report.md`,
+        commitSha: 'N/A'
+      };
+    }
+
+    return {
+      workflowId: projectId,
+      status: overallStatus,
+      routeType: skipsUx ? 'BACKEND' : 'FULLSTACK',
+      pipelinePhases,
+      pendingGates,
+      auditLog,
+      qaResult,
+      releaseStatus: legacyStatus.releaseGate?.status || 'pending',
+      repoInfo: {
+        techStack: ['Detected from code'],
+        fileCount: 0,
+        components: []
+      }
+    };
+  }
+
+
+  // =========================================================================
   // Internals
   // =========================================================================
 

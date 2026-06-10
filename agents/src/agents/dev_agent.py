@@ -105,27 +105,7 @@ Optional: Human feedback for targeted rework.
 
 Output ONLY valid JSON. No markdown fences."""
 
-def _get_llm(model_config=None):
-    if model_config is None:
-        model_config = {}
-        
-    model_name = model_config.get("model") or os.getenv("DEFAULT_MODEL", "deepseek-v4-pro")
-    temp = model_config.get("temperature", 0.0)
-    max_tokens = model_config.get("max_tokens", 8192)
-    thinking = model_config.get("thinking", True)
-    
-    kwargs = {
-        "model": model_name,
-        "temperature": temp,
-        "max_tokens": max_tokens,
-        "api_key": os.getenv("OPENAI_API_KEY", ""),
-        "base_url": os.getenv("OPENAI_API_BASE") or None
-    }
-    
-    if thinking:
-        kwargs["model_kwargs"] = {"extra_body": {"thinking": True}}
-        
-    return ChatOpenAI(**kwargs)
+from src.utils.llm_factory import get_llm as _get_llm
 
 def _parse(raw):
     text = raw.strip()
