@@ -1,4 +1,8 @@
-// AIFA PHASE 6 — release bundle / final.md writer (T6.2).
+// Release-bundle writer.
+//
+// Beginner reading guide: after an owner/admin approves release, this service
+// combines resolved artifacts, audit events, evidence, and git metadata into
+// final.md and qa-report.md. It writes into the server repo copy when available.
 //
 // On RELEASED, assemble a multi-part release bundle in the cloned repo:
 //   1) working branch  2) commit/patch diff  3) final.md  4) QA report

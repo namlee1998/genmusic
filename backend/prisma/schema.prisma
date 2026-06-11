@@ -1,5 +1,10 @@
-// Prisma schema for AIDLC Backend
-// This file sets up SQLite to replace Supabase PostgreSQL
+// AIFA persistence map.
+//
+// Beginner reading guide:
+// - Start with Task, AgentEvent, AgentArtifact, HitlDecision, and PendingGate.
+// - Task stores one worker run; AgentEvent stores its ordered lifecycle history.
+// - Artifact content may live on disk while this database stores its metadata.
+// - SQLite is the active local/runtime database; DATABASE_URL isolates dev/tests.
 
 generator client {
   provider = "prisma-client-js"
@@ -7,7 +12,7 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  // I1: env-driven so tests/CI/smoke can target an isolated sqlite file and
+  // Env-driven so tests/CI/smoke can target an isolated sqlite file and
   // never touch dev.db. Local dev sets DATABASE_URL="file:./dev.db" in .env.
   url      = env("DATABASE_URL")
 }

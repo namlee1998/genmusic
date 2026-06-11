@@ -1,3 +1,9 @@
+// SDLC HTTP route map.
+//
+// Beginner reading guide: routes only attach middleware and delegate to
+// SdlcController. Follow a route into the controller, then into
+// SdlcWorkflowService for business behavior.
+
 const express = require('express');
 const multer = require('multer');
 const SdlcController = require('../controllers/SdlcController');
@@ -62,7 +68,7 @@ router.get('/projects/:project_id/release-files/:file_name', SdlcController.down
 // ── Dev-only: demo scenario selector (MOCK_SCENARIO) ───────────────────────
 router.get('/dev/mock-scenario',  SdlcController.getMockScenario.bind(SdlcController));
 
-// ── Demo board: 3 independent flows parked at PO / DEV / QA ────────────────
+// ── Primary /aifa board (single real flow or staged multi-flow demo) ───────
 // POST /api/v1/sdlc/demo/seed-board[?reset=true]   provision (idempotent)
 // GET  /api/v1/sdlc/demo/board                     aggregated board state
 router.post('/demo/seed-board', SdlcController.seedDemoBoard.bind(SdlcController));

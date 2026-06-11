@@ -1,34 +1,39 @@
 [
   {
     "name": "Login",
-    "purpose": "Cho phép người dùng đăng nhập bằng email/mật khẩu hoặc bằng Google",
+    "purpose": "Primary entry point — user signs in with Google or email/password.",
     "elements": [
-      "Logo sản phẩm",
-      "Form email + mật khẩu",
-      "Nút Đăng nhập",
-      "Dải phân cách 'hoặc'",
-      "Nút Sign in with Google",
-      "Liên kết Quên mật khẩu / Tạo tài khoản"
+      { "type": "logo",          "label": "AIFA" },
+      { "type": "heading",       "label": "Welcome back" },
+      { "type": "subheading",    "label": "Sign in to continue to your workspace" },
+      { "type": "button-google", "label": "Continue with Google" },
+      { "type": "divider",       "label": "or" },
+      { "type": "input",         "label": "Email", "placeholder": "you@example.com" },
+      { "type": "input",         "label": "Password", "placeholder": "••••••••" },
+      { "type": "button-primary","label": "Sign in" },
+      { "type": "link",          "label": "Forgot password?" },
+      { "type": "link",          "label": "Don't have an account? Sign up" }
     ],
-    "states": ["default", "loading", "error"]
+    "states": ["default", "loading", "error-wrong-password", "error-network"]
   },
   {
-    "name": "Google Consent (external)",
-    "purpose": "Màn hình đồng ý của Google nơi người dùng cấp quyền truy cập hồ sơ",
+    "name": "OAuth Callback",
+    "purpose": "Shown while the backend exchanges the OAuth code for a session.",
     "elements": [
-      "Danh sách quyền yêu cầu (email, hồ sơ cơ bản)",
-      "Nút Cho phép",
-      "Nút Huỷ"
+      { "type": "logo",       "label": "AIFA" },
+      { "type": "spinner",    "label": "" },
+      { "type": "subheading", "label": "Signing you in with Google…" }
     ],
-    "states": ["consent", "denied"]
+    "states": ["loading"]
   },
   {
     "name": "Login Error",
-    "purpose": "Hiển thị khi xác thực Google thất bại hoặc bị huỷ",
+    "purpose": "Shown when Google OAuth fails or is cancelled. Allows retry.",
     "elements": [
-      "Banner lỗi đỏ",
-      "Form đăng nhập (giữ nguyên)",
-      "Nút Sign in with Google (cho phép thử lại)"
+      { "type": "logo",           "label": "AIFA" },
+      { "type": "error-banner",   "label": "Sign-in failed — please try again" },
+      { "type": "button-google",  "label": "Retry with Google" },
+      { "type": "link",           "label": "Try a different account" }
     ],
     "states": ["visible"]
   }

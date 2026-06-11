@@ -141,6 +141,56 @@ const MOCK_SCRIPTS = {
           file_path: 'docs/penpot/google-login.svg',
           screen: 'Google login',
         },
+        // Canonical typed screen spec — renderer reads type+label to draw each element.
+        screens: [
+          {
+            name: 'Login',
+            purpose: 'Primary entry point — user signs in with Google or email/password.',
+            elements: [
+              { type: 'logo',           label: 'AIFA' },
+              { type: 'heading',        label: 'Welcome back' },
+              { type: 'subheading',     label: 'Sign in to continue to your workspace' },
+              { type: 'button-google',  label: 'Continue with Google' },
+              { type: 'divider',        label: 'or' },
+              { type: 'input',          label: 'Email', placeholder: 'you@example.com' },
+              { type: 'input',          label: 'Password', placeholder: '••••••••' },
+              { type: 'button-primary', label: 'Sign in' },
+              { type: 'link',           label: 'Forgot password?' },
+            ],
+            states: ['default', 'loading', 'error-wrong-password'],
+          },
+          {
+            name: 'OAuth Callback',
+            purpose: 'Shown while the backend exchanges the OAuth code for a session.',
+            elements: [
+              { type: 'logo',       label: 'AIFA' },
+              { type: 'spinner',    label: '' },
+              { type: 'subheading', label: 'Signing you in with Google…' },
+            ],
+            states: ['loading'],
+          },
+          {
+            name: 'Login Error',
+            purpose: 'Shown when Google OAuth fails or is cancelled.',
+            elements: [
+              { type: 'logo',          label: 'AIFA' },
+              { type: 'error-banner',  label: 'Sign-in failed — please try again' },
+              { type: 'button-google', label: 'Retry with Google' },
+              { type: 'link',          label: 'Try a different account' },
+            ],
+            states: ['visible'],
+          },
+        ],
+        color_palette: {
+          primary: '#4285F4', primary_text: '#FFFFFF',
+          background: '#F8FAFC', surface: '#FFFFFF',
+          border: '#E2E8F0', text: '#1E293B', text_muted: '#64748B',
+          error: '#DC2626', success: '#16A34A',
+        },
+        typography: {
+          heading_font: 'Inter', body_font: 'Inter',
+          heading_size: 22, subheading_size: 14, body_size: 14, small_size: 12,
+        },
       },
     },
     'dev-agent': DEV_ASKS,

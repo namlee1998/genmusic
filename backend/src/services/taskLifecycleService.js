@@ -1,3 +1,9 @@
+// Persisted execution-state machine for one Task.
+//
+// Beginner reading guide: transition() validates the state edge, updates Task,
+// and appends an ordered AgentEvent in the same database transaction. Workflow
+// phases such as PO_REVIEW are derived elsewhere from these task states.
+
 const prisma = require('../config/database');
 const logger = require('../config/logger');
 

@@ -1,3 +1,10 @@
+// Typed frontend boundary for /api/v1/sdlc.
+//
+// Beginner reading guide: this file contains transport helpers only. Components
+// call these functions; backend workflow behavior lives in SdlcWorkflowService.
+// The primary /aifa UI polls getDemoBoard(), while subscribeTaskSSE remains
+// available for task-level clients and the legacy dashboard.
+
 import api, { getBaseURL } from './client';
 import { getStoredAuthSession } from './authStorage';
 
@@ -652,11 +659,78 @@ export interface GateDecisionPayload {
 export const submitGateDecision = (taskId: string, payload: GateDecisionPayload) =>
   api.post(`${BASE}/tasks/${taskId}/gate-decision`, payload).then((r) => r.data);
 
+<<<<<<< HEAD
+=======
+// Structured stage-review decision: idempotent and optimistic-locked.
+export interface StructuredDecisionBody {
+  decision_id: string;
+  base_output_version: number;
+  action: 'approve' | 'reject' | 'edit_approve';
+  comment?: string;
+  payload?: {
+    retry_reason?: string;
+    patch?: unknown[];
+    edited_output?: Record<string, unknown>;
+    target_fields?: string[];
+    blocking_issues?: Array<{ severity: string; issue: string; expected_fix: string }>;
+    acceptance_checks?: string[];
+  };
+}
+
+export const submitStructuredDecision = (taskId: string, body: StructuredDecisionBody) =>
+  api.post(`${BASE}/tasks/${taskId}/decision`, body).then((r) => r.data);
+
+// ── Status ────────────────────────────────────────────────────────────────
+
+export const getSdlcTaskStatus = (taskId: string) =>
+  api.get(`${BASE}/tasks/${taskId}`).then((r) => r.data.data);
+
+export const getWorkflowStatus = (projectId: string) =>
+  api.get(`${BASE}/workflow-status`, { params: { project_id: projectId } }).then((r) => r.data.data);
+
+export const getFinalReviewPacket = (projectId: string) =>
+  api.get(`${BASE}/final-review-packet/${projectId}`).then((r) => r.data.data);
+
+>>>>>>> staging
 export const submitReleaseDecision = (
   projectId: string,
   body: { decision_id: string; decision: 'APPROVE' | 'REJECT'; comment?: string },
 ) => api.post(`${BASE}/projects/${projectId}/release-decision`, body).then((r) => r.data);
 
+<<<<<<< HEAD
+=======
+export const getAuditTrail = (projectId: string) =>
+  api.get(`${BASE}/audit-trail/${projectId}`).then((r) => r.data.data);
+
+// ── Repo-aware workflow start and live onGate approvals ────────────────────
+
+/**
+ * Start a repo-aware, PO-first workflow (applies the 429 cap).
+ * Pass `repoUrl` to clone a remote repo, or `repoPath` to use an already-cloned
+ * local folder ("Open folder" flow). Both are optional — omit for a repo-less run.
+ */
+export const runWorkflow = (
+  projectId: string,
+  request: string,
+  repoUrl?: string,
+  branch = 'main',
+  repoPath?: string,
+) => api.post(`${BASE}/run-po-agent`, {
+  project_id: projectId,
+  feature_request: { title: request, description: request, priority: 'High' },
+  request,
+  repo_url: repoUrl || undefined,
+  repo_path: repoPath || undefined,
+  branch,
+}).then((r) => r.data);
+
+/**
+ * Upload a whole local folder (chosen anywhere on the user's machine) as the
+ * workflow repo. Browsers can't expose an absolute path, so we stream the files
+ * with their relative paths; the backend writes them into the project workspace
+ * and git-inits a repo, returning the server-side `repo_path`.
+ */
+>>>>>>> staging
 export const uploadRepoFolder = (
   projectId: string,
   files: Array<File & { relativePath?: string }>,
@@ -707,6 +781,29 @@ export const downloadReleaseFile = (projectId: string, fileName: 'final.md' | 'q
   api.get(`${BASE}/projects/${projectId}/release-files/${fileName}`, { responseType: 'blob' })
     .then((r) => r.data as Blob);
 
+<<<<<<< HEAD
+=======
+// ── Dev-only demo scenario selector (MOCK_SCENARIO) ───────────────────────
+
+export interface MockScenarioState {
+  scenario: string;
+  mockEnabled: boolean;
+  executionPath: string;
+  mockClaudeCode: boolean;
+  available: string[];
+}
+
+export const getMockScenario = (): Promise<MockScenarioState> =>
+  api.get(`${BASE}/dev/mock-scenario`).then((r) => r.data.data);
+
+// ── Primary /aifa board: real_single or staged three_flow mode ─────────────
+
+export interface CardAction {
+  label: string;
+  kind?: 'review' | 'penpot' | 'diff' | 'test-report' | 'approve' | 'reject';
+  placeholder?: string;
+}
+>>>>>>> staging
 export interface BoardCard {
   label: string;
   agent: string;
@@ -714,7 +811,15 @@ export interface BoardCard {
   description: string;
   whatsIncluded: string[];
   taskId: string;
+  stage?: string;
   invalid: boolean;
+  validationIssues?: Array<{ rule: string; detail: string }>;
+  penpotUrl?: string | null;
+  patchDiff?: string | null;
+  changedFiles?: string[] | null;
+  testCases?: Array<Record<string, unknown>> | null;
+  qaReport?: string | null;
+  actions?: { review: CardAction; approve: CardAction; reject: CardAction };
 }
 
 export interface BoardPhase {

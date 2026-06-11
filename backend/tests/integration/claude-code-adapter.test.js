@@ -6,6 +6,72 @@ const claudeCodeRunner = require('../../src/agents/claudeCodeRunner');
 const gateBridge = require('../../src/services/gateBridge');
 
 describe('Claude Code SDK adapter contracts', () => {
+  test('parser finds a valid JSON block after an invalid fenced block', () => {
+    const parsed = claudeCodeRunner.parseJsonObject([
+      'Draft:',
+      '```json',
+      '{"prd": "missing closing brace"',
+      '```',
+      'Final:',
+      '```json',
+      '{"outputVersion":"agent-io.v3","artifact":{"prd":"# PRD","user_stories":["Story"]}}',
+      '```',
+    ].join('\n'));
+
+    expect(parsed).toMatchObject({
+      outputVersion: 'agent-io.v3',
+      artifact: { prd: '# PRD' },
+    });
+  });
+
+  test('parser prefers the full artifact envelope over a small prose object', () => {
+    const parsed = claudeCodeRunner.parseJsonObject([
+      'Example metadata: {"status":"draft"}',
+      'Final output:',
+      '{"outputVersion":"agent-io.v3","stage":"po","artifact":{"prd":"# PRD","scope":"In","out_of_scope":"Out"}}',
+    ].join('\n'));
+
+    expect(parsed).toMatchObject({
+      outputVersion: 'agent-io.v3',
+      stage: 'po',
+      artifact: { prd: '# PRD' },
+    });
+  });
+
+  test('balanced JSON extraction ignores braces inside string values', () => {
+    const parsed = claudeCodeRunner.parseJsonObject(
+      'Result: {"artifact":{"prd":"Use {tenantId} in the route","scope":"API"}} trailing text',
+    );
+
+    expect(parsed.artifact.prd).toContain('{tenantId}');
+  });
+
+  test('output repair runs once without any allowed tools', async () => {
+    const query = jest.fn(({ options }) => (async function* resultStream() {
+      expect(options.allowedTools).toEqual([]);
+      expect(options.maxTurns).toBe(3);
+      await expect(options.canUseTool('Write', { file_path: 'x' })).resolves.toMatchObject({
+        behavior: 'deny',
+      });
+      yield {
+        type: 'result',
+        result: '```json\n{"outputVersion":"agent-io.v3","artifact":{"prd":"# Repaired"}}\n```',
+      };
+    }()));
+
+    const result = await claudeCodeRunner._internal.repairRawOutput({
+      query,
+      role: 'po-agent',
+      rawResult: 'PRD was drafted but JSON formatting failed.',
+      cwd: process.cwd(),
+    });
+
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(claudeCodeRunner.parseJsonObject(result)).toMatchObject({
+      artifact: { prd: '# Repaired' },
+    });
+  });
+
   test('runner forwards canUseTool context and adapts absolute paths for the UI gate', async () => {
     const onGate = jest.fn(async (_toolName, input) => ({ behavior: 'allow', updatedInput: input }));
     const repoPath = path.resolve('repo');
@@ -151,6 +217,49 @@ describe('Claude Code SDK adapter contracts', () => {
 
   test('runner explicitly uses a generous maxTurns default', () => {
     expect(claudeCodeRunner._internal.DEFAULT_MAX_TURNS).toBeGreaterThanOrEqual(100);
+  });
+
+  test('role limits keep DEV and QA runs bounded unless explicitly overridden', () => {
+    expect(claudeCodeRunner._internal.maxTurnsForRole('dev-agent')).toBe(200);
+    expect(claudeCodeRunner._internal.maxTurnsForRole('qa-agent')).toBe(50);
+  });
+
+  test('DEV context excludes unrelated upstream artifacts', () => {
+    const compact = claudeCodeRunner._internal.compactContext('dev-agent', {
+      prd: [{ content: '# PRD' }],
+      ux_spec: [{ content: '# UX' }],
+      qa_report: [{ content: 'irrelevant and potentially huge' }],
+      a2a_handoff: [{ content: { noisy: true } }],
+    });
+
+    expect(compact).toEqual({
+      prd: [{ content: '# PRD' }],
+      ux_spec: [{ content: '# UX' }],
+    });
+  });
+
+  test('normalizer promotes valid nested DEV security evidence to contract fields', () => {
+    const output = claudeCodeRunner.normalizeOutput('dev-agent', {
+      artifact: {
+        implementation_plan: '# Plan',
+        patch_diff: 'diff --git a/a b/a',
+        changed_files: ['a'],
+        sandbox_result: { tests_ran: true, build_ok: true },
+        self_test_report: '19 tests passed',
+        linked_ac_ids: ['AC-1'],
+        risk_assessment: 'High-risk authentication change',
+        risk_classification: {
+          level: 'HIGH',
+          required_gates: ['security'],
+          security_notes: 'State and token validation implemented.',
+          security_gate: { recommendation: 'PASS' },
+        },
+      },
+    });
+
+    expect(output.security_notes).toContain('token validation');
+    expect(output.security_gate).toEqual({ recommendation: 'PASS' });
+    expect(output.patch_format).toBe('unified_diff');
   });
 
   test('normalizer rejects required fields that are present but empty', () => {
