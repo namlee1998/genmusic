@@ -2,6 +2,16 @@
 
 All notable changes to the AIDLC Control Platform (Team 6) will be documented in this file.
 
+## [3.1.0] - 2026-06-11
+### Added
+- Tái cấu trúc và tổ chức lại toàn bộ tài liệu dự án (Docs Reorganization).
+- Tạo mục lục tài liệu master mới tại `docs/README.md` để dễ dàng tra cứu.
+- Tạo thư mục lưu trữ `docs/archive/` để chuyển các tài liệu cũ, roadmap cũ, và task cá nhân (gồm 9 file: `HANDOVER.md`, `CURRENT_WORKFLOW.md`, `AIFA_DEMO_1_WEEK_ROADMAP.md`, `AIFA_REAL_DATA_3_WEEK_ROADMAP.md`, `design_prompt_1.md`, `AIFA_INTEGRATION_PLAN.md`, `TASK_GIANG_FE.md`, `TASK_MINH_BE.md`, `TASK_NAM_AGENT.md`).
+
+### Changed
+- Viết lại toàn bộ tài liệu `README.md` ở root dự án (rút gọn từ 740 dòng xuống khoảng 200 dòng, chuyển dịch hoàn toàn sang Tiếng Việt và xóa bỏ 16 liên kết chết).
+- Cập nhật tài liệu tiến độ frontend `frontend/docs/PROGRESS.md` để sửa các liên kết repo cũ và ghi nhận các cải tiến lớn cho AIFA v3 SDLCControlCenter (bao gồm GatePanel, PipelineStepper, AuditLog, FinalApproval, RepoInput, mock simulation, và SSE fallback).
+
 ## [3.0.0] - AIFA v3 Risk-Gated Workflow
 ### Added
 - Claude Code mock execution path through the production-shaped `onGate` interface.
