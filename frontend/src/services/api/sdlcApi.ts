@@ -228,6 +228,11 @@ export const getMockScenario = (): Promise<MockScenarioState> =>
 
 // ── Primary /aifa board: real_single or staged three_flow mode ─────────────
 
+export interface CardAction {
+  label: string;
+  kind?: 'review' | 'penpot' | 'diff' | 'test-report' | 'approve' | 'reject';
+  placeholder?: string;
+}
 export interface BoardCard {
   label: string;
   agent: string;
@@ -235,7 +240,15 @@ export interface BoardCard {
   description: string;
   whatsIncluded: string[];
   taskId: string;
+  stage?: string;
   invalid: boolean;
+  validationIssues?: Array<{ rule: string; detail: string }>;
+  penpotUrl?: string | null;
+  patchDiff?: string | null;
+  changedFiles?: string[] | null;
+  testCases?: Array<Record<string, unknown>> | null;
+  qaReport?: string | null;
+  actions?: { review: CardAction; approve: CardAction; reject: CardAction };
 }
 export interface BoardPhase {
   stage: string;

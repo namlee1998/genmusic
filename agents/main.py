@@ -179,13 +179,17 @@ def _parse_agent_input(node_target: str, context: dict):
             feedback_prompt=_feedback_context(context),
         )
     if node_target == "qa_agent":
+        sandbox_result = _first_context_value(context, "sandbox_result")
+        sandbox_report = _text_context(context, "sandbox_report")
+        if not sandbox_report and sandbox_result:
+            sandbox_report = json.dumps(sandbox_result, ensure_ascii=False)
         return QAAgentInput(
             prd=_text_context(context, "prd"),
             acceptance_criteria=_list_context(context, "acceptance_criteria"),
             ux_spec=_text_context(context, "ux_spec"),
             implementation_plan=_text_context(context, "implementation_plan"),
-            mock_code_diff=_text_context(context, "mock_code_diff"),
-            sandbox_report=_text_context(context, "sandbox_report"),
+            mock_code_diff=_text_context(context, "patch_diff") or _text_context(context, "mock_code_diff"),
+            sandbox_report=sandbox_report,
             risk_assessment=_text_context(context, "risk_assessment"),
             risk_level=_text_context(context, "risk_level", "LOW"),
             feedback_prompt=_feedback_context(context),

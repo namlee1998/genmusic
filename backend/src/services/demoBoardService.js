@@ -25,7 +25,7 @@ const FEATURE = {
 };
 // qa-agent is STRICT_MANUAL by default; PO/DEV must be forced so each flow parks
 // at a stage review. UX stays auto (kept transparent — only 3 agents are shown).
-const REVIEW_HOLD_ROLES = ['po-agent', 'dev-agent'];
+const REVIEW_HOLD_ROLES = ['po-agent', 'ux-agent', 'dev-agent'];
 const STAGES = ['po', 'ux', 'dev', 'qa'];
 const REVIEW_ORDER = ['po', 'dev', 'qa']; // the human-reviewed stages, in order
 const FLOW_TARGETS = [
@@ -40,10 +40,46 @@ const REAL_SINGLE_TARGETS = [
 ];
 
 const STAGE_META = {
-  po:  { agent: 'PO Agent',  title: 'PO Agent needs your approval',  desc: 'Please review the product requirements and user stories for this release.' },
-  ux:  { agent: 'UX Agent',  title: 'UX Agent needs your approval',  desc: 'Please review the proposed screens and user flow.' },
-  dev: { agent: 'Dev Agent', title: 'Dev Agent needs your approval', desc: 'Please review the implementation plan and code changes.' },
-  qa:  { agent: 'QA Agent',  title: 'QA Agent needs your approval',  desc: 'Please review the test results and quality assurance summary.' },
+  po: {
+    agent: 'PO Agent',
+    title: 'PO Agent needs your approval',
+    desc: 'Please review the product requirements and user stories for this release.',
+    actions: {
+      review:  { label: '📄 View PRD',      kind: 'review' },
+      approve: { label: '✓ Approve stories' },
+      reject:  { label: '↺ Revise stories', placeholder: 'What stories or acceptance criteria need to change?' },
+    },
+  },
+  ux: {
+    agent: 'UX Agent',
+    title: 'UX Agent needs your approval',
+    desc: 'Please review the proposed screens and user flow. Open the Penpot design to inspect the wireframes.',
+    actions: {
+      review:  { label: '🎨 Open in Penpot', kind: 'penpot' },
+      approve: { label: '✓ Approve design' },
+      reject:  { label: '↺ Redesign',        placeholder: 'Which screens or flows need to be redesigned?' },
+    },
+  },
+  dev: {
+    agent: 'Dev Agent',
+    title: 'Dev Agent needs your approval',
+    desc: 'Please review the implementation plan and code changes.',
+    actions: {
+      review:  { label: '🔍 View diff',    kind: 'diff' },
+      approve: { label: '✓ Approve code' },
+      reject:  { label: '↺ Request fix',   placeholder: 'What needs to be fixed or improved in the implementation?' },
+    },
+  },
+  qa: {
+    agent: 'QA Agent',
+    title: 'QA Agent needs your approval',
+    desc: 'Please review the test results and quality assurance summary.',
+    actions: {
+      review:  { label: '📋 View tests',   kind: 'test-report' },
+      approve: { label: '✓ Ship it' },
+      reject:  { label: '↺ More coverage', placeholder: 'Which test cases or scenarios need more coverage?' },
+    },
+  },
 };
 
 let board = null;      // in-memory board { id, status, flows: [{ flowNo, target, projectId, parked }] }
@@ -309,7 +345,22 @@ async function buildFlowCard(f) {
 
 async function buildReviewCard(stage, phase) {
   const meta = STAGE_META[stage];
-  const output = (await Task.findById(phase.taskId).catch(() => null))?.agentOutput || {};
+  const task = await Task.findById(phase.taskId).catch(() => null);
+  const output = task?.agentOutput || {};
+  const validationIssues = task
+    ? svc._validateGateOutput(task, output).violations
+      .filter((violation) => violation.severity === 'BLOCKER')
+      .map((violation) => ({ rule: violation.rule, detail: violation.detail }))
+    : [];
+  const penpotUrl = stage === 'ux'
+    ? (output.penpot_url?.editUrl || output.penpot_url?.viewUrl || null)
+    : null;
+  const patchDiff = stage === 'dev' ? (output.patch_diff || output.mock_code_diff || null) : null;
+  const changedFiles = stage === 'dev'
+    ? (Array.isArray(output.changed_files) ? output.changed_files : null)
+    : null;
+  const testCases = stage === 'qa' ? (Array.isArray(output.test_cases) ? output.test_cases : null) : null;
+  const qaReport = stage === 'qa' ? (output.qa_report || null) : null;
   return {
     label: stage === 'qa' ? 'CURRENT REVIEW' : 'APPROVAL NEEDED',
     agent: meta.agent,
@@ -317,7 +368,15 @@ async function buildReviewCard(stage, phase) {
     description: meta.desc,
     whatsIncluded: buildBullets(output, stage),
     taskId: phase.taskId,
+    stage,
     invalid: !!phase.invalid,
+    validationIssues,
+    penpotUrl,
+    patchDiff,
+    changedFiles,
+    testCases,
+    qaReport,
+    actions: meta.actions,
   };
 }
 
@@ -334,9 +393,11 @@ function buildBullets(o, stage) {
     if (o.prd) out.push('Product requirements (PRD)');
     if (o.scope) out.push('Release scope defined');
   } else if (stage === 'ux') {
-    if (len(o.screens) != null) out.push(`${len(o.screens)} screens`);
+    if (len(o.screens) != null) out.push(`${len(o.screens)} screens designed`);
     if (o.user_flow) out.push('User flow documented');
-    if (o.penpot_mock) out.push('Penpot mock generated');
+    if (o.penpot_url?.editUrl) out.push('Penpot design file ready');
+    else if (o.penpot_url?.viewUrl) out.push('SVG wireframe preview ready');
+    else if (o.penpot_mock) out.push('Penpot wireframe (mock)');
   } else if (stage === 'dev') {
     if (len(o.changed_files) != null) out.push(`${len(o.changed_files)} files changed`);
     const sb = o.sandbox_result || {};

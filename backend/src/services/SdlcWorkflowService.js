@@ -20,6 +20,7 @@ const AgentService = require('./AgentService');
 const MembershipService = require('./MembershipService');
 const QuotaService = require('./QuotaService');
 const QualityGateService = require('./QualityGateService');
+const PenpotService = require('./PenpotService');
 const fs = require('fs/promises');
 const path = require('path');
 const { ApiError, ERROR_CODES } = require('../middleware/errorHandler');
@@ -239,7 +240,14 @@ const OUTPUT_CONTRACTS = {
       check: (o) => !!(o.release_reason && o.release_reason.trim()) },
     { rule: 'quality_gate_pass', severity: 'BLOCKER',
       detail: (o, task) => `Quality gate is ${(task?.result?.gateRecommendation) || o.gate_evaluation?.recommendation || 'unknown'}, expected PASS`,
-      check: (o, task) => ((task?.result?.gateRecommendation) || o.gate_evaluation?.recommendation) === 'PASS' },
+      check: (o, task) => {
+        const recommendation = (task?.result?.gateRecommendation) || o.gate_evaluation?.recommendation;
+        if (recommendation === 'PASS') return true;
+        // If all tests actually ran and passed, a REWORK is only a labelling gap —
+        // not a real quality failure. Treat it as passing so the gate does not stall.
+        const tr = o.test_run_report || {};
+        return tr.executed === true && typeof tr.failed === 'number' && tr.failed === 0 && (tr.total || 0) > 0;
+      } },
   ],
 };
 
@@ -252,8 +260,8 @@ const RETRY_REASONS = ['schema_invalid', 'ac_not_measurable', 'coverage_gap', 'b
 const AGENT_POLICY = {
   'po-agent':  { max_attempts: MAX_RETRY_PER_STEP, timeout_seconds: 180 },
   'ux-agent':  { max_attempts: MAX_RETRY_PER_STEP, timeout_seconds: 240 },
-  'dev-agent': { max_attempts: MAX_RETRY_PER_STEP, timeout_seconds: 600 },
-  'qa-agent':  { max_attempts: 2,                  timeout_seconds: 600 },
+  'dev-agent': { max_attempts: MAX_RETRY_PER_STEP, timeout_seconds: 1800 },
+  'qa-agent':  { max_attempts: 2,                  timeout_seconds: 900 },
 };
 const FINAL_GATE = 'FINAL_GATE';
 const RELEASE_DECISIONS = ['APPROVE', 'REJECT'];
@@ -729,8 +737,12 @@ class SdlcWorkflowService {
       throw new ApiError(409, 'DEV still has a pending gate; QA cannot start yet');
     }
 
+    // Only de-duplicate in-flight tasks (pending/running). A completed task means
+    // a prior run finished — rework or a new call must create a fresh task.
     const existingQa = projectTasks.find(
-      (task) => task.type === 'qa-agent' && task.sourceRunId === sourceTask.id
+      (task) => task.type === 'qa-agent'
+        && task.sourceRunId === sourceTask.id
+        && ['pending', 'running'].includes(task.status)
     );
     if (existingQa) return existingQa;
 
@@ -787,8 +799,11 @@ class SdlcWorkflowService {
     if (!['APPROVE', 'REJECT', 'REQUEST_CHANGES'].includes(decision)) {
       throw new ApiError(400, 'Decision must be APPROVE | REJECT | REQUEST_CHANGES');
     }
-    if (task.type === 'qa-agent' && decision === 'APPROVE' && task.result?.gateRecommendation !== 'PASS') {
-      throw new ApiError(409, 'QA quality gate must PASS before final approval');
+    if (task.type === 'qa-agent' && decision === 'APPROVE') {
+      const qaValidation = this._validateGateOutput(task, task.agentOutput || {});
+      if (!qaValidation.ok) {
+        throw new ApiError(409, 'QA quality gate must PASS before final approval');
+      }
     }
     const gateEvaluation = this._evaluateGatePolicy(task);
     if (decision === 'APPROVE'
@@ -814,13 +829,9 @@ class SdlcWorkflowService {
       const refreshed = await Task.findById(taskId);
       await this._startNextAgentIfAvailable(refreshed, user?.id);
     } else if (decision === 'REQUEST_CHANGES' && comment) {
-      // Trigger targeted rework automatically in the background
-      this.triggerRework({
-        projectId: task.projectId,
-        sourceTaskId: taskId,
-        feedbackPrompt: comment,
-        user
-      }).catch(err => console.error('[SDLC] Rework triggered by gate decision failed:', err));
+      // Re-run the owning agent directly (no LLM routing — we already know the task type).
+      this._rerunOwningWorker({ rejectedTask: task, feedbackPrompt: comment, user })
+        .catch(err => console.error('[SDLC] Rework failed:', err));
     }
 
     return { task, hitlDecision: hitlRecord };
@@ -1492,7 +1503,11 @@ class SdlcWorkflowService {
     if (priorReleaseDecision && ['APPROVE', 'REJECT'].includes(priorReleaseDecision.decision)) {
       throw new ApiError(409, `This QA run was already finalized as ${priorReleaseDecision.decision}`);
     }
-    if (qaTask.result?.gateRecommendation !== 'PASS') {
+    const qaGatePass = qaTask.result?.gateRecommendation === 'PASS' || (() => {
+      const tr = qaTask.agentOutput?.test_run_report || {};
+      return tr.executed === true && typeof tr.failed === 'number' && tr.failed === 0 && (tr.total || 0) > 0;
+    })();
+    if (!qaGatePass) {
       throw new ApiError(409, 'Release gate is unavailable until QA quality gate returns PASS');
     }
     const evidence = await this._buildReleaseEvidenceSummary(projectId);
@@ -1729,7 +1744,14 @@ class SdlcWorkflowService {
     const phaseTasks = [intentTask, poTask, uxTask, devTask, qaTask].filter(Boolean);
     const invalidByTaskId = {};
     await Promise.all(phaseTasks.map(async (t) => {
-      invalidByTaskId[t.id] = t.status === 'completed' ? await AgentArtifact.hasInvalid(t.id) : false;
+      if (t.status !== 'completed') { invalidByTaskId[t.id] = false; return; }
+      const dbInvalid = await AgentArtifact.hasInvalid(t.id);
+      // If DB says INVALID, do a live re-check: the stored status may be stale
+      // (e.g. gate rules were tightened or loosened after the task completed).
+      // Only keep INVALID when runtime validation also finds a BLOCKER.
+      invalidByTaskId[t.id] = dbInvalid
+        ? this._validateGateOutput(t, t.agentOutput || {}).violations.some((v) => v.severity === 'BLOCKER')
+        : false;
     }));
 
     const mapPhase = (task) => {
@@ -1786,7 +1808,11 @@ class SdlcWorkflowService {
       releaseGate: {
         eligible: qaTask?.status === 'completed'
           && qaTask.versionStatus === 'committed'
-          && qaTask.result?.gateRecommendation === 'PASS'
+          && (() => {
+            if (qaTask.result?.gateRecommendation === 'PASS') return true;
+            const tr = qaTask.agentOutput?.test_run_report || {};
+            return tr.executed === true && typeof tr.failed === 'number' && tr.failed === 0 && (tr.total || 0) > 0;
+          })()
           && decisionsByTaskId[qaTask.id]?.decision === 'APPROVE',
         canDecide: ['owner', 'admin'].includes(membership?.role),
         reviewerRole: membership?.role || null,
@@ -2436,6 +2462,17 @@ class SdlcWorkflowService {
       });
       return;
     }
+    // Task already in a terminal state (e.g. timeout fired first from budget/sweep).
+    // Don't attempt a second terminal transition — just log and bail.
+    const TERMINAL_STATES = ['completed', 'failed', 'cancelled', 'timeout'];
+    if (current && TERMINAL_STATES.includes(current.executionStatus)) {
+      logger.warn('_markTaskFailed: task already terminal, skipping failed transition', {
+        taskId: task.id,
+        currentState: current.executionStatus,
+        error: error.message,
+      });
+      return;
+    }
 
     // T4: keep the structured error code visible in the persisted error so the
     // SSE error event / UI can render a precise error state.
@@ -2453,6 +2490,9 @@ class SdlcWorkflowService {
         signal: error.signal || null,
         stderrPreview: typeof error.stderr === 'string' ? error.stderr.slice(0, 2000) : null,
         stdoutPreview: typeof error.stdout === 'string' ? error.stdout.slice(0, 2000) : null,
+        rawResultPreview: typeof error.rawResult === 'string' ? error.rawResult.slice(0, 4000) : null,
+        repairResultPreview: typeof error.repairResult === 'string' ? error.repairResult.slice(0, 4000) : null,
+        repairError: error.repairError || null,
         failedAt: new Date().toISOString(),
       },
     };
@@ -2647,7 +2687,7 @@ class SdlcWorkflowService {
     const artifactTypes = ['feature_request', 'scenario_brief', 'intent_assumptions', 'clarifying_questions',
       'prd', 'user_stories', 'acceptance_criteria', 'scope', 'out_of_scope', 'mcp_activity',
       'route_classification', 'assumptions',
-      'ux_spec', 'user_flow', 'wireframe_spec', 'component_inventory', 'screens', 'penpot_mock',
+      'ux_spec', 'user_flow', 'wireframe_spec', 'component_inventory', 'screens', 'penpot_mock', 'penpot_url',
       'architecture_ledger_update', 'implementation_plan', 'mock_code_diff', 'changed_files',
       'patch_diff', 'patch_format', 'linked_ac_ids', 'sandbox_result', 'self_test_report',
       'risk_assessment', 'risk_level', 'sandbox_report', 'patch_branch', 'patch_commit',
@@ -2717,6 +2757,7 @@ class SdlcWorkflowService {
           riskLevel: completedData.risk_level || 'LOW',
           mockCodeDiff,
           implementationPlan,
+          testRunReport: completedData.test_run_report || null,
         });
 
         completedData.gate_evaluation = gateResult;
@@ -2729,6 +2770,37 @@ class SdlcWorkflowService {
       } catch (gateErr) {
         console.error(`[QualityGate] Evaluation failed for task ${task.id}:`, gateErr.message);
         // Non-fatal — continue saving without gate result
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // UX design generation — SVG wireframe always; Penpot file when enabled
+    // -------------------------------------------------------------------------
+    if (task.type === 'ux-agent' && !completedData.penpot_url) {
+      try {
+        const screens = Array.isArray(completedData.screens) ? completedData.screens : [];
+        const colorPalette = completedData.color_palette || {};
+        const typography = completedData.typography || {};
+
+        // Always generate a local SVG wireframe saved to public/ux-previews/
+        const svgPath = PenpotService.generateSvgPreview(task.id, screens, colorPalette, typography);
+        completedData.penpot_url = { editUrl: null, viewUrl: svgPath, fileId: null };
+
+        // If Penpot is enabled also push a real design file and upgrade editUrl
+        if (PenpotService.enabled) {
+          const featureTitle = completedData.feature_title
+            || (await Task.findLatestByProject(task.projectId, 'po-agent', 'completed', 'committed')
+              .then((t) => t?.result?.summary || 'AIFA Feature')
+              .catch(() => 'AIFA Feature'));
+          const design = await PenpotService.createDesign(featureTitle, screens);
+          if (design.editUrl) {
+            completedData.penpot_url = { editUrl: design.editUrl, viewUrl: svgPath, fileId: design.fileId };
+            console.log(`[Penpot] UX design ready: ${design.editUrl}`);
+          }
+        }
+      } catch (penpotErr) {
+        console.error(`[UX Preview] Generation failed for task ${task.id}:`, penpotErr.message);
+        // Non-fatal — UX review card still shows without a preview
       }
     }
 

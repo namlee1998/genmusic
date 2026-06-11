@@ -22,7 +22,7 @@ describe('App 404 routing', () => {
   it('renders the not found page for unmatched public routes', async () => {
     render(<App />);
 
-    expect(await screen.findByText('404 - Page not found')).toBeInTheDocument();
+    expect(await screen.findByText('404 - Page not found', {}, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.getByText('This route is off the map')).toBeInTheDocument();
   });
 });

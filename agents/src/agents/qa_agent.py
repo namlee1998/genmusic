@@ -19,7 +19,9 @@ SYSTEM_PROMPT = """You are a senior QA Engineer. Your mission is to generate tes
 Given: PRD, Acceptance Criteria (AC) list, UX Spec, Implementation Plan, Code Diff, Sandbox Report, Risk Assessment.
 
 === OUTPUT (strict JSON) ===
-{test_cases, qa_report, ac_coverage_matrix, pass_count, fail_count, blocker_count, release_recommendation, summary}
+{test_cases, qa_report, ac_coverage_matrix, test_run_report, regression_risks,
+security_findings, release_decision, release_reason, pass_count, fail_count,
+blocker_count, release_recommendation, summary}
 
 === TEST CASE RULES ===
 
@@ -41,7 +43,7 @@ Given: PRD, Acceptance Criteria (AC) list, UX Spec, Implementation Plan, Code Di
    - expected_result must describe EXACTLY what happens — not "success message appears" but "Toast shows 'Login successful' and user is redirected to /dashboard"
    - precondition must list full app state: auth state, screen, data, feature flags
    - test_data must use LITERAL values (not "a valid email" but "user@example.com")
-   - If exact text is unknown from documents: use "TODO: confirm exact text with dev"
+   - If exact text is unknown from documents: use "PENDING_CLARIFICATION: confirm exact text with dev"
 
 5. REAL BUG COVERAGE — think about these real failure scenarios:
    - What if the network call fails? (timeout, 500 error)
@@ -106,9 +108,10 @@ def _parse(raw):
     text = raw.strip()
     fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
     if fence: text = fence.group(1).strip()
-    try: return json.loads(text)
-    except: return {"test_cases":[], "qa_report": raw, "ac_coverage_matrix":[], "pass_count":0,
-                    "fail_count":0, "blocker_count":0, "release_recommendation":"HOLD", "summary":""}
+    try:
+        return json.loads(text)
+    except Exception as exc:
+        raise ValueError(f"QA agent generated invalid JSON: {exc}") from exc
 
 def _build_qa_content(input_data: QAAgentInput) -> str:
     """Build the human message content for QA Agent from all input artifacts."""
@@ -155,11 +158,21 @@ async def run_qa_agent(input_data: QAAgentInput, model_config=None, trace_contex
     p = _parse(resp.content)
     test_cases = [QATestCase(**t) if isinstance(t, dict) else t for t in p.get("test_cases", [])]
     matrix = [ACCoverageRow(**r) if isinstance(r, dict) else r for r in p.get("ac_coverage_matrix", [])]
-    return QAAgentOutput(test_cases=test_cases, qa_report=p.get("qa_report",""),
-                         ac_coverage_matrix=matrix, pass_count=p.get("pass_count",0),
-                         fail_count=p.get("fail_count",0), blocker_count=p.get("blocker_count",0),
-                         release_recommendation=p.get("release_recommendation","HOLD"),
-                         summary=p.get("summary","QA Agent completed"))
+    return QAAgentOutput(
+        test_cases=test_cases,
+        qa_report=p.get("qa_report", ""),
+        ac_coverage_matrix=matrix,
+        test_run_report=p.get("test_run_report", {}),
+        regression_risks=p.get("regression_risks", []),
+        security_findings=p.get("security_findings", []),
+        release_decision=p.get("release_decision", "needs_changes"),
+        release_reason=p.get("release_reason", ""),
+        pass_count=p.get("pass_count", 0),
+        fail_count=p.get("fail_count", 0),
+        blocker_count=p.get("blocker_count", 0),
+        release_recommendation=p.get("release_recommendation", "HOLD"),
+        summary=p.get("summary", "QA Agent completed"),
+    )
 
 async def stream_qa_agent(input_data: QAAgentInput, model_config=None, trace_context=None):
     llm = _get_llm(model_config)
