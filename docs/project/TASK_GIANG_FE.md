@@ -2,16 +2,16 @@
 
 > **Vai trò:** Frontend Development + Quản lý dự án
 > **Phases chịu trách nhiệm:** Phase 3 (FE) + Phase 4 (docs) + quản lý tổng
-> **Tham chiếu:** [MULTICA_INTEGRATION_PLAN.md](./MULTICA_INTEGRATION_PLAN.md)
+> **Tham chiếu:** [AIFA_INTEGRATION_PLAN.md](./AIFA_INTEGRATION_PLAN.md)
 
 ---
 
 ## Tổng Quan Công Việc
 
 ```
-Day 1-2: Setup FE + Mock API + RepoInput component
-Day 3-4: PipelineStepper + ApprovalQueue + QAResultCard
-Day 5:   Integrate FE ↔ Backend (Minh)
+Day 1-2: Setup FE + Mock API + Update RepoInput + GatePanel
+Day 3-4: PipelineStepper update + DiffViewer + AuditLog + FinalApproval
+Day 5:   Integrate FE ↔ Backend (Minh) + SSE connection
 Day 6:   E2E test + fix bugs
 Day 7:   Docs + cleanup + review toàn bộ
 
@@ -20,149 +20,180 @@ Song song: Quản lý tiến độ team (Minh, Nam)
 
 ---
 
-## Phase 3: Frontend Refactor
+## Phase 3: Frontend — 1 Màn Tối Giản (AIFA v3 §8)
 
-### Day 1-2: Foundation + RepoInput
+### Day 1-2: Foundation + RepoInput + GatePanel
 
-- [ ] **Setup mock API layer**
+- [x] **Setup mock API layer**
   - File: `frontend/src/services/api/sdlcApi.ts`
   - Tạo biến `VITE_USE_MOCK=true` trong `.env.development`
-  - Mock data cho 4 endpoints:
+  - Mock data cho AIFA endpoints:
     ```typescript
-    POST /api/sdlc/pipeline          → { projectId, status }
-    GET  /api/sdlc/pipeline/:id      → { status, currentStep, approvals, qaResult }
-    POST /api/sdlc/pipeline/:id/approve → { success }
-    GET  /api/sdlc/pipeline/:id/artifacts/:type → { content }
+    POST /api/v1/sdlc/run-po-agent     → { workflowId, status }
+    GET  /api/v1/sdlc/pipeline/:id     → { status, routeType, pipelinePhases, pendingGates, auditLog }
+    POST /api/v1/sdlc/approvals/:id    → { success }
+    POST /api/v1/sdlc/projects/:id/release-decision → { success, branch, finalMd }
     ```
-  - Mock data nên cover đủ các state: cloning, analyzing, po_running, awaiting_approval, qa_complete
+  - Mock data cover: REPO_CLONING, PO_RUNNING, DEV_FILE_GATE, SANDBOX_TESTING, QA_GATE, FINAL_APPROVAL
 
-- [ ] **Tạo Zustand store mới**
+- [x] **Update Zustand store**
   - File: `frontend/src/store/useSdlcStore.ts`
-  - State cần:
+  - State mới theo AIFA:
     ```typescript
     interface SdlcState {
-      projectId: string | null;
+      // Input
       repoUrl: string;
-      pipelineStatus: PipelineStatus;
-      currentStep: number;       // 1-6
-      approvals: ApprovalItem[];
+      featureRequest: string;           // 🆕 "add google login"
+
+      // Pipeline
+      workflowId: string | null;
+      routeType: 'UI' | 'BACKEND' | 'ANALYSIS' | 'FULLSTACK' | null;
+      pipelinePhases: PhaseStatus[];    // dynamic based on route
+
+      // Gates — phân loại (thay approvals)
+      pendingGates: GateItem[];
+      gateHistory: GateItem[];
+
+      // Audit
+      auditLog: AuditEntry[];           // 🆕 realtime
+
+      // Output
       qaResult: QAResult | null;
-      isLoading: boolean;
-      error: string | null;
-      // actions
-      submitRepo: (url: string) => Promise<void>;
-      pollStatus: () => Promise<void>;
-      approveItem: (id: string, action: 'approve' | 'reject', comment?: string) => Promise<void>;
+      releaseStatus: 'pending' | 'approved' | 'rejected' | null;
+
+      // Actions
+      startPipeline: (repoUrl: string, request: string) => Promise<void>;
+      resolveGate: (gateId: string, action: string, comment?: string) => Promise<void>;
+      releaseDecision: (action: string) => Promise<void>;
     }
     ```
 
-- [ ] **Component: RepoInput**
+- [x] **Update Component: RepoInput**
   - File: `frontend/src/pages/SdlcDashboard/components/RepoInput.tsx`
-  - Input field cho GitHub/GitLab URL
-  - Validate URL format (phải là .git hoặc https://github.com/...)
-  - Button "Analyze Repository"
-  - Loading state khi submitting
-  - Hiện repo info sau khi clone thành công (tech stack, file count)
+  - **Thêm:** input field cho Feature Request (AIFA v3: repo + request)
+  - URL validation (github.com/*, gitlab.com/*, bitbucket.org/*)
+  - Default request: "add google login"
   - **Wireframe:**
     ```
-    ┌─────────────────────────────────────────────────┐
-    │  🔗 Repository URL                              │
-    │  ┌───────────────────────────────────────┐ ┌──┐ │
-    │  │ https://github.com/user/repo.git      │ │▶ │ │
-    │  └───────────────────────────────────────┘ └──┘ │
-    │                                                 │
-    │  📊 Analysis: React, Node.js | 90 files | 3 components │
-    └─────────────────────────────────────────────────┘
+    ┌────────────────────────────────────────────────────┐
+    │  🔗 Repository URL            Feature Request      │
+    │  ┌───────────────────────┐   ┌──────────────────┐  │
+    │  │ https://github.com/...│   │ add google login │  │
+    │  └───────────────────────┘   └──────────────────┘  │
+    │                                         [▶ Run]    │
+    │  📊 sample-app | React + Node.js | 90 files        │
+    └────────────────────────────────────────────────────┘
+    ```
+
+- [ ] **NEW Component: GatePanel** ⭐ (core innovation — AIFA v3 §5.3, §5.2)
+  - File: `frontend/src/pages/SdlcDashboard/components/GatePanel.tsx`
+  - **Gate loại A (DEV file risk):**
+    - Hiển thị file path + risk reason
+    - Hiển thị **diff** (không chỉ tên file — AIFA v3 §12.11)
+    - Approve / Reject + Comment
+    - Badge: AUTO ✅ / APPROVAL 🔔 / BLOCK ❌
+  - **Gate loại B (PO clarification):**
+    - Tối đa 3 câu hỏi + options
+    - User chọn hoặc dùng default
+  - **Wireframe:**
+    ```
+    ┌───────────────────────────────────────────────────┐
+    │  🔔 DEV GATE — Require Approval                   │
+    │                                                   │
+    │  DEV muốn sửa `src/middleware/auth.js`            │
+    │  Risk: auth/security file                          │
+    │                                                   │
+    │  --- a/src/middleware/auth.js                      │
+    │  +++ b/src/middleware/auth.js                      │
+    │  @@ -15,3 +15,8 @@                                │
+    │  + const googleAuth = require('./google-oauth');   │
+    │  + app.use('/auth/google', googleAuth.router);    │
+    │                                                   │
+    │  [✅ Approve]  [❌ Reject + Comment]               │
+    └───────────────────────────────────────────────────┘
     ```
 
 ---
 
-### Day 3: PipelineStepper
+### Day 3: PipelineStepper Update + DiffViewer
 
-- [ ] **Component: PipelineStepper**
+- [x] **Update Component: PipelineStepper**
   - File: `frontend/src/pages/SdlcDashboard/components/PipelineStepper.tsx`
-  - 6 steps: Clone → Analyze → PO Agent → UX Agent → DEV Agent → QA Agent
-  - States cho mỗi step: pending | running | awaiting_approval | complete | failed
-  - Animated progress indicator
-  - Real-time update qua polling (mỗi 3s khi pipeline đang chạy)
+  - **Route linh hoạt** (AIFA v3 §4.2):
+    - FULLSTACK: PO → UX → DEV → QA (4 steps)
+    - BACKEND: PO → DEV → QA (3 steps, skip UX)
+    - ANALYSIS: PO → QA (2 steps)
+  - Hiện route badge: "Route: FULLSTACK" / "Route: BACKEND (skip UX)"
+  - States: pending | running | gate_pending | complete | failed
   - **Wireframe:**
     ```
     ┌──────────────────────────────────────────────────┐
-    │  ① Clone  ② Analyze  ③ PO  ④ UX  ⑤ DEV  ⑥ QA   │
-    │  [✅]──────[✅]──────[🔄]──[⏳]──[⏳]──[⏳]      │
-    │                       │                          │
-    │           "PO Agent đang phân tích PRD..."       │
+    │  Pipeline    Route: FULLSTACK (UI + Backend)      │
+    │  ┌──────┐   ┌──────┐   ┌──────┐   ┌──────┐     │
+    │  │ PO ✅ │──▶│ UX ✅ │──▶│DEV 🔔│──▶│ QA ○ │     │
+    │  │ 2m30s │   │ 1m45s│   │ gate │   │      │     │
+    │  └──────┘   └──────┘   └──────┘   └──────┘     │
     └──────────────────────────────────────────────────┘
+    ```
+
+- [ ] **NEW Component: DiffViewer** (AIFA v3 §12.11)
+  - File: `frontend/src/pages/SdlcDashboard/components/DiffViewer.tsx`
+  - Render unified diff với syntax highlighting
+  - Dùng `react-diff-viewer-continued` hoặc custom CSS
+  - Props: `diff: string`, `fileName: string`
+  - Used by: GatePanel, DetailModal
+  - ```powershell
+    cd frontend && npm install react-diff-viewer-continued
     ```
 
 ---
 
-### Day 4: ApprovalQueue + QAResultCard + DetailModal
+### Day 4: AuditLog + FinalApproval + ApprovalQueue + QAResultCard
 
-- [ ] **Component: ApprovalQueue**
-  - File: `frontend/src/pages/SdlcDashboard/components/ApprovalQueue.tsx`
-  - List các approval items cần user review
-  - Mỗi card hiện: agent name, artifact type, confidence score, summary
-  - Buttons: Approve ✅ / Reject ❌
-  - Optional comment khi reject
-  - Badge count trên header
+- [ ] **NEW Component: AuditLog** (AIFA v3 §8.6)
+  - File: `frontend/src/pages/SdlcDashboard/components/AuditLog.tsx`
+  - List gọn, realtime (SSE driven)
+  - Mỗi entry: timestamp + actor icon + action + status badge
+  - Filter: agent type (PO/UX/DEV/QA/A2A/SYSTEM)
   - **Wireframe:**
     ```
-    ┌─────────────────────────────────────────────────┐
-    │  📋 Pending Approvals (2)                       │
-    │  ┌───────────────────────────────────────────┐  │
-    │  │ 🤖 PO Agent — PRD Document                │  │
-    │  │ Confidence: 72%  ⚠️                       │  │
-    │  │ "Generated PRD for e-commerce checkout..." │  │
-    │  │ [👁 Detail]    [✅ Approve]  [❌ Reject]   │  │
-    │  └───────────────────────────────────────────┘  │
-    │  ┌───────────────────────────────────────────┐  │
-    │  │ 🤖 DEV Agent — Code Diff                  │  │
-    │  │ Confidence: 65%  ⚠️                       │  │
-    │  │ "Modified 5 files, added checkout API..."  │  │
-    │  │ [👁 Detail]    [✅ Approve]  [❌ Reject]   │  │
-    │  └───────────────────────────────────────────┘  │
-    └─────────────────────────────────────────────────┘
+    ┌───────────────────────────────────────────────────┐
+    │  📋 Audit Log (realtime)                          │
+    │  10:30:05  🤖 PO  ✅ Route classified: FULLSTACK  │
+    │  10:30:35  🤖 PO  ✅ PRD generated (conf: 88%)    │
+    │  10:31:00  🔗 A2A ✅ PO→UX handoff (hash ✓)       │
+    │  10:32:45  🎨 UX  ✅ UX spec generated             │
+    │  10:33:00  💻 DEV ⏳ Running...                     │
+    │  10:33:15  💻 DEV 🔔 Gate: auth.js needs approval  │
+    └───────────────────────────────────────────────────┘
     ```
 
-- [ ] **Component: QAResultCard**
-  - File: `frontend/src/pages/SdlcDashboard/components/QAResultCard.tsx`
-  - Hiện QA report summary (pass/fail, coverage, issues found)
-  - Link tới QA.md trong repo
-  - Final approve/reject cho release
-  - **Wireframe:**
-    ```
-    ┌─────────────────────────────────────────────────┐
-    │  🧪 QA Report — Final                           │
-    │  Status: ✅ PASSED  |  Coverage: 85%            │
-    │  Issues: 0 blockers, 2 warnings                 │
-    │  ┌─────────────────────────────────────────┐    │
-    │  │ QA.md đã được commit vào repo           │    │
-    │  │ Branch: agent/qa-session-abc123         │    │
-    │  └─────────────────────────────────────────┘    │
-    │  [👁 Full Report]  [✅ Release]  [❌ Reject]    │
-    └─────────────────────────────────────────────────┘
-    ```
+- [ ] **NEW Component: FinalApproval** (AIFA v3 §5.7)
+  - File: `frontend/src/pages/SdlcDashboard/components/FinalApproval.tsx`
+  - Nút "Approve Release" (disabled until QA passes + no blockers)
+  - Hiện output release info: branch name, commit hash, final.md status
+  - Owner/admin only
 
-- [ ] **Component: DetailModal**
-  - File: `frontend/src/pages/SdlcDashboard/components/DetailModal.tsx`
-  - Modal hiện chi tiết artifact (PRD, UX spec, code diff, QA report)
-  - Render markdown content
-  - Code diff syntax highlighting
-  - Scroll + copy button
+- [x] **Component: ApprovalQueue** — ✅ Giữ nguyên
+- [x] **Component: QAResultCard** — ✅ Giữ nguyên
+- [x] **Component: DetailModal** — ✅ Giữ nguyên
 
 ---
 
 ### Day 5: Integration với Backend
 
+- [ ] **Connect SSE stream**
+  - `EventSource('/api/v1/sdlc/stream/:workflowId')`
+  - Handle events: progress, gate_pending, gate_resolved, completed, error, heartbeat
+  - Reconnect on error
+
 - [ ] **Chuyển mock → real API**
   - Set `VITE_USE_MOCK=false`
-  - Verify tất cả endpoints hoạt động với backend của Minh
-  - Test WebSocket/polling real-time updates
+  - Verify tất cả endpoints hoạt động
+  - Test SSE realtime updates
 
 - [ ] **Update SdlcDashboard/index.tsx**
-  - File: `frontend/src/pages/SdlcDashboard/index.tsx`
-  - Layout mới: RepoInput → PipelineStepper → ApprovalQueue → QAResultCard
+  - Layout: RepoInput → PipelineStepper → GatePanel → AuditLog → FinalApproval
   - Archive các components cũ (move vào `_archive/`)
 
 ---
@@ -170,47 +201,49 @@ Song song: Quản lý tiến độ team (Minh, Nam)
 ### Day 6: Testing + Polish
 
 - [ ] **Test tất cả flows:**
-  - [ ] Submit repo → clone → analyze → hiện tech stack
-  - [ ] Pipeline chạy → stepper animate
-  - [ ] Approval card hiện khi confidence < 80%
-  - [ ] Approve → pipeline tiếp tục
-  - [ ] Reject → pipeline dừng
-  - [ ] QA complete → QAResultCard hiện kết quả
-  - [ ] Detail modal hiện đúng content
+  - [ ] Submit repo + request → clone → analyze → hiện tech stack
+  - [ ] PO route classification → stepper adjusts (3 or 4 steps)
+  - [ ] A2A handoff visible trong audit log
+  - [ ] DEV file gate → GatePanel hiện diff
+  - [ ] Approve gate → pipeline continues
+  - [ ] Reject gate → pipeline stops + reason required
+  - [ ] QA complete → QAResultCard hiện
+  - [ ] Final approval → RELEASED
+  - [ ] Audit log shows full trail
 
 - [ ] **UI polish:**
   - [ ] Responsive trên mobile
   - [ ] Dark mode compatibility
   - [ ] Loading skeletons
-  - [ ] Error states (network error, timeout, etc.)
+  - [ ] Error states (network error, timeout)
   - [ ] Empty states
 
 ---
 
 ## Phase 4: Documentation (Day 7)
 
-- [ ] Update `README.md` — hướng dẫn setup FE
+- [ ] Update `README.md` — hướng dẫn setup FE, remove Multica references
 - [ ] Update `frontend/docs/PROGRESS.md` — ghi nhận tiến độ
 - [ ] Review + merge code của Minh và Nam
-- [ ] Viết `docs/DEMO_GUIDE.md` — hướng dẫn demo
+- [ ] Viết `docs/DEMO_GUIDE.md` — hướng dẫn demo AIFA flow
 
 ---
 
 ## Quản Lý Dự Án (Song Song Cả Tuần)
 
 ### Daily check:
-- [ ] **Day 1:** Confirm Minh setup Multica thành công, Nam hiểu agent prompts
-- [ ] **Day 2:** Verify daemon + Claude Code CLI hoạt động
-- [ ] **Day 3:** Review API contract với Minh — thống nhất request/response format
-- [ ] **Day 4:** Check Nam đã refactor xong agent prompts chưa
-- [ ] **Day 5:** Integration day — pair với Minh để connect FE ↔ BE
-- [ ] **Day 6:** Full team test E2E flow
+- [ ] **Day 1:** Confirm Minh bắt đầu RepoService + GateBridge, Nam hiểu AIFA v3 strategy
+- [ ] **Day 2:** Verify Docker sandbox build thành công
+- [ ] **Day 3:** Review API contract với Minh — thống nhất SSE events + gate types
+- [ ] **Day 4:** Check Nam đã update agent prompts với route_classification chưa
+- [ ] **Day 5:** Integration day — pair với Minh để connect SSE + gates
+- [ ] **Day 6:** Full team test E2E AIFA flow
 - [ ] **Day 7:** Final review + docs
 
 ### Blocking issues cần escalate:
-- Nếu Multica server không chạy được → fallback plan: mock Multica, dùng subprocess trực tiếp
+- Nếu Docker Desktop không chạy → fallback: skip sandbox test, chỉ mock
 - Nếu API contract thay đổi → update mock data + thông báo Minh
-- Nếu Claude Code CLI cần login → chuẩn bị hướng dẫn cho Nam
+- Nếu SSE không hoạt động → fallback: polling mỗi 3s
 
 ---
 
@@ -218,17 +251,22 @@ Song song: Quản lý tiến độ team (Minh, Nam)
 
 | Action | File |
 |---|---|
-| 🆕 NEW | `frontend/src/pages/SdlcDashboard/components/RepoInput.tsx` |
-| 🆕 NEW | `frontend/src/pages/SdlcDashboard/components/PipelineStepper.tsx` |
-| 🆕 NEW | `frontend/src/pages/SdlcDashboard/components/ApprovalQueue.tsx` |
-| 🆕 NEW | `frontend/src/pages/SdlcDashboard/components/QAResultCard.tsx` |
-| 🆕 NEW | `frontend/src/pages/SdlcDashboard/components/DetailModal.tsx` |
+| 🆕 NEW | `frontend/src/pages/SdlcDashboard/components/GatePanel.tsx` |
+| 🆕 NEW | `frontend/src/pages/SdlcDashboard/components/DiffViewer.tsx` |
+| 🆕 NEW | `frontend/src/pages/SdlcDashboard/components/AuditLog.tsx` |
+| 🆕 NEW | `frontend/src/pages/SdlcDashboard/components/FinalApproval.tsx` |
+| 🔄 MODIFY | `frontend/src/pages/SdlcDashboard/components/RepoInput.tsx` |
+| 🔄 MODIFY | `frontend/src/pages/SdlcDashboard/components/PipelineStepper.tsx` |
+| ✅ KEEP | `frontend/src/pages/SdlcDashboard/components/ApprovalQueue.tsx` |
+| ✅ KEEP | `frontend/src/pages/SdlcDashboard/components/QAResultCard.tsx` |
+| ✅ KEEP | `frontend/src/pages/SdlcDashboard/components/DetailModal.tsx` |
+| ✅ KEEP | `frontend/src/pages/SdlcDashboard/components/HumanGatePanel.tsx` |
 | 🔄 MODIFY | `frontend/src/pages/SdlcDashboard/index.tsx` |
 | 🔄 MODIFY | `frontend/src/services/api/sdlcApi.ts` |
 | 🔄 MODIFY | `frontend/src/store/useSdlcStore.ts` |
 | 🆕 NEW | `docs/DEMO_GUIDE.md` |
 | 🔄 MODIFY | `README.md` |
-| 📁 ARCHIVE | 6 old FE components (AgentPhaseCard, FeatureRequestForm, etc.) |
+| 📁 ARCHIVE | 9 old FE components (AgentPhaseCard, FeatureRequestForm, McpActivityPanel, StageInspector, PenpotPreview, ReleaseGatePanel, ArtifactViewer, KanbanBoard, WorkflowMetricsPanel) |
 
 ---
 
@@ -237,41 +275,49 @@ Song song: Quản lý tiến độ team (Minh, Nam)
 ```typescript
 // === Types ===
 
-type PipelineStatus = 
-  | 'cloning' | 'analyzing' 
-  | 'po_running' | 'ux_running' | 'dev_running' | 'sandbox_testing' | 'qa_running'
-  | 'awaiting_approval'
-  | 'qa_complete' | 'failed';
+type GateType = 'DEV_FILE_GATE' | 'PO_CLARIFY' | 'HITL_REVIEW' | 'FINAL_RELEASE';
+type RouteType = 'UI' | 'BACKEND' | 'ANALYSIS' | 'FULLSTACK';
+type GateAction = 'approve' | 'reject';
 
-interface ApprovalItem {
+interface GateItem {
   id: string;
-  agentName: 'PO' | 'UX' | 'DEV' | 'QA';
-  artifactType: 'prd' | 'ux_spec' | 'code_diff' | 'qa_report';
-  confidence: number;       // 0-100
-  summary: string;
-  createdAt: string;        // ISO 8601
+  type: GateType;
+  payload: {
+    action?: string;         // 'MODIFY' | 'DELETE' | 'CREATE'
+    path?: string;           // file path
+    reason?: string;         // risk reason
+    diff?: string;           // unified diff (AIFA v3: "hiển thị diff")
+    questions?: string[];    // PO clarification questions (max 3)
+  };
+  createdAt: string;
 }
 
-interface QAResult {
-  status: 'passed' | 'failed';
-  coverage: number;          // 0-100
-  blockers: number;
-  warnings: number;
-  reportUrl: string;         // link tới QA.md trong repo
-  commitSha: string;
+interface AuditEntry {
+  timestamp: string;
+  actor: 'PO' | 'UX' | 'DEV' | 'QA' | 'A2A' | 'SYSTEM' | 'USER';
+  action: string;
+  status: 'ok' | 'warning' | 'error' | 'pending';
+}
+
+interface PhaseStatus {
+  agent: 'PO' | 'UX' | 'DEV' | 'QA';
+  status: 'pending' | 'running' | 'gate_pending' | 'completed' | 'failed' | 'skipped';
+  duration?: string;
 }
 
 interface PipelineResponse {
-  projectId: string;
-  status: PipelineStatus;
-  currentStep: number;       // 1-6
+  workflowId: string;
+  status: string;
+  routeType: RouteType;
+  pipelinePhases: PhaseStatus[];
+  pendingGates: GateItem[];
+  auditLog: AuditEntry[];
+  qaResult?: QAResult;
   repoInfo?: {
     techStack: string[];
     fileCount: number;
     components: string[];
   };
-  approvals: ApprovalItem[];
-  qaResult?: QAResult;
 }
 ```
 
