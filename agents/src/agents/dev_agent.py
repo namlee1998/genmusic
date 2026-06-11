@@ -1,16 +1,22 @@
-"""
-DEV Agent - Implementation Plan, Code Patch, Changed Files, Risk Assessment.
+"""DEV worker for the optional Python/LangChain execution path.
+
+Beginner reading guide: E2B can execute when explicitly enabled; otherwise the
+module asks the configured model for a patch, runs the local sandbox checker,
+and retries a bounded number of times. Node remains the source of truth for
+artifact validation, gates, and downstream QA ordering.
 """
 from __future__ import annotations
-import json, logging, os, re
+import json
+import logging
+import os
+import re
+import sys
 from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from src.schemas.aidlc import DEVAgentInput, DEVAgentOutput, ChangedFile
-import sys
-import os
 
-# Try to import E2BRuntime
+# E2B is optional; local fallback remains available when it is not installed.
 try:
     # Add sandbox to sys.path so we can import e2b_runtime
     current_dir = os.path.dirname(os.path.abspath(__file__))

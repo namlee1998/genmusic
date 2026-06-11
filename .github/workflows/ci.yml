@@ -1,0 +1,54 @@
+name: CI
+
+# I1: gate merges on the backend test suite + the demo bad-case scenarios.
+# A broken happy/bad-case branch turns the build red and blocks merge.
+on:
+  push:
+    branches: [main, staging, 'features/**']
+  pull_request:
+
+jobs:
+  backend:
+    name: backend tests + demo preflight
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      # Isolated sqlite DB for CI — never the committed dev.db.
+      DATABASE_URL: "file:./ci.db"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Push schema to the isolated CI database
+        run: npx prisma db push --skip-generate --accept-data-loss
+
+      # Drift guard: compare the live (just-pushed) DB against the schema models.
+      # Repo uses db push (no migration history), so `migrate status` is N/A —
+      # `migrate diff --exit-code` is the right check (exit 2 on drift).
+      - name: Schema drift check
+        run: >-
+          npx prisma migrate diff
+          --from-schema-datasource prisma/schema.prisma
+          --to-schema-datamodel prisma/schema.prisma
+          --exit-code
+
+      - name: Unit & integration tests
+        run: npm test
+
+      # Demo scenario preflight — the six bad/good branches must all pass.
+      # Uses its own isolated smoke DB (set inside the script).
+      - name: Demo scenario preflight
+        run: npm run demo:smoke

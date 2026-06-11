@@ -1,5 +1,10 @@
-// Prisma schema for AIDLC Backend
-// This file sets up SQLite to replace Supabase PostgreSQL
+// AIFA persistence map.
+//
+// Beginner reading guide:
+// - Start with Task, AgentEvent, AgentArtifact, HitlDecision, and PendingGate.
+// - Task stores one worker run; AgentEvent stores its ordered lifecycle history.
+// - Artifact content may live on disk while this database stores its metadata.
+// - SQLite is the active local/runtime database; DATABASE_URL isolates dev/tests.
 
 generator client {
   provider = "prisma-client-js"
@@ -7,7 +12,9 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = "file:./dev.db"
+  // Env-driven so tests/CI/smoke can target an isolated sqlite file and
+  // never touch dev.db. Local dev sets DATABASE_URL="file:./dev.db" in .env.
+  url      = env("DATABASE_URL")
 }
 
 // ============================================
@@ -109,6 +116,14 @@ model Task {
   retryCount        Int      @default(0)
   lastRetryReason   String?
   gateMode          String?  // strict_manual | confidence_based | auto_approve_safe
+  executionStatus   String   @default("queued")
+  attempt           Int      @default(0)
+  maxAttempts       Int      @default(1)
+  lockedBy          String?
+  lockedAt          DateTime?
+  heartbeatAt       DateTime?
+  startedAt         DateTime?
+  finishedAt        DateTime?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -116,6 +131,24 @@ model Task {
   user              User?    @relation(fields: [userId], references: [id])
   project           Project  @relation(fields: [projectId], references: [id])
   artifacts         AgentArtifact[]
+  events            AgentEvent[]
+}
+
+model AgentEvent {
+  id         String   @id @default(uuid())
+  taskId     String
+  projectId  String
+  sequence   Int
+  type       String
+  actor      String
+  payload    String?
+  createdAt  DateTime @default(now())
+
+  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, sequence])
+  @@index([projectId, createdAt])
+  @@index([taskId, createdAt])
 }
 
 model AgentArtifact {
@@ -126,6 +159,10 @@ model AgentArtifact {
   artifactType     String
   artifactKey      String?
   title            String?
+  // Validation status (T1): VALID | INVALID | PENDING. Default VALID keeps
+  // pre-existing rows non-breaking; new rows are set explicitly after the
+  // role validator (_validateGateOutput) runs.
+  status           String   @default("VALID")
   contentJson      String?  // JSON string
   contentText      String?  // Text
   ordinal          Int      @default(0)
@@ -202,6 +239,24 @@ model HitlDecision {
   jsonPatch         String?  // JSON string — RFC 6902 operations (for edit_approve)
   payload           String?  // JSON string — extra context (rerun input/output, etc.)
   createdAt     DateTime @default(now())
+}
+
+model PendingGate {
+  approvalId String   @id
+  taskId     String
+  projectId  String?
+  role       String
+  kind       String
+  payload    String
+  status     String   @default("pending")
+  resolution String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  resolvedAt DateTime?
+
+  @@index([taskId])
+  @@index([projectId])
+  @@index([status])
 }
 
 model FeatureBacklog {

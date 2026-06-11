@@ -1,4 +1,16 @@
+// HTTP/SSE adapter for the SDLC control plane.
+//
+// Beginner reading guide: this class validates transport-level input and shapes
+// responses. It delegates workflow decisions to SdlcWorkflowService and
+// repository handling to repoService.
+
 const SdlcWorkflowService = require('../services/SdlcWorkflowService');
+const repoService = require('../services/repoService');
+const gateBridge = require('../services/gateBridge');
+const demoBoardService = require('../services/demoBoardService');
+
+// Demo scenarios exposed by the dev-only scenario selector endpoint.
+const DEFAULT_MOCK_SCENARIO = 'happy_path';
 
 class SdlcController {
   // ─── IntentGate ──────────────────────────────────────────────────────────
@@ -27,7 +39,7 @@ class SdlcController {
 
   async runPOAgent(req, res, next) {
     try {
-      const { project_id, source_task_id, feature_request, feedback_prompt, backlog_id } = req.body;
+      const { project_id, source_task_id, feature_request, feedback_prompt, backlog_id, repo_url, repo_path, branch, request } = req.body;
       if (!source_task_id && (!project_id || !feature_request?.title)) {
         return res.status(400).json({
           status: 'error',
@@ -41,10 +53,47 @@ class SdlcController {
         featureRequest: feature_request,
         feedbackPrompt: feedback_prompt || '',
         backlogId: backlog_id || null,
+        // T1.4: repo-aware, user-initiated workflow start.
+        repoUrl: repo_url || null,
+        repoPath: repo_path || null,
+        branch: branch || 'main',
+        request: request || feature_request?.title || '',
+        newWorkflow: !source_task_id,
         user: req.user,
       });
 
       return res.status(202).json({ task_id: task.id, status: task.status, type: task.type });
+    } catch (err) { next(err); }
+  }
+
+  /**
+   * Upload an entire local folder (from anywhere on the user's machine) as the
+   * workflow repo. The browser cannot send an absolute path, so it streams the
+   * files; we write them into the project workspace and git-init a fresh repo.
+   * Returns the server-side `repo_path` to pass to run-po-agent.
+   */
+  async uploadRepo(req, res, next) {
+    try {
+      const { project_id, request } = req.body;
+      if (!project_id) return res.status(400).json({ status: 'error', message: 'project_id is required' });
+      const files = req.files || [];
+      if (!files.length) return res.status(400).json({ status: 'error', message: 'No folder files were uploaded' });
+
+      // `paths` carries each file's relative path (webkitRelativePath), aligned
+      // by index with req.files (multer preserves field order).
+      const rawPaths = req.body.paths;
+      const paths = Array.isArray(rawPaths) ? rawPaths : (rawPaths ? [rawPaths] : []);
+      const entries = files.map((f, i) => ({ relativePath: paths[i] || f.originalname, buffer: f.buffer }));
+
+      const result = await repoService.prepareUploadedRepo({
+        projectId: project_id,
+        files: entries,
+        request: request || '',
+      });
+      return res.status(201).json({
+        status: 'success',
+        data: { repo_path: result.repoPath, base_branch: result.baseBranch, file_count: result.fileCount },
+      });
     } catch (err) { next(err); }
   }
 
@@ -158,6 +207,31 @@ class SdlcController {
     } catch (err) { next(err); }
   }
 
+  // ─── Gate approvals (T2.4) — resolve a pending onGate gate ────────────────
+
+  async resolveApproval(req, res, next) {
+    try {
+      const { approval_id } = req.params;
+      const { action, comment, answers } = req.body || {};
+      const result = await SdlcWorkflowService.resolveApproval({
+        approvalId: approval_id,
+        action,
+        comment: comment || '',
+        answers: answers ?? null,
+        user: req.user,
+      });
+      return res.json({ status: 'success', data: result });
+    } catch (err) { next(err); }
+  }
+
+  async listPendingApprovals(req, res, next) {
+    try {
+      const { task_id, project_id } = req.query;
+      const gates = await SdlcWorkflowService.listPendingGates({ taskId: task_id || null, projectId: project_id || null });
+      return res.json({ status: 'success', data: { pending: gates } });
+    } catch (err) { next(err); }
+  }
+
   // ─── Status & Data ───────────────────────────────────────────────────────
 
   async getTaskStatus(req, res, next) {
@@ -180,11 +254,20 @@ class SdlcController {
           gate_evaluation: task.gateEvaluation || null,
           artifacts: task.artifacts || [],
           hitl_decision: task.hitlDecision || null,
+          pending_gates: task.pendingGates || [],
           // Structured HITL fields (plan 2.4 / 2.7 / 2.8)
           output_version: task.outputVersion ?? 0,
           retry_count: task.retryCount ?? 0,
           last_retry_reason: task.lastRetryReason || null,
           gate_mode: task.gateMode || null,
+          execution_status: task.executionStatus || null,
+          attempt: task.attempt ?? 0,
+          max_attempts: task.maxAttempts ?? 1,
+          locked_by: task.lockedBy || null,
+          locked_at: task.lockedAt || null,
+          heartbeat_at: task.heartbeatAt || null,
+          started_at: task.startedAt || null,
+          finished_at: task.finishedAt || null,
           agent_output: task.agentOutput || null,
           approved_output: task.approvedOutput || null,
           created_at: task.createdAt,
@@ -203,33 +286,77 @@ class SdlcController {
       res.setHeader('Connection', 'keep-alive');
       res.flushHeaders?.();
 
-      const sendEvent = (event, data) => {
+      // DMO-004: an SSE frame carries an `id:` = the persisted AgentEvent
+      // sequence so a client can resume after a drop. The cursor comes from the
+      // standard EventSource `Last-Event-ID` header, or `?after_sequence=` for
+      // fetch-based clients.
+      const sendEvent = (event, data, id = null) => {
+        if (id !== null) res.write(`id: ${id}\n`);
         res.write(`event: ${event}\n`);
         res.write(`data: ${JSON.stringify(data)}\n\n`);
       };
 
+      const cursorRaw = req.headers['last-event-id'] ?? req.query.after_sequence ?? 0;
+      let lastSeq = Number.isFinite(Number(cursorRaw)) ? Number(cursorRaw) : 0;
+
+      // Replay every persisted AgentEvent after the cursor (and tail new ones),
+      // each tagged with its sequence id so a reconnect never loses an event.
+      const flushPersistedEvents = async () => {
+        const events = await SdlcWorkflowService
+          .getTaskEvents(task_id, { afterSequence: lastSeq, limit: 500 }, req.user)
+          .catch(() => []);
+        for (const ev of events) {
+          sendEvent('agent_event', {
+            sequence: ev.sequence,
+            type: ev.type,
+            actor: ev.actor,
+            payload: ev.payload,
+            createdAt: ev.createdAt,
+          }, ev.sequence);
+          if (ev.sequence > lastSeq) lastSeq = ev.sequence;
+        }
+      };
+
       sendEvent('progress', {
         step: 'connected',
+        resumedFrom: lastSeq,
         log: 'Connected to SDLC task stream...',
       });
+      // Immediate replay so a reconnect catches up without waiting a poll tick.
+      await flushPersistedEvents();
 
       const heartbeatInterval = setInterval(() => {
         res.write(': heartbeat\n\n');
       }, 15000);
 
       let pollInterval;
+      const unsubscribeGateEvents = gateBridge.subscribe(task_id, (event, data) => {
+        sendEvent(event, data);
+      });
       const stopAll = () => {
         clearInterval(pollInterval);
         clearInterval(heartbeatInterval);
+        unsubscribeGateEvents();
       };
+
+      // T2/T7: only emit a gate_pending event when the pending set changes, so
+      // the client isn't spammed every poll tick.
+      const seenGates = new Set();
 
       pollInterval = setInterval(async () => {
         try {
+          await flushPersistedEvents(); // DMO-004: stream newly-persisted events with ids
           const task = await SdlcWorkflowService.getTaskStatus(task_id, req.user);
 
           if (!task) {
             sendEvent('error', { message: 'Task not found' });
             stopAll(); res.end(); return;
+          }
+
+          for (const gate of task.pendingGates || []) {
+            if (seenGates.has(gate.approvalId)) continue;
+            seenGates.add(gate.approvalId);
+            sendEvent('gate_pending', gate);
           }
 
           if (task.status === 'completed') {
@@ -304,6 +431,8 @@ class SdlcController {
           comment: result.hitlDecision.comment,
           release_status: result.hitlDecision.payload?.release_status || null,
           idempotent_replay: result.idempotentReplay || false,
+          // T6.2 — multi-part release outputs (branch, commit, final.md, …).
+          release_outputs: result.releaseOutputs || null,
         },
       });
     } catch (err) { next(err); }
@@ -313,6 +442,16 @@ class SdlcController {
     try {
       const { project_id } = req.params;
       const trail = await SdlcWorkflowService.getAuditTrail(project_id, req.user);
+      return res.json({ status: 'success', data: trail });
+    } catch (err) { next(err); }
+  }
+
+  // T7: thin alias for the audit trail under a UI-friendly name. No new logic —
+  // delegates straight to getAuditTrail (:id is the project id).
+  async getTimeline(req, res, next) {
+    try {
+      const { id } = req.params;
+      const trail = await SdlcWorkflowService.getAuditTrail(id, req.user);
       return res.json({ status: 'success', data: trail });
     } catch (err) { next(err); }
   }
@@ -330,6 +469,90 @@ class SdlcController {
       const { project_id } = req.params;
       const result = await SdlcWorkflowService.getProjectArtifacts(project_id, req.user);
       return res.json({ status: 'success', data: result });
+    } catch (err) { next(err); }
+  }
+
+  async getTaskEvents(req, res, next) {
+    try {
+      const { task_id } = req.params;
+      const { after_sequence, limit } = req.query;
+      const events = await SdlcWorkflowService.getTaskEvents(task_id, {
+        afterSequence: after_sequence,
+        limit,
+      }, req.user);
+      return res.json({ status: 'success', data: { events } });
+    } catch (err) { next(err); }
+  }
+
+  async downloadReleaseFile(req, res, next) {
+    try {
+      const { project_id, file_name } = req.params;
+      const filePath = await SdlcWorkflowService.getReleaseFile(project_id, file_name, req.user);
+      return res.download(filePath, file_name);
+    } catch (err) { next(err); }
+  }
+
+  // ─── Dev-only: demo scenario selector ────────────────────────────────────
+  // Lets the UI flip MOCK_SCENARIO at runtime (the mock builder reads it per
+  // run). Disabled in production. Never persisted — process env only.
+
+  getMockScenario(req, res) {
+    return res.json({
+      status: 'success',
+      data: {
+        scenario: DEFAULT_MOCK_SCENARIO,
+        mockEnabled: process.env.USE_MOCK_AGENTS === 'true',
+        executionPath: process.env.EXECUTION_PATH || 'langchain',
+        mockClaudeCode: false,
+        available: [DEFAULT_MOCK_SCENARIO],
+      },
+    });
+  }
+
+  // ─── Cancel a running/awaiting task ──────────────────────────────────────
+
+  async cancelTask(req, res, next) {
+    try {
+      const { task_id } = req.params;
+      const result = await SdlcWorkflowService.cancelTask({
+        taskId: task_id,
+        reason: req.body?.reason || 'cancelled by user',
+        user: req.user,
+      });
+      return res.json({ status: 'success', data: result });
+    } catch (err) { next(err); }
+  }
+
+  // ─── Primary /aifa board endpoints ─────────────────────────────────────────
+
+  async seedDemoBoard(req, res, next) {
+    try {
+      const reset = req.query.reset === 'true' || req.body?.reset === true;
+      const sourceRepoPath = req.body?.sourceRepoPath || req.body?.source_repo_path || null;
+      const mode = req.body?.mode || 'three_flow';
+      const data = await demoBoardService.seedBoard({ reset, sourceRepoPath, mode });
+      return res.json({ status: 'success', data });
+    } catch (err) { next(err); }
+  }
+
+  async getDemoBoard(req, res, next) {
+    try {
+      const data = await demoBoardService.getBoard();
+      return res.json({ status: 'success', data: data || { status: 'empty', flows: [] } });
+    } catch (err) { next(err); }
+  }
+
+  async getDemoUxDoc(req, res, next) {
+    try {
+      const data = await demoBoardService.getUxDoc(req.params.project_id);
+      return res.json({ status: 'success', data });
+    } catch (err) { next(err); }
+  }
+
+  async retryDemoFlow(req, res, next) {
+    try {
+      const data = await demoBoardService.retryFlow(req.params.project_id);
+      return res.json({ status: 'success', data });
     } catch (err) { next(err); }
   }
 

@@ -1,3 +1,10 @@
+// Typed frontend boundary for /api/v1/sdlc.
+//
+// Beginner reading guide: this file contains transport helpers only. Components
+// call these functions; backend workflow behavior lives in SdlcWorkflowService.
+// The primary /aifa UI polls getDemoBoard(), while subscribeTaskSSE remains
+// available for task-level clients and the legacy dashboard.
+
 import api, { getBaseURL } from './client';
 import { getStoredAuthSession } from './authStorage';
 
@@ -7,6 +14,29 @@ export const getApiErrorMessage = (error: unknown, fallback: string) => {
   if (typeof error !== 'object' || error === null) return fallback;
   const candidate = error as { response?: { data?: { message?: string } }; message?: string };
   return candidate.response?.data?.message || candidate.message || fallback;
+};
+
+export interface SdlcError {
+  message: string;
+  code?: string | null;
+  phase?: string | null;
+  requestId?: string | null;
+}
+
+/** Parse the backend `{status, code, message, phase, requestId}` error envelope. */
+export const parseApiError = (error: unknown, fallback: string): SdlcError => {
+  if (typeof error !== 'object' || error === null) return { message: fallback };
+  const candidate = error as {
+    response?: { data?: { message?: string; code?: string; phase?: string; requestId?: string }; headers?: Record<string, string> };
+    message?: string;
+  };
+  const data = candidate.response?.data;
+  return {
+    message: data?.message || candidate.message || fallback,
+    code: data?.code ?? null,
+    phase: data?.phase ?? null,
+    requestId: data?.requestId ?? candidate.response?.headers?.['x-request-id'] ?? null,
+  };
 };
 
 export interface FeatureRequest {
@@ -56,7 +86,7 @@ export const runQAAgent = (sourceTaskId: string, feedbackPrompt = '') =>
 export const submitGateDecision = (taskId: string, payload: GateDecisionPayload) =>
   api.post(`${BASE}/tasks/${taskId}/gate-decision`, payload).then((r) => r.data);
 
-// Structured HITL decision (plan section 2.3 / 2.8) — idempotent, optimistic-locked.
+// Structured stage-review decision: idempotent and optimistic-locked.
 export interface StructuredDecisionBody {
   decision_id: string;
   base_output_version: number;
@@ -94,11 +124,229 @@ export const submitReleaseDecision = (
 export const getAuditTrail = (projectId: string) =>
   api.get(`${BASE}/audit-trail/${projectId}`).then((r) => r.data.data);
 
+// ── Repo-aware workflow start and live onGate approvals ────────────────────
+
+/**
+ * Start a repo-aware, PO-first workflow (applies the 429 cap).
+ * Pass `repoUrl` to clone a remote repo, or `repoPath` to use an already-cloned
+ * local folder ("Open folder" flow). Both are optional — omit for a repo-less run.
+ */
+export const runWorkflow = (
+  projectId: string,
+  request: string,
+  repoUrl?: string,
+  branch = 'main',
+  repoPath?: string,
+) => api.post(`${BASE}/run-po-agent`, {
+  project_id: projectId,
+  feature_request: { title: request, description: request, priority: 'High' },
+  request,
+  repo_url: repoUrl || undefined,
+  repo_path: repoPath || undefined,
+  branch,
+}).then((r) => r.data);
+
+/**
+ * Upload a whole local folder (chosen anywhere on the user's machine) as the
+ * workflow repo. Browsers can't expose an absolute path, so we stream the files
+ * with their relative paths; the backend writes them into the project workspace
+ * and git-inits a repo, returning the server-side `repo_path`.
+ */
+export const uploadRepoFolder = (
+  projectId: string,
+  files: Array<File & { relativePath?: string }>,
+  request = '',
+  onProgress?: (pct: number) => void,
+) => {
+  const form = new FormData();
+  form.append('project_id', projectId);
+  if (request) form.append('request', request);
+  for (const f of files) {
+    form.append('files', f);
+    form.append('paths', f.relativePath || (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name);
+  }
+  return api.post(`${BASE}/upload-repo`, form, {
+    timeout: 10 * 60 * 1000,
+    onUploadProgress: (e) => {
+      if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100));
+    },
+  }).then((r) => r.data.data as { repo_path: string; base_branch: string; file_count: number });
+};
+
+export interface PendingGate {
+  approvalId: string;
+  taskId: string;
+  projectId?: string | null;
+  role: string;
+  kind: 'tool' | 'question';
+  status?: 'pending' | 'interrupted';
+  payload: {
+    tool?: string;
+    toolName?: string;
+    file_path?: string | null;
+    diff?: string | null;
+    reason?: string;
+    category?: string;
+    display?: { command?: string | null; filePath?: string | null; diffPreview?: string | null; prompt?: string | null };
+    questions?: Array<{ question: string; header?: string; options?: Array<{ label: string; description?: string }> }>;
+  };
+  createdAt?: string;
+}
+
+export const listPendingApprovals = (params: { taskId?: string; projectId?: string }) =>
+  api.get(`${BASE}/approvals`, { params: { task_id: params.taskId, project_id: params.projectId } })
+    .then((r) => r.data.data.pending as PendingGate[]);
+
+/** Resolve a tool gate (approve/reject) or a question gate (answers). */
+export const resolveApproval = (
+  approvalId: string,
+  body: { action?: 'approve' | 'reject'; comment?: string; answers?: string[] | Record<string, string> },
+) => api.post(`${BASE}/approvals/${approvalId}`, body).then((r) => r.data.data);
+
 export const getWorkflowMetrics = (projectId: string) =>
   api.get(`${BASE}/projects/${projectId}/metrics`).then((r) => r.data.data);
 
 export const getProjectArtifacts = (projectId: string) =>
   api.get(`${BASE}/projects/${projectId}/artifacts`).then((r) => r.data.data);
+
+export const downloadReleaseFile = (projectId: string, fileName: 'final.md' | 'qa-report.md') =>
+  api.get(`${BASE}/projects/${projectId}/release-files/${fileName}`, { responseType: 'blob' })
+    .then((r) => r.data as Blob);
+
+// ── Dev-only demo scenario selector (MOCK_SCENARIO) ───────────────────────
+
+export interface MockScenarioState {
+  scenario: string;
+  mockEnabled: boolean;
+  executionPath: string;
+  mockClaudeCode: boolean;
+  available: string[];
+}
+
+export const getMockScenario = (): Promise<MockScenarioState> =>
+  api.get(`${BASE}/dev/mock-scenario`).then((r) => r.data.data);
+
+// ── Primary /aifa board: real_single or staged three_flow mode ─────────────
+
+export interface CardAction {
+  label: string;
+  kind?: 'review' | 'penpot' | 'diff' | 'test-report' | 'approve' | 'reject';
+  placeholder?: string;
+}
+export interface BoardCard {
+  label: string;
+  agent: string;
+  title: string;
+  description: string;
+  whatsIncluded: string[];
+  taskId: string;
+  stage?: string;
+  invalid: boolean;
+  validationIssues?: Array<{ rule: string; detail: string }>;
+  penpotUrl?: string | null;
+  patchDiff?: string | null;
+  changedFiles?: string[] | null;
+  testCases?: Array<Record<string, unknown>> | null;
+  qaReport?: string | null;
+  actions?: { review: CardAction; approve: CardAction; reject: CardAction };
+}
+export interface BoardPhase {
+  stage: string;
+  status: string;
+  committed: boolean;
+  awaitingReview: boolean;
+  invalid: boolean;
+  error?: string | null;
+}
+export interface BoardReleaseGate {
+  eligible: boolean;
+  status: string;
+  canDecide: boolean;
+  approvalBlocked: boolean;
+}
+export interface BoardFlow {
+  flowNo: number;
+  target: string;
+  projectId?: string;
+  active?: boolean;
+  status: 'seeding' | 'ready' | 'error' | 'unavailable';
+  repo?: string;
+  branch?: string;
+  progress?: { done: number; total: number };
+  currentPhase?: string;
+  waitingFor?: string | null;
+  reviewStage?: string | null;
+  phases?: BoardPhase[];
+  card?: BoardCard | null;
+  failure?: {
+    stage: string;
+    error: string;
+    code?: string | null;
+    recoverable?: boolean | null;
+  } | null;
+  pendingGates?: PendingGate[];
+  releaseGate?: BoardReleaseGate | null;
+  released?: string | null;
+}
+export interface DemoBoard {
+  id?: string;
+  mode?: 'three_flow' | 'real_single';
+  status: string;
+  error?: string | null;
+  flows: BoardFlow[];
+}
+
+export interface WorkflowTimelineEvent {
+  timestamp: string;
+  actor: string;
+  action: string;
+  type: string;
+  taskId?: string | null;
+  agent?: string | null;
+  status?: string | null;
+  decision?: string | null;
+  comment?: string | null;
+  reason?: string | null;
+  gate?: string | null;
+  stateFrom?: string | null;
+  stateTo?: string | null;
+  fromAgent?: string | null;
+  toAgent?: string | null;
+  versionTag?: string | null;
+  severity?: string | null;
+}
+
+export interface WorkflowTimeline {
+  projectId: string;
+  events: WorkflowTimelineEvent[];
+  phaseTransitions?: Array<Record<string, unknown>>;
+}
+
+// Real Claude Code runs make these board calls slower than ordinary CRUD (the
+// backend reads live workflow status), so override the 30s default to avoid a
+// misleading "timeout exceeded" banner while a real run is provisioning.
+const BOARD_TIMEOUT_MS = 120_000;
+
+export const seedDemoBoard = (
+  reset = false,
+  sourceRepoPath?: string,
+  mode: 'three_flow' | 'real_single' = 'three_flow',
+): Promise<DemoBoard> =>
+  api.post(`${BASE}/demo/seed-board`, { reset, sourceRepoPath, mode }, { timeout: BOARD_TIMEOUT_MS }).then((r) => r.data.data);
+
+export const getDemoBoard = (): Promise<DemoBoard> =>
+  api.get(`${BASE}/demo/board`, { timeout: BOARD_TIMEOUT_MS }).then((r) => r.data.data);
+
+export interface UxDoc { taskId: string; fileName: string; markdown: string; }
+
+export const getDemoUxDoc = (projectId: string): Promise<UxDoc | null> =>
+  api.get(`${BASE}/demo/flow/${projectId}/ux-doc`).then((r) => r.data.data);
+
+export const retryDemoFlow = (projectId: string): Promise<{ retried: boolean; stage?: string; reason?: string }> =>
+  api.post(`${BASE}/demo/flow/${projectId}/retry`, {}, { timeout: BOARD_TIMEOUT_MS }).then((r) => r.data.data);
+
+export const getWorkflowTimeline = (projectId: string): Promise<WorkflowTimeline> =>
+  api.get(`${BASE}/workflow/${projectId}/timeline`).then((r) => r.data.data);
 
 // ── Backlog ───────────────────────────────────────────────────────────────
 
@@ -119,6 +367,8 @@ export const subscribeTaskSSE = (
     onProgress?: (data: Record<string, unknown>) => void;
     onCompleted?: (data: Record<string, unknown>) => void;
     onError?: (data: Record<string, unknown>) => void;
+    onGatePending?: (data: Record<string, unknown>) => void;
+    onGateResolved?: (data: Record<string, unknown>) => void;
   }
 ): AbortController => {
   const abort = new AbortController();
@@ -157,6 +407,8 @@ export const subscribeTaskSSE = (
               const data = JSON.parse(line.slice(6));
               if (currentEvent === 'progress') handlers.onProgress?.(data);
               else if (currentEvent === 'completed') handlers.onCompleted?.(data);
+              else if (currentEvent === 'gate_pending') handlers.onGatePending?.(data);
+              else if (currentEvent === 'gate_resolved') handlers.onGateResolved?.(data);
               else if (currentEvent === 'error') handlers.onError?.(data);
             } catch { /* Ignore malformed SSE frames and continue streaming. */ }
             currentEvent = null;
@@ -209,256 +461,36 @@ export interface PipelineResponse {
   qaResult?: QAResult;
 }
 
-// Client-side mock simulation state
-let mockPipeline: PipelineResponse | null = null;
-let mockTimer: any = null;
+// Legacy dashboard compatibility adapters. These call real backend routes;
+// client-side pipeline simulation is intentionally not supported.
+export const startFromRepo = (projectId: string, repoUrl: string): Promise<any> =>
+  runWorkflow(projectId, 'Analyze and improve this repository', repoUrl);
 
-const MOCK_ARTIFACTS: Record<string, string> = {
-  prd: `# Product Requirements Document (PRD)
-
-## 1. Overview
-This is a generated PRD for the repository analysis. The agent has identified the core stack is React and Node.js.
-
-## 2. Features
-- User Auth & Session Management
-- Interactive Dashboard Layout
-- Dark/Light Mode support
-- Repository Integration & Analysis
-
-## 3. Tech Stack Requirements
-- React 19 + TypeScript
-- Zustand for lightweight state management
-- Vite for building and hot-reload
-`,
-  ux_spec: `# UI/UX Specification
-
-## 1. Design System
-- Primary: HSL 220 90% 56% (Vibrant Blue)
-- Dark Background: HSL 224 71% 4% (Premium Sleek Dark)
-- Accent: HSL 142 70% 45% (Vibrant Emerald)
-
-## 2. Page Hierarchy
-- /auth: Simplified login
-- /sdlc: Single-page delivery dashboard with 3 primary panes
-- /sdlc/audit: Interactive audit trail
-- /sdlc/outputs: Detailed artifact list
-`,
-  code_diff: `diff --git a/src/App.tsx b/src/App.tsx
-index 1a2b3c4..5d6e7f8 100644
---- a/src/App.tsx
-+++ b/src/App.tsx
-@@ -10,6 +10,12 @@ export default function App() {
-   return (
-     <div className="app-container">
-       <header>
--        <h1>SDLC Platform</h1>
-+        <h1>End-to-End Autonomous Software Factory</h1>
-       </header>
-+      <main>
-+        <RepoInput />
-+        <PipelineStepper />
-+      </main>
-     </div>
-   );
- }
-`,
-  qa_report: `# 🧪 QA Report Summary
-
-## 1. Unit Tests
-- Passed: 45 / 45 (100%)
-- Failed: 0 (0%)
-- Warnings: 2
-
-## 2. Code Coverage
-- Statements: 92.5%
-- Branches: 88.0%
-- Functions: 94.1%
-- Lines: 92.5%
-
-## 3. Security Audits
-- 0 critical vulnerabilities found.
-- 1 low severity dependency warning (npm audit).
-`
-};
-
-const startMockSimulation = (projectId: string, repoUrl: string) => {
-  if (mockTimer) clearTimeout(mockTimer);
-
-  mockPipeline = {
-    projectId,
-    status: 'cloning',
-    currentStep: 1,
-    repoInfo: {
-      techStack: ['React 19', 'Zustand', 'TypeScript', 'Vite'],
-      fileCount: 124,
-      components: ['RepoInput', 'PipelineStepper', 'ApprovalQueue', 'QAResultCard']
-    },
-    approvals: []
-  };
-
-  const steps = [
-    { status: 'cloning', step: 1, delay: 3000 },
-    { status: 'analyzing', step: 1, delay: 3000 },
-    { status: 'po_running', step: 2, delay: 4000 },
-    { status: 'awaiting_po_approval', step: 2, delay: 0 },
-    { status: 'ux_running', step: 3, delay: 4000 },
-    { status: 'dev_running', step: 4, delay: 4000 },
-    { status: 'sandbox_testing', step: 5, delay: 3000 },
-    { status: 'awaiting_dev_approval', step: 5, delay: 0 },
-    { status: 'qa_running', step: 6, delay: 4000 },
-    { status: 'qa_complete', step: 6, delay: 0 }
-  ];
-
-  let currentIdx = 0;
-
-  const runNext = () => {
-    if (!mockPipeline) return;
-    if (currentIdx >= steps.length) return;
-
-    const nextStep = steps[currentIdx];
-
-    if (nextStep.status === 'awaiting_po_approval') {
-      mockPipeline.status = 'awaiting_approval';
-      mockPipeline.approvals.push({
-        id: 'po-prd',
-        agentName: 'PO',
-        artifactType: 'prd',
-        confidence: 78,
-        summary: 'Generated high-fidelity PRD for the repository. Requires verification of core tech stack.',
-        createdAt: new Date().toISOString()
-      });
-      currentIdx++; // point to next state for when resumed
-      return;
-    }
-
-    if (nextStep.status === 'awaiting_dev_approval') {
-      mockPipeline.status = 'awaiting_approval';
-      mockPipeline.approvals.push({
-        id: 'dev-code',
-        agentName: 'DEV',
-        artifactType: 'code_diff',
-        confidence: 65,
-        summary: 'Integrated Tailwind configuration and main components. Please verify changes to index.tsx.',
-        createdAt: new Date().toISOString()
-      });
-      currentIdx++; // point to next state for when resumed
-      return;
-    }
-
-    mockPipeline.status = nextStep.status;
-    mockPipeline.currentStep = nextStep.step;
-
-    if (nextStep.status === 'qa_complete') {
-      mockPipeline.qaResult = {
-        status: 'passed',
-        coverage: 92.5,
-        blockers: 0,
-        warnings: 2,
-        reportUrl: 'QA.md',
-        commitSha: 'a7b8c9d'
-      };
-      return;
-    }
-
-    currentIdx++;
-    mockTimer = setTimeout(runNext, nextStep.delay);
-  };
-
-  mockTimer = setTimeout(runNext, 3000);
-};
-
-const approveMockItem = (approvalId: string) => {
-  if (!mockPipeline) return;
-  const item = mockPipeline.approvals.find(a => a.id === approvalId);
-  if (item) {
-    item.approved = true;
-
-    if (approvalId === 'po-prd') {
-      mockPipeline.status = 'ux_running';
-      mockPipeline.currentStep = 3;
-      setTimeout(() => {
-        if (!mockPipeline) return;
-        mockPipeline.status = 'dev_running';
-        mockPipeline.currentStep = 4;
-        setTimeout(() => {
-          if (!mockPipeline) return;
-          mockPipeline.status = 'sandbox_testing';
-          mockPipeline.currentStep = 5;
-          setTimeout(() => {
-            if (!mockPipeline) return;
-            mockPipeline.status = 'awaiting_approval';
-            mockPipeline.approvals.push({
-              id: 'dev-code',
-              agentName: 'DEV',
-              artifactType: 'code_diff',
-              confidence: 65,
-              summary: 'Integrated Tailwind configuration and main components. Please verify changes to index.tsx.',
-              createdAt: new Date().toISOString()
-            });
-          }, 3000);
-        }, 4000);
-      }, 4000);
-    } else if (approvalId === 'dev-code') {
-      mockPipeline.status = 'qa_running';
-      mockPipeline.currentStep = 6;
-      setTimeout(() => {
-        if (!mockPipeline) return;
-        mockPipeline.status = 'qa_complete';
-        mockPipeline.currentStep = 6;
-        mockPipeline.qaResult = {
-          status: 'passed',
-          coverage: 92.5,
-          blockers: 0,
-          warnings: 2,
-          reportUrl: 'QA.md',
-          commitSha: 'a7b8c9d'
-        };
-      }, 4000);
-    }
-  }
-};
-
-export const startFromRepo = (projectId: string, repoUrl: string): Promise<any> => {
-  if (import.meta.env.VITE_USE_MOCK === 'true') {
-    startMockSimulation(projectId, repoUrl);
-    return Promise.resolve({ projectId, status: 'cloning' });
-  }
-  return api.post(`${BASE}/start-from-repo`, { project_id: projectId, repo_url: repoUrl }).then(r => r.data);
-};
-
-export const getPipelineStatus = (projectId: string): Promise<PipelineResponse> => {
-  if (import.meta.env.VITE_USE_MOCK === 'true') {
-    if (!mockPipeline) {
-      return Promise.resolve({
-        projectId,
-        status: 'idle',
-        currentStep: 0,
-        approvals: []
-      });
-    }
-    return Promise.resolve(mockPipeline);
-  }
-  return api.get(`${BASE}/pipeline-status/${projectId}`).then(r => r.data.data);
-};
+export const getPipelineStatus = (projectId: string): Promise<PipelineResponse> =>
+  Promise.all([getWorkflowStatus(projectId), listPendingApprovals({ projectId })])
+    .then(([status, pending]) => ({
+      projectId,
+      status: String(status.currentPhase || 'idle').toLowerCase(),
+      currentStep: Math.max(0, ['po', 'ux', 'dev', 'qa'].findIndex((stage) => status.phases?.[stage]) + 1),
+      approvals: pending.map((gate) => ({
+        id: gate.approvalId,
+        agentName: gate.role.replace('-agent', '').toUpperCase() as ApprovalItem['agentName'],
+        artifactType: gate.kind === 'tool' ? 'code_diff' : 'prd',
+        confidence: 0,
+        summary: gate.payload.reason || 'Human input required',
+        createdAt: gate.createdAt || new Date().toISOString(),
+      })),
+    }));
 
 export const approveItem = (projectId: string, approvalId: string, action: 'approve' | 'reject', comment?: string): Promise<any> => {
-  if (import.meta.env.VITE_USE_MOCK === 'true') {
-    if (action === 'approve') {
-      approveMockItem(approvalId);
-    } else {
-      if (mockPipeline) {
-        mockPipeline.status = 'failed';
-      }
-    }
-    return Promise.resolve({ success: true });
-  }
-  return api.post(`${BASE}/pipeline/${projectId}/approve`, { approval_id: approvalId, action, comment }).then(r => r.data);
+  void projectId;
+  return resolveApproval(approvalId, { action, comment });
 };
 
-export const getArtifactContent = (projectId: string, type: string): Promise<{ content: string }> => {
-  if (import.meta.env.VITE_USE_MOCK === 'true') {
-    return Promise.resolve({ content: MOCK_ARTIFACTS[type] || 'No content found' });
-  }
-  return api.get(`${BASE}/pipeline/${projectId}/artifacts/${type}`).then(r => r.data);
-};
-
+export const getArtifactContent = (projectId: string, type: string): Promise<{ content: string }> =>
+  getProjectArtifacts(projectId).then((result) => {
+    const artifact = (result.artifacts || []).find((item: any) => item.type === type);
+    const content = artifact?.contentText
+      || (artifact?.contentJson ? JSON.stringify(artifact.contentJson, null, 2) : 'No content found');
+    return { content };
+  });

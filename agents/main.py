@@ -1,12 +1,14 @@
-"""
-FastAPI server — AI Agents Service
-Exposes HTTP + SSE endpoints for the direct LangChain worker runtime.
-This is the bridge between The Backend (Node.js) and the AI Agents (Python).
+"""FastAPI transport adapter for the optional Python/LangChain worker runtime.
+
+Beginner reading guide:
+- The Node backend sends a RunAgentRequest to ``/v1/agent/run``.
+- This module converts generic context into a role-specific Pydantic input.
+- It dispatches to PO/UX/DEV/QA modules and streams progress/completion as SSE.
+- Workflow ordering, persistence, validation, and HITL gates remain in Node.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -18,12 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
-from src.schemas import (
-    Agent1Input,
-    Agent2Input,
-    Agent3Input,
-    RunAgentRequest,
-)
+from src.schemas import RunAgentRequest
 from src.schemas.aidlc import (
     DEVAgentInput,
     FeatureRequest,
@@ -182,13 +179,17 @@ def _parse_agent_input(node_target: str, context: dict):
             feedback_prompt=_feedback_context(context),
         )
     if node_target == "qa_agent":
+        sandbox_result = _first_context_value(context, "sandbox_result")
+        sandbox_report = _text_context(context, "sandbox_report")
+        if not sandbox_report and sandbox_result:
+            sandbox_report = json.dumps(sandbox_result, ensure_ascii=False)
         return QAAgentInput(
             prd=_text_context(context, "prd"),
             acceptance_criteria=_list_context(context, "acceptance_criteria"),
             ux_spec=_text_context(context, "ux_spec"),
             implementation_plan=_text_context(context, "implementation_plan"),
-            mock_code_diff=_text_context(context, "mock_code_diff"),
-            sandbox_report=_text_context(context, "sandbox_report"),
+            mock_code_diff=_text_context(context, "patch_diff") or _text_context(context, "mock_code_diff"),
+            sandbox_report=sandbox_report,
             risk_assessment=_text_context(context, "risk_assessment"),
             risk_level=_text_context(context, "risk_level", "LOW"),
             feedback_prompt=_feedback_context(context),
@@ -403,14 +404,12 @@ async def run_agent_sync(request: RunAgentRequest):
 
 
 @app.get("/v1/agent/stream/{session_id}")
-async def stream_agent_ws(session_id: str):
-    """
-    WebSocket endpoint for real-time agent trace streaming.
-    (Placeholder — full WS implementation requires uvicorn wsproto)
-    """
+async def stream_capabilities(session_id: str):
+    """Compatibility endpoint that points clients to the supported SSE stream."""
     return {
         "session_id": session_id,
-        "message": "WebSocket streaming available via SSE at /v1/agent/run",
+        "transport": "sse",
+        "message": "Use POST /v1/agent/run for real-time SSE progress.",
     }
 
 

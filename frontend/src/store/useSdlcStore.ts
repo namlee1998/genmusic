@@ -31,6 +31,9 @@ export interface PhaseStatus {
   versionStatus: string | null;
   gate: string | null;
   hitlDecision: HitlDecision | null;
+  // Derived flags surfaced by the backend (T1/T5).
+  awaitingReview?: boolean;
+  invalid?: boolean;
   createdAt: string | null;
   updatedAt: string | null;
 }
@@ -99,6 +102,24 @@ export interface AuditEvent {
   type: 'agent_run' | 'agent_complete' | 'hitl_decision' | 'a2a_handoff' | 'escalation' | 'release_decision' | 'failure';
 }
 
+export interface PhaseTransition {
+  type: 'PHASE_TRANSITION';
+  from: string;
+  to: string;
+  cause: string;
+  at: string;
+  agent?: string | null;
+  taskId?: string | null;
+  requestId?: string | null;
+}
+
+export interface SdlcError {
+  message: string;
+  code?: string | null;
+  phase?: string | null;
+  requestId?: string | null;
+}
+
 export interface WorkflowMetrics {
   projectId: string;
   generatedAt: string;
@@ -158,10 +179,11 @@ interface SdlcState {
 
   // ── Audit Trail ───────────────────────────────────────────────────────
   auditEvents: AuditEvent[];
+  phaseTransitions: PhaseTransition[];
   isFeatureRequestFormOpen: boolean;
 
   // ── Error ─────────────────────────────────────────────────────────────
-  error: string | null;
+  error: SdlcError | null;
 
   // ── New Pipeline States ────────────────────────────────────────────────
   repoUrl: string;
@@ -183,8 +205,9 @@ interface SdlcState {
   setArtifacts: (artifacts: Artifact[]) => void;
   selectArtifact: (artifact: Artifact | null) => void;
   setAuditEvents: (events: AuditEvent[]) => void;
+  setPhaseTransitions: (transitions: PhaseTransition[]) => void;
   setFeatureRequestFormOpen: (isOpen: boolean) => void;
-  setError: (msg: string | null) => void;
+  setError: (err: string | SdlcError | null) => void;
   clearTask: () => void;
 
   // ── New Actions ───────────────────────────────────────────────────────
@@ -205,6 +228,7 @@ export const useSdlcStore = create<SdlcState>((set, get) => ({
   artifacts: [],
   selectedArtifact: null,
   auditEvents: [],
+  phaseTransitions: [],
   isFeatureRequestFormOpen: false,
   error: null,
 
@@ -231,8 +255,9 @@ export const useSdlcStore = create<SdlcState>((set, get) => ({
   setArtifacts: (artifacts) => set({ artifacts }),
   selectArtifact: (artifact) => set({ selectedArtifact: artifact }),
   setAuditEvents: (events) => set({ auditEvents: events }),
+  setPhaseTransitions: (transitions) => set({ phaseTransitions: transitions }),
   setFeatureRequestFormOpen: (isOpen) => set({ isFeatureRequestFormOpen: isOpen }),
-  setError: (msg) => set({ error: msg }),
+  setError: (err) => set({ error: err == null ? null : (typeof err === 'string' ? { message: err } : err) }),
   clearTask: () => set({ activeTaskId: null, activePhase: null, taskStatus: null, sseLogs: [], sseActive: false }),
 
   // New Action implementations
