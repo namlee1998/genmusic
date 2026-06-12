@@ -21,41 +21,6 @@ datasource db {
 // Core Tables
 // ============================================
 
-model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String   // Added for local auth
-  role      String   @default("user")
-  createdAt DateTime @default(now())
-  
-  projects  ProjectMembership[]
-  tasks     Task[]
-}
-
-model AdminUser {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  passwordHash String
-  fullName     String?
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-}
-
-model Profile {
-  userId     String   @id
-  fullName   String?
-  age        Int?
-  jobTitle   String?
-  address    String?
-  phone      String?
-  bio        String?
-  avatarUrl  String?
-  avatarPath String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-}
-
 model Project {
   id          String   @id @default(uuid())
   name        String
@@ -64,32 +29,7 @@ model Project {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   
-  members     ProjectMembership[]
   tasks       Task[]
-}
-
-model ProjectMembership {
-  id        String   @id @default(uuid())
-  userId    String
-  projectId String
-  role      String   @default("member")
-  invitedBy String?
-  joinedAt  DateTime?
-  
-  user      User     @relation(fields: [userId], references: [id])
-  project   Project  @relation(fields: [projectId], references: [id])
-}
-
-model ProjectInvitation {
-  id        String   @id @default(uuid())
-  projectId String
-  email     String
-  role      String   @default("member")
-  token     String   @unique
-  status    String   @default("pending")
-  invitedBy String
-  expiresAt DateTime
-  createdAt DateTime @default(now())
 }
 
 // ============================================
@@ -127,8 +67,6 @@ model Task {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  userId            String?
-  user              User?    @relation(fields: [userId], references: [id])
   project           Project  @relation(fields: [projectId], references: [id])
   artifacts         AgentArtifact[]
   events            AgentEvent[]
@@ -269,61 +207,5 @@ model FeatureBacklog {
   status        String   @default("draft")
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
-}
-
-model Plan {
-  id                   String   @id @default(uuid())
-  name                 String
-  creditsLimit         Int      @default(0)
-  maxProjects          Int?
-  maxMembersPerProject Int?
-  taskHistoryDays      Int?
-  description          String?
-  isActive             Boolean  @default(true)
-  createdAt            DateTime @default(now())
-}
-
-model UserSubscription {
-  id            String   @id @default(uuid())
-  userId        String   @unique
-  planId        String
-  status        String   @default("active")
-  creditsUsed   Int      @default(0)
-  creditsTotal  Int      @default(0)
-  periodStart   DateTime?
-  periodEnd     DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-}
-
-model UsageLog {
-  id            String   @id @default(uuid())
-  userId        String?
-  projectId     String?
-  taskId        String?
-  agentType     String
-  status        String
-  tokenInput    Int      @default(0)
-  tokenOutput   Int      @default(0)
-  tokenTotal    Int      @default(0)
-  creditsCharged Float   @default(0)
-  executedAt    DateTime @default(now())
-}
-
-model AuditLog {
-  id            String   @id @default(uuid())
-  userId        String?
-  action        String
-  entityType    String?
-  entityId      String?
-  details       String?  // JSON string
-  createdAt     DateTime @default(now())
-}
-
-model DashboardSnapshot {
-  id            String   @id @default(uuid())
-  date          DateTime @unique
-  metrics       String   // JSON string
-  createdAt     DateTime @default(now())
 }
 

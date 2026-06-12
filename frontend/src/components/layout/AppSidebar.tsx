@@ -1,15 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { useAuthStore } from '@/store/useAuthStore';
 import { useHitlStore } from '@/store/useHitlStore';
 import { useSdlcStore } from '@/store/useSdlcStore';
-import { getProfile, type Profile } from '@/services/api';
 import {
   Layers,
   History,
-  FolderOpen,
-  Settings,
   Gavel,
   ChevronDown,
   ChevronLeft,
@@ -64,59 +60,20 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [profile, setProfile] = useState<Profile | null>(null);
-
-  const { user } = useAuthStore();
   const { interventions } = useHitlStore();
   const setFeatureRequestFormOpen = useSdlcStore((s) => s.setFeatureRequestFormOpen);
 
   const activeProject = projects.find((p) => p.id === activeProjectId);
 
-  // Fetch profile for displaying job role & full name in sidebar footer
-  useEffect(() => {
-    let mounted = true;
-    const loadProfile = async () => {
-      try {
-        const data = await getProfile();
-        if (mounted) setProfile(data);
-      } catch {
-        /* no-op */
-      }
-    };
-    void loadProfile();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
   const filteredProjects = projects.filter((p) =>
     p.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
-
-  const displayName =
-    profile?.full_name ||
-    (user?.user_metadata?.company_name as string) ||
-    user?.email?.split('@')[0] ||
-    t('layout.welcomeAdmin');
-  const roleName = (profile?.job_title || user?.user_metadata?.job_title || t('layout.welcomeGuest')) as string;
-  const avatarUrl =
-    profile?.avatar_url ||
-    `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=0D8ABC&color=fff`;
 
   // Active path checking helpers
   const isBuildActive =
     location.pathname === '/sdlc' || location.pathname === '/sdlc/';
   const isAuditActive = location.pathname.startsWith('/sdlc/audit');
-  const isOutputsActive = location.pathname.startsWith('/sdlc/outputs');
   const isHitlActive = location.pathname.startsWith('/sdlc/hitl');
-  const isSettingsActive =
-    location.pathname.startsWith('/projects/') && location.pathname.endsWith('/settings');
-
-  // Trigger project settings page navigation
-  const handleOpenSettings = (id: string) => {
-    onSelectProject(id);
-    navigate(`/projects/${id}/settings`);
-  };
 
   return (
     <aside
@@ -235,19 +192,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                             {project.role}
                           </span>
                         )}
-                        {/* Quick Settings Gear */}
-                        <button
-                          type="button"
-                          title={t('layout.projectSettings')}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setIsDropdownOpen(false);
-                            handleOpenSettings(project.id);
-                          }}
-                          className="shrink-0 text-on-surface-variant/50 hover:text-primary transition-colors opacity-0 group-hover:opacity-100 p-0.5"
-                        >
-                          <Settings size={12} />
-                        </button>
+
                         {/* Quick Delete Trash */}
                         {project.role === 'owner' && onDeleteProject && (
                           <button
@@ -409,79 +354,12 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
             {!collapsed && <span>{t('dashboard.audit', 'Audit Trail')}</span>}
           </button>
 
-          {/* Worker Outputs */}
-          <button
-            onClick={() => activeProjectId && navigate('/sdlc/outputs')}
-            disabled={!activeProjectId}
-            title={collapsed ? t('dashboard.outputs', 'Worker Outputs') : undefined}
-            className={`
-              w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs transition-all relative group
-              ${
-                !activeProjectId
-                  ? 'opacity-40 cursor-not-allowed text-on-surface-variant/50'
-                  : isOutputsActive
-                  ? 'bg-primary/10 border-l-[3px] border-primary text-primary font-bold shadow-[inset_0_0_10px_rgba(99,102,241,0.06)]'
-                  : 'text-on-surface-variant hover:bg-surface-variant hover:text-on-surface border-l-[3px] border-transparent'
-              }
-              ${collapsed ? 'justify-center border-l-0' : ''}
-            `}
-          >
-            <FolderOpen size={16} className={isOutputsActive ? 'text-primary' : 'text-on-surface-variant/80'} />
-            {!collapsed && <span>{t('dashboard.outputs', 'Worker Outputs')}</span>}
-          </button>
 
-          {/* Settings */}
-          <button
-            onClick={() => activeProjectId && navigate(`/projects/${activeProjectId}/settings`)}
-            disabled={!activeProjectId}
-            title={collapsed ? t('layout.projectSettings', 'Project Settings') : undefined}
-            className={`
-              w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs transition-all relative group
-              ${
-                !activeProjectId
-                  ? 'opacity-40 cursor-not-allowed text-on-surface-variant/50'
-                  : isSettingsActive
-                  ? 'bg-primary/10 border-l-[3px] border-primary text-primary font-bold shadow-[inset_0_0_10px_rgba(99,102,241,0.06)]'
-                  : 'text-on-surface-variant hover:bg-surface-variant hover:text-on-surface border-l-[3px] border-transparent'
-              }
-              ${collapsed ? 'justify-center border-l-0' : ''}
-            `}
-          >
-            <Settings size={16} className={isSettingsActive ? 'text-primary' : 'text-on-surface-variant/80'} />
-            {!collapsed && <span>{t('layout.projectSettings', 'Project Settings')}</span>}
-          </button>
         </nav>
       </div>
 
       {/* 4. Footer Section */}
       <div className="border-t border-outline-variant shrink-0 flex flex-col">
-        {/* Profile Navigator */}
-        <button
-          onClick={() => navigate('/profile')}
-          title={t('layout.myProfile')}
-          className={`
-            flex items-center gap-3 p-3 text-left transition-colors hover:bg-surface-variant/60
-            ${collapsed ? 'justify-center' : ''}
-          `}
-        >
-          <div className="w-8 h-8 rounded-xl border border-outline-variant overflow-hidden shrink-0">
-            <img
-              src={avatarUrl}
-              alt="avatar"
-              className="w-full h-full object-cover"
-            />
-          </div>
-          {!collapsed && (
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold leading-tight text-on-surface truncate">
-                {displayName}
-              </p>
-              <p className="text-[9px] text-on-surface-variant/80 uppercase tracking-widest font-label-mono leading-none mt-1 truncate">
-                {roleName}
-              </p>
-            </div>
-          )}
-        </button>
 
         {/* Collapsible toggle */}
         <div className="border-t border-outline-variant/30 p-2">

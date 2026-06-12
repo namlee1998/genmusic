@@ -2,12 +2,8 @@ import React, { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 
 const AppShell = lazy(() => import('@/components/layout/AppShell').then(module => ({ default: module.AppShell })));
-const AuthPage = lazy(() => import('@/pages/Auth/AuthPage').then(module => ({ default: module.AuthPage })));
 
 const NotFoundPage = lazy(() => import('@/pages/NotFound').then(module => ({ default: module.NotFoundPage })));
-const UpgradePlanPage = lazy(() => import('@/pages/UpgradePlan').then(module => ({ default: module.UpgradePlanPage })));
-const AdminApp = lazy(() => import('@/pages/Admin').then(module => ({ default: module.AdminApp })));
-const AifaDemo = lazy(() => import('@/pages/AifaDemo'));
 
 const PageLoader = () => (
   <div className="min-h-screen flex items-center justify-center bg-background">
@@ -24,18 +20,10 @@ export default function App() {
       <Suspense fallback={<PageLoader />}>
         <Routes>
           <Route path="/" element={<Navigate to="/sdlc/hitl" replace />} />
-          <Route path="/auth" element={<AuthPage />} />
-          <Route path="/admin/*" element={<AdminApp />} />
-          <Route
-            path="/upgrade"
-            element={
-              <ProtectedRoute>
-                <UpgradePlanPage />
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/auth" element={<Navigate to="/sdlc/hitl" replace />} />
+          <Route path="/admin/*" element={<Navigate to="/sdlc/hitl" replace />} />
+          <Route path="/upgrade" element={<Navigate to="/sdlc/hitl" replace />} />
           <Route path="/app/*" element={<Navigate to="/sdlc/hitl" replace />} />
-          <Route path="/aifa" element={<AifaDemo />} />
           
           {/* ── AIDLC Control Platform ── */}
           <Route
@@ -47,22 +35,8 @@ export default function App() {
             }
           />
 
-          <Route
-            path="/profile"
-            element={
-              <ProtectedRoute>
-                <AppShell />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/projects/:projectId/settings"
-            element={
-              <ProtectedRoute>
-                <AppShell />
-              </ProtectedRoute>
-            }
-          />
+
+
 
           <Route path="*" element={<NotFoundPage />} />
         </Routes>

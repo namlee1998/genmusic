@@ -4,15 +4,11 @@ import { useTranslation } from 'react-i18next';
 import { AppSidebar } from './AppSidebar';
 import { useApiActions } from '@/hooks/useApiActions';
 import { useAppStore } from '@/store';
-import { ProfilePage } from '@/pages/Profile';
-import { ProjectSettings } from '@/pages/ProjectSettings';
 import { NotFoundPage } from '@/pages/NotFound';
 import SdlcDashboard from '@/pages/SdlcDashboard';
 import AuditPage from '@/pages/SdlcDashboard/AuditPage';
-import OutputsPage from '@/pages/SdlcDashboard/OutputsPage';
 import HitlDashboard from '@/pages/SdlcDashboard/HitlDashboard';
 import { AppTopBar } from './AppTopBar';
-import { QuotaWarningBanner } from './QuotaWarningBanner';
 import { useSdlcStore } from '@/store/useSdlcStore';
 
 
@@ -129,18 +125,19 @@ function ImportProjectDialog({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const validateUrl = (urlStr: string) => {
-    if (!urlStr) return t('layout.projectNameLabel', 'Repository URL is required');
-    const regex = /^(https?:\/\/)?(www\.)?(github|gitlab)\.com\/[\w-]+\/[\w.-]+(\.git)?\/?$/i;
-    if (!regex.test(urlStr)) {
-      return t('layout.createProjectFailed', 'Please enter a valid GitHub or GitLab URL');
+  const validatePath = (pathStr: string) => {
+    if (!pathStr.trim()) return t('layout.projectNameLabel', 'Local folder path is required');
+    const isWindowsAbsolute = /^[a-zA-Z]:[\\/]/i.test(pathStr.trim());
+    const isUnixAbsolute = pathStr.trim().startsWith('/') || pathStr.trim().startsWith('\\\\');
+    if (!isWindowsAbsolute && !isUnixAbsolute) {
+      return 'Please enter a valid absolute local directory path (e.g., C:\\Projects\\my-app or /Users/name/my-app)';
     }
     return '';
   };
 
   const handleSubmit = async () => {
-    const urlStr = value.trim();
-    const validationError = validateUrl(urlStr);
+    const pathStr = value.trim();
+    const validationError = validatePath(pathStr);
     if (validationError) {
       setError(validationError);
       return;
@@ -148,8 +145,9 @@ function ImportProjectDialog({
     setSubmitting(true);
     setError(null);
     try {
-      const repoName = urlStr.replace(/\.git\/?$/, '').split('/').pop() || 'Imported Project';
-      await onSubmit(repoName, urlStr);
+      const cleanPath = pathStr.replace(/[\\/]+$/, '');
+      const repoName = cleanPath.split(/[\\/]/).pop() || 'Imported Project';
+      await onSubmit(repoName, pathStr);
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { message?: string } } })?.response?.data?.message ??
@@ -221,14 +219,11 @@ export const AppShell: React.FC = () => {
   const navigate = useNavigate();
   const isFeatureRequestFormOpen = useSdlcStore((s) => s.isFeatureRequestFormOpen);
   const setFeatureRequestFormOpen = useSdlcStore((s) => s.setFeatureRequestFormOpen);
-  const isProfileRoute = location.pathname === '/profile';
-  const isProjectSettingsRoute = location.pathname.startsWith('/projects/') && location.pathname.endsWith('/settings');
   const isAuditRoute = location.pathname === '/sdlc/audit' || location.pathname === '/sdlc/audit/';
-  const isOutputsRoute = location.pathname === '/sdlc/outputs' || location.pathname === '/sdlc/outputs/';
   const isHitlRoute = location.pathname === '/sdlc/hitl' || location.pathname === '/sdlc/hitl/';
   const isUnknownAppRoute = location.pathname.startsWith('/sdlc/')
     && location.pathname !== '/sdlc/' && location.pathname !== '/sdlc'
-    && !isAuditRoute && !isOutputsRoute && !isHitlRoute;
+    && !isAuditRoute && !isHitlRoute;
 
   const [panelCollapsed, setPanelCollapsed] = useState(() => {
     return localStorage.getItem('project-panel-collapsed') === 'true';
@@ -290,7 +285,6 @@ export const AppShell: React.FC = () => {
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-background dark">
       <AppTopBar />
-      <QuotaWarningBanner />
 
       <div className="flex flex-1 min-h-0">
         <AppSidebar
@@ -306,19 +300,11 @@ export const AppShell: React.FC = () => {
 
         <main className="flex-1 flex flex-col min-w-0 min-h-0">
           <div className="flex-1 overflow-hidden">
-            {isProfileRoute ? (
-              <ProfilePage />
-            ) : isProjectSettingsRoute ? (
-              <ProjectSettings />
-            ) : isUnknownAppRoute ? (
+            {isUnknownAppRoute ? (
               <NotFoundPage mode="panel" />
             ) : isAuditRoute ? (
               <div className="flex flex-col h-full bg-background">
                 <AuditPage />
-              </div>
-            ) : isOutputsRoute ? (
-              <div className="flex flex-col h-full bg-background">
-                <OutputsPage />
               </div>
             ) : isHitlRoute ? (
               <div className="flex flex-col h-full bg-background">
