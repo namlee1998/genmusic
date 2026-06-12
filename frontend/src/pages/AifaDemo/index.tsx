@@ -1,11 +1,11 @@
-// AIFA — Multi-Agent Workflows board.
+// Primary /aifa workflow board.
 //
-// The user opens a cloned-repo folder; AIFA spins up three independent workflows
-// on that repo, each PARKED at a different agent's review (Flow 1 → PO, Flow 2 →
-// DEV, Flow 3 → QA). Every flow is then walked review-by-review to the final
-// release; on release the combined run report (4 agents + audit trail) is written
-// back into the opened folder as a distinct file per flow. Audit trail is also
-// collected in the system but intentionally hidden from this view.
+// Beginner reading guide:
+// - refetch() polls the backend board view-model every 2.5 seconds.
+// - uploadAndSeed() copies the selected folder to the backend and starts a board.
+// - review/release handlers call sdlcApi and then refresh the board.
+// - real_single mode shows one interactive run; staged demo mode can show three
+//   independent review flows.
 //
 // Self-contained inline styles (light theme) so the board never collides with
 // the dashboard CSS. Route: /aifa.
@@ -13,30 +13,37 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createProject } from '@/services/api/documentsApi';
 import {
-  seedDemoBoard,
-  getDemoBoard,
-  getDemoUxDoc,
-  retryDemoFlow,
-  getWorkflowTimeline,
-  getProjectArtifacts,
-  uploadRepoFolder,
-  submitGateDecision,
-  submitReleaseDecision,
-  downloadReleaseFile,
-  resolveApproval,
+  seedDemoBoard, //Khởi tạo workflow demo
+  getDemoBoard, //Lấy trạng thái board hiện tại
+  getDemoUxDoc, //Lấy UX markdown doc để ghi ra folder
+  retryDemoFlow, //
+  getWorkflowTimeline,//Lấy audit timeline
+  getProjectArtifacts,//Lấy artifact agent đã sinh
+  uploadRepoFolder,//Upload folder repo lên backend
+  submitGateDecision,//Approve/request changes cho output agent
+  submitReleaseDecision,//Approve/reject final release
+  downloadReleaseFile,//Tải report release
+  resolveApproval,//Xử lý live Claude gate: approve tool, reject tool, answer question
   type DemoBoard,
   type BoardFlow,
   type PendingGate,
   type WorkflowTimelineEvent,
 } from '@/services/api/sdlcApi';
 
-const uuid = () => (crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
-const FEATURE_SLUG = 'add-google-login';
+const uuid = () => (crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`); //Tạo decision_id cho release decision. Nếu browser hỗ trợ crypto.randomUUID() thì dùng nó, không thì fallback bằng timestamp + random.
+const FEATURE_SLUG = 'add-google-login'; //Feature demo hiện tại là add Google login. Tên này được dùng khi upload repo và đặt tên file output.
 
 // Heavy / generated folders we never upload — keeps the repo payload small.
-const IGNORE_UPLOAD = /(^|\/)(node_modules|\.git|dist|build|out|\.next|\.turbo|\.cache|coverage|\.venv|__pycache__)(\/|$)/;
-const MAX_UPLOAD_FILE_SIZE = 25 * 1024 * 1024;
+const IGNORE_UPLOAD = /(^|\/)(node_modules|\.git|dist|build|out|\.next|\.turbo|\.cache|coverage|\.venv|__pycache__)(\/|$)/;//Regex bỏ qua các folder nặng hoặc không nên upload:
+const MAX_UPLOAD_FILE_SIZE = 25 * 1024 * 1024;//Mỗi file upload tối đa 25MB.
 
+//Type local cho File System Access API
+//Lý do cần type này: TypeScript có thể chưa có sẵn type đầy đủ cho File System Access API, nên code tự định nghĩa tối thiểu các method cần dùng:
+//getFile()
+//createWritable()
+//values()
+//getFileHandle()
+//Dùng để :đọc file trong folder local + Ghi file .md trở lại folder local sau khi workflow release.
 interface LocalFileHandle {
   kind: 'file';
   name: string;
@@ -49,6 +56,9 @@ interface LocalDirectoryHandle {
   values(): AsyncIterableIterator<LocalFileHandle | LocalDirectoryHandle>;
   getFileHandle(name: string, options?: { create?: boolean }): Promise<LocalFileHandle>;
 }
+
+// Hàm này duyệt đệ quy folder local:Duyệt từng entry. Nếu entry là folder Nếu không nằm trong IGNORE_UPLOAD thì Gọi lại collectDirectoryFiles(). Nếu entry là file thì getFile()gắn thêm file.relativePathpush vào mảng files và Trả về danh sách File[]
+
 
 const collectDirectoryFiles = async (
   directory: LocalDirectoryHandle,
@@ -65,7 +75,7 @@ const collectDirectoryFiles = async (
       continue;
     }
     const file = await entry.getFile() as File & { relativePath?: string };
-    file.relativePath = `${rootName}/${relativePath}`;
+    file.relativePath = `${rootName}/${relativePath}`; //Backend cần biết file nằm ở path nào trong repo, không chỉ tên file. Vì vậy frontend gắn thêm relativePath.
     files.push(file);
   }
   return files;
@@ -104,7 +114,7 @@ const quickFixesFor = (stage?: string | null) => QUICK_FIXES[stage || ''] || [
   'Align the output with the agreed scope and acceptance criteria.',
 ];
 
-const unavailableFlow = (flowNo: number, target: string): BoardFlow => ({
+const unavailableFlow = (flowNo: number, target: string): BoardFlow => ({ // Luồng unavaiable
   flowNo,
   target,
   active: false,
@@ -123,7 +133,9 @@ const unavailableFlow = (flowNo: number, target: string): BoardFlow => ({
   released: null,
 });
 
-interface ReviewDialog { flowNo: number; taskId: string; stage: string; comment: string }
+interface ReviewDialog { flowNo: number; taskId: string; stage: string; comment: string; placeholder?: string }
+interface DiffModal { patchDiff: string; changedFiles: string[] | null }
+interface TestReportModal { testCases: Array<Record<string, unknown>>; qaReport: string | null }
 interface ArtifactReview {
   flowNo: number;
   stage: string;
@@ -137,24 +149,28 @@ interface TimelineState {
   events: WorkflowTimelineEvent[];
 }
 
+//Các state chính trong AifaDemo
 export default function AifaDemo() {
-  const [board, setBoard] = useState<DemoBoard | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<Record<string, boolean>>({});
-  const [dialog, setDialog] = useState<ReviewDialog | null>(null);
-  const [artifactReview, setArtifactReview] = useState<ArtifactReview | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const [board, setBoard] = useState<DemoBoard | null>(null); //Toàn bộ trạng thái board lấy từ backend
+  const [error, setError] = useState<string | null>(null); //Lưu lỗi hiển thị trên UI.
+  const [busy, setBusy] = useState<Record<string, boolean>>({}); //Map trạng thái loading theo từng action.
+  const [dialog, setDialog] = useState<ReviewDialog | null>(null); //Dialog request changes.
+  const [artifactReview, setArtifactReview] = useState<ArtifactReview | null>(null); //Modal xem artifact của stage hiện tại.
+  const [uploading, setUploading] = useState(false); //Trạng thái upload folder.
   const [uploadPct, setUploadPct] = useState(0);
-  const [folderLabel, setFolderLabel] = useState('');
+  const [folderLabel, setFolderLabel] = useState(''); //Lưu tên file đã ghi lại vào folder theo flow number.
   const [savedFiles, setSavedFiles] = useState<Record<number, string>>({});
-  const [timelineOpen, setTimelineOpen] = useState<Record<number, boolean>>({});
-  const [timelines, setTimelines] = useState<Record<string, TimelineState>>({});
-  const [gateAnswers, setGateAnswers] = useState<Record<string, string>>({});
-  const dirHandleRef = useRef<LocalDirectoryHandle | null>(null);
-  const stagingProjectRef = useRef<string | null>(null);
-  const folderInputRef = useRef<HTMLInputElement | null>(null);
-  const uxDocWrittenRef = useRef<Set<string>>(new Set()); // UX task ids already written to the folder
+  const [timelineOpen, setTimelineOpen] = useState<Record<number, boolean>>({}); //Flow nào đang mở timeline.
+  const [timelines, setTimelines] = useState<Record<string, TimelineState>>({}); //Timeline cache theo projectId
+  const [gateAnswers, setGateAnswers] = useState<Record<string, string>>({}); //Câu trả lời người dùng nhập cho Claude question gate.
+  const [diffModal, setDiffModal] = useState<DiffModal | null>(null); //Modal xem code diff từ DEV agent.
+  const [testReportModal, setTestReportModal] = useState<TestReportModal | null>(null); //Modal xem test cases từ QA agent.
+  const dirHandleRef = useRef<LocalDirectoryHandle | null>(null); //Giữ quyền truy cập folder local đã mở bằng showDirectoryPicker. nếu có dirHandleRef, frontend có thể ghi file .md ngược lại vào folder.
+  const stagingProjectRef = useRef<string | null>(null); //Giữ project staging backend đã tạo, tránh tạo project mới liên tục.
+  const folderInputRef = useRef<HTMLInputElement | null>(null); //Fallback cho browser không hỗ trợ showDirectoryPicker.
+  const uxDocWrittenRef = useRef<Set<string>>(new Set()); // UX task ids already written to the folder. Chống ghi trùng UX doc nhiều lần do polling mỗi 2.5s.
 
+//poll board từ backend. là hàm trung tâm để lấy trạng thái board.
   const refetch = useCallback(async () => {
     try {
       const b = await getDemoBoard();
@@ -193,7 +209,7 @@ export default function AifaDemo() {
   useEffect(() => {
     let stop = false;
     refetch();
-    const id = setInterval(() => { if (!stop) refetch(); }, 2500);
+    const id = setInterval(() => { if (!stop) refetch(); }, 5000);
     return () => { stop = true; clearInterval(id); };
   }, [refetch]);
 
@@ -286,12 +302,13 @@ export default function AifaDemo() {
   // file into the opened folder — once per UX task. Falls back to a browser
   // download when there is no writable folder handle (input-upload path).
   const writeUxDocToFolder = useCallback(async (flow: BoardFlow) => {
-    const taskId = flow.card?.taskId;
-    if (!flow.projectId || !taskId || uxDocWrittenRef.current.has(taskId)) return;
-    uxDocWrittenRef.current.add(taskId); // mark first so polling doesn't re-enter
+    if (!flow.projectId) return;
+    let taskId: string | null = null;
     try {
       const doc = await getDemoUxDoc(flow.projectId);
-      if (!doc?.markdown) { uxDocWrittenRef.current.delete(taskId); return; }
+      if (!doc?.markdown || uxDocWrittenRef.current.has(doc.taskId)) return;
+      taskId = doc.taskId;
+      uxDocWrittenRef.current.add(taskId);
       const name = `aifa-flow-${flow.flowNo}-${doc.fileName}`;
       const dir = dirHandleRef.current;
       if (dir) {
@@ -307,14 +324,14 @@ export default function AifaDemo() {
       }
       setSavedFiles((s) => ({ ...s, [flow.flowNo]: name }));
     } catch {
-      uxDocWrittenRef.current.delete(taskId); // allow a retry on the next poll
+      if (taskId) uxDocWrittenRef.current.delete(taskId);
     }
   }, []);
 
   // Auto-write the UX design doc the moment a flow parks at its UX review.
   useEffect(() => {
     for (const flow of board?.flows || []) {
-      if (flow.reviewStage === 'ux' && flow.card?.taskId) void writeUxDocToFolder(flow as BoardFlow);
+      if (flow.projectId && flow.active !== false) void writeUxDocToFolder(flow as BoardFlow);
     }
   }, [board, writeUxDocToFolder]);
 
@@ -465,7 +482,7 @@ export default function AifaDemo() {
   const activeFlow = rawFlows.find((flow) => flow.flowNo === 1)
     || { flowNo: 1, status: 'seeding' as const, target: 'po' };
   const flows = rawFlows.length
-    ? [activeFlow as BoardFlow, unavailableFlow(2, 'dev'), unavailableFlow(3, 'qa')]
+    ? [activeFlow as BoardFlow, unavailableFlow(2, 'dev'), unavailableFlow(3, 'qa')] // hiện tại chỉ flow 1 chạy thực.
     : [];
   const hasBoard = flows.length > 0 && board?.status !== 'empty';
   const seeding = activeFlow.status === 'seeding' || (board?.status === 'seeding' && !(activeFlow as BoardFlow).projectId);
@@ -552,7 +569,9 @@ export default function AifaDemo() {
                 onGateAnswerChange={(approvalId, value) => setGateAnswers((current) => ({ ...current, [approvalId]: value }))}
                 onResolveGate={resolveLiveGate}
                 onToggleTimeline={toggleTimeline}
-                onRequestChanges={(f) => setDialog({ flowNo: f.flowNo, taskId: f.card!.taskId, stage: f.reviewStage || '', comment: '' })}
+                onRequestChanges={(f) => setDialog({ flowNo: f.flowNo, taskId: f.card!.taskId, stage: f.reviewStage || '', comment: '', placeholder: f.card?.actions?.reject.placeholder })}
+                onDiffModal={setDiffModal}
+                onTestReport={setTestReportModal}
               />
             ))}
           </div>
@@ -586,12 +605,93 @@ export default function AifaDemo() {
               style={S.textarea}
               autoFocus
               value={dialog.comment}
-              placeholder="e.g. Tighten the OAuth callback validation and add a test for the mismatched-state case."
+              placeholder={dialog.placeholder || "e.g. Tighten the OAuth callback validation and add a test for the mismatched-state case."}
               onChange={(e) => setDialog({ ...dialog, comment: e.target.value })}
             />
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
               <button style={S.btnGhost} onClick={() => setDialog(null)}>Cancel</button>
               <button style={S.btnDanger} disabled={!dialog.comment.trim()} onClick={submitDialog}>Submit</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Test report modal — shown after QA agent completes */}
+      {testReportModal && (
+        <div style={S.modalBackdrop} onClick={() => setTestReportModal(null)}>
+          <div style={{ ...S.modal, width: 900, maxHeight: '88vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 4px' }}>QA Test Report — {testReportModal.testCases.length} test cases</h3>
+            <p style={{ margin: '0 0 10px', fontSize: 12.5, color: '#64748b' }}>All tests executed by the QA agent against the feature implementation.</p>
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                <thead>
+                  <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
+                    <th style={{ padding: '6px 8px', borderBottom: '1px solid #e2e8f0', width: 60 }}>ID</th>
+                    <th style={{ padding: '6px 8px', borderBottom: '1px solid #e2e8f0' }}>Title</th>
+                    <th style={{ padding: '6px 8px', borderBottom: '1px solid #e2e8f0', width: 80 }}>Type</th>
+                    <th style={{ padding: '6px 8px', borderBottom: '1px solid #e2e8f0', width: 50 }}>AC</th>
+                    <th style={{ padding: '6px 8px', borderBottom: '1px solid #e2e8f0', width: 60 }}>Result</th>
+                    <th style={{ padding: '6px 8px', borderBottom: '1px solid #e2e8f0' }}>Evidence</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {testReportModal.testCases.map((tc, i) => {
+                    const result = String(tc.result || '').toLowerCase();
+                    const passed = result === 'pass' || result === 'passed' || result === 'true';
+                    return (
+                      <tr key={i} style={{ borderBottom: '1px solid #f1f5f9', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
+                        <td style={{ padding: '5px 8px', color: '#64748b', fontFamily: 'monospace' }}>{String(tc.id || i + 1)}</td>
+                        <td style={{ padding: '5px 8px' }}>{String(tc.title || tc.name || '')}</td>
+                        <td style={{ padding: '5px 8px', color: '#64748b' }}>{String(tc.type || '')}</td>
+                        <td style={{ padding: '5px 8px', color: '#64748b', fontFamily: 'monospace' }}>{String(tc.source_ac || tc.ac || '')}</td>
+                        <td style={{ padding: '5px 8px' }}>
+                          <span style={{ color: passed ? '#16a34a' : '#dc2626', fontWeight: 600 }}>
+                            {passed ? '✓ pass' : `✗ ${result || 'fail'}`}
+                          </span>
+                        </td>
+                        <td style={{ padding: '5px 8px', color: '#475569', fontSize: 11.5, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {String(tc.evidence || tc.actual || '')}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {testReportModal.qaReport && (
+                <div style={{ marginTop: 16, padding: '12px 14px', background: '#f8fafc', borderRadius: 6, fontSize: 12.5, color: '#334155', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                  <strong style={{ display: 'block', marginBottom: 6 }}>QA Report</strong>
+                  {testReportModal.qaReport}
+                </div>
+              )}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+              <button style={S.btnGhost} onClick={() => setTestReportModal(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Code diff modal — shown after DEV agent completes */}
+      {diffModal && (
+        <div style={S.modalBackdrop} onClick={() => setDiffModal(null)}>
+          <div style={{ ...S.modal, width: 860, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 4px' }}>Code diff — DEV Agent</h3>
+            {diffModal.changedFiles && diffModal.changedFiles.length > 0 && (
+              <p style={{ margin: '0 0 10px', fontSize: 12.5, color: '#64748b' }}>
+                Changed: {diffModal.changedFiles.map((f) => typeof f === 'string' ? f : (f as any).path || JSON.stringify(f)).join(', ')}
+              </p>
+            )}
+            <pre style={{
+              flex: 1, overflowY: 'auto', background: '#0f172a', color: '#e2e8f0',
+              padding: '14px 16px', borderRadius: 8, fontSize: 12.5,
+              fontFamily: '"Fira Code", "Cascadia Code", Consolas, monospace',
+              lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+              margin: 0,
+            }}>
+              {diffModal.patchDiff}
+            </pre>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+              <button style={S.btnGhost} onClick={() => setDiffModal(null)}>Close</button>
             </div>
           </div>
         </div>
@@ -723,7 +823,7 @@ function LiveGateCard({
 }
 
 function FlowColumn({
-  flow, busy, savedFile, timelineOpen, timeline, onApproveReview, onApproveRelease, onRejectRelease, onRetry, onDownload, onToggleTimeline, onRequestChanges, onReviewArtifacts, gateAnswers, onGateAnswerChange, onResolveGate,
+  flow, busy, savedFile, timelineOpen, timeline, onApproveReview, onApproveRelease, onRejectRelease, onRetry, onDownload, onToggleTimeline, onRequestChanges, onReviewArtifacts, gateAnswers, onGateAnswerChange, onResolveGate, onDiffModal, onTestReport,
 }: {
   flow: BoardFlow;
   busy: Record<string, boolean>;
@@ -741,6 +841,8 @@ function FlowColumn({
   onReviewArtifacts: (f: BoardFlow) => void;
   onGateAnswerChange: (approvalId: string, value: string) => void;
   onResolveGate: (gate: PendingGate, action: 'approve' | 'reject' | 'answer') => void;
+  onDiffModal: (d: DiffModal) => void;
+  onTestReport: (d: TestReportModal) => void;
 }) {
   const accent = accentFor(flow.reviewStage || flow.target);
   const unavailable = flow.status === 'unavailable' || flow.active === false;
@@ -765,6 +867,7 @@ function FlowColumn({
     ? (released === 'RELEASED' ? '🚀 Released' : '🛑 Release rejected')
     : seeding ? '⏳ Seeding…'
     : card ? `⏱ Waiting for approval — ${card.agent}`
+    : flow.currentPhase === 'FINAL_REVIEW' ? '⏱ Awaiting final release approval'
     : '⚙ Agent running…';
 
   return (
@@ -840,21 +943,67 @@ function FlowColumn({
               </div>
             )}
             {card.invalid && (
-              <div style={S.invalidNote}>Output is INVALID — request changes instead of approving.</div>
+              <div style={S.invalidNote}>
+                Output is INVALID — request changes instead of approving.
+                {(card.validationIssues || []).map((issue) => (
+                  <div key={issue.rule}>• {issue.detail}</div>
+                ))}
+              </div>
             )}
             <div style={S.actionRow}>
-              <button style={S.btnOutline} disabled={revBusy} onClick={() => onReviewArtifacts(flow)}>
-                Review details
-              </button>
+              {/* Review / primary action button */}
+              {card.actions?.review.kind === 'penpot' ? (
+                <button
+                  style={S.btnOutline}
+                  disabled={revBusy || !card.penpotUrl}
+                  onClick={() => {
+                    if (!card.penpotUrl) return;
+                    let url = card.penpotUrl;
+                    if (url.startsWith('/')) {
+                      const apiBase = import.meta.env.VITE_API_URL || '';
+                      const origin = apiBase ? new URL(apiBase).origin : window.location.origin;
+                      url = `${origin}${url}`;
+                    }
+                    window.open(url, '_blank');
+                  }}
+                  title={card.penpotUrl
+                    ? (card.penpotUrl.startsWith('/ux-previews') ? 'Open SVG wireframe preview' : 'Open in Penpot')
+                    : 'Preview not available yet'}
+                >
+                  {card.penpotUrl?.startsWith('/ux-previews') ? 'Preview design' : card.actions.review.label}
+                </button>
+              ) : card.actions?.review.kind === 'diff' ? (
+                <button
+                  style={S.btnOutline}
+                  disabled={revBusy || !card.patchDiff}
+                  title={card.patchDiff ? 'View code diff from DEV agent' : 'Diff not available yet'}
+                  onClick={() => card.patchDiff && onDiffModal({ patchDiff: card.patchDiff, changedFiles: card.changedFiles ?? null })}
+                >
+                  {card.actions.review.label}
+                </button>
+              ) : card.actions?.review.kind === 'test-report' ? (
+                <button
+                  style={S.btnOutline}
+                  disabled={revBusy || !card.testCases?.length}
+                  title={card.testCases?.length ? `View ${card.testCases.length} test cases` : 'Test report not available yet'}
+                  onClick={() => card.testCases?.length && onTestReport({ testCases: card.testCases as Array<Record<string, unknown>>, qaReport: card.qaReport ?? null })}
+                >
+                  {card.actions.review.label}
+                </button>
+              ) : (
+                <button style={S.btnOutline} disabled={revBusy} onClick={() => onReviewArtifacts(flow)}>
+                  {card.actions?.review.label ?? 'Review details'}
+                </button>
+              )}
               <button
                 style={{ ...S.btnApprove, background: accent.solid }}
                 disabled={card.invalid || revBusy}
                 onClick={() => onApproveReview(flow)}
               >
-                ✓ Approve
+                {card.actions?.approve.label ?? '✓ Approve'}
               </button>
               <button style={S.btnOutline} disabled={revBusy} onClick={() => onRequestChanges(flow)}>
-                ↻ Request changes
+                {card.actions?.reject.label ?? '↻ Request changes'}
               </button>
             </div>
           </div>
@@ -878,6 +1027,7 @@ function FlowColumn({
                 </button>
               </div>
             ) : released ? (released === 'RELEASED' ? 'This workflow has been released.' : 'This release was rejected.')
+              : flow.currentPhase === 'FINAL_REVIEW' ? 'All agents done — approve the final release below.'
               : `${flow.currentPhase || 'Working'} — the next agent is running…`}
           </div>
         )}

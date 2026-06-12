@@ -1,22 +1,182 @@
-# AIFA v3 System Architecture
+# AIFA System Architecture
 
-## 1. Muc tieu
+> Status: current implementation
+> Related code map: [AIFA_NOTES.md](AIFA_NOTES.md)
 
-AIFA la software factory co bon worker PO, UX, DEV va QA. Backend giu state
-workflow, kiem soat handoff va tam dung tai cac diem can human. Demo hien tai
-mock toan bo Claude Code, Penpot va QA execution nhung van di qua interface va
-gate giong duong tich hop that.
+## 1. Muc tieu he thong
 
-## 2. Core flow
+AIFA la mot AI software factory co backend control plane dieu phoi cac worker:
+
+- PO: phan tich yeu cau va tao PRD.
+- UX: tao UX spec, user flow va wireframe.
+- DEV: tao hoac sua code, thu thap sandbox/self-test evidence.
+- QA: tao va danh gia test evidence, dua ra release recommendation.
+
+He thong khong chi goi LLM theo thu tu. Backend con chiu trach nhiem:
+
+- Luu task, artifact, event va human decision.
+- Chon execution path cho worker.
+- Validate output theo schema, semantic va risk.
+- Tam dung tai tool gate, question gate va stage review.
+- Bao dam handoff dung chain va dung output version.
+- Quan ly repo copy, branch, commit, diff va release report.
+- Phuc hoi task/gate o muc stage sau crash hoac restart.
+
+## 2. Deployment topology
 
 ```text
-Folder upload / Repo URL
+Browser
+  |
+  | HTTP / multipart upload / polling
+  v
+Frontend - React + TypeScript + Vite
+  |
+  | /api/v1/*
+  v
+Backend - Node.js + Express
+  |\
+  | \---- Prisma ---- SQLite
+  |
+  |------ filesystem ---- workspace/projects/<projectId>
+  |
+  |------ Claude Agent SDK ---- local Claude Code runtime
+  |
+  \------ HTTP/SSE ---- Python Agents - FastAPI + LangChain
+```
+
+Ba service co the chay qua `docker-compose.yml`:
+
+| Service | Port | Vai tro |
+| --- | --- | --- |
+| `frontend` | `5173` | UI va API client |
+| `backend` | `3000` | Control plane, API, orchestrator va persistence |
+| `agents` | `8001` | Python/LangChain worker runtime |
+
+Real Claude Agent SDK runner nam trong backend process. Python agents la mot
+service rieng va duoc backend goi qua HTTP/SSE.
+
+## 3. Component architecture
+
+### 3.1 Frontend
+
+Entry points:
+
+- `frontend/src/main.tsx`: khoi tao React.
+- `frontend/src/App.tsx`: router; `/aifa` la UI chinh.
+- `frontend/src/pages/AifaDemo/index.tsx`: board hien tai.
+- `frontend/src/services/api/sdlcApi.ts`: SDLC API client.
+
+`AifaDemo`:
+
+- Mo folder bang File System Access API hoac file input fallback.
+- Upload repo copy len backend.
+- Seed va poll demo board moi 2.5 giay.
+- Hien stage review, pending tool/question gate va timeline.
+- Resolve approval, retry flow va release decision.
+- Tai `final.md` tu backend va tao file report moi trong folder local neu co
+  quyen `readwrite`.
+
+`frontend/src/pages/SdlcDashboard/index.tsx` la dashboard cu co task SSE client,
+nhung `/sdlc/*` hien redirect sang `/aifa`.
+
+### 3.2 Backend API
+
+Entry points:
+
+- `backend/src/server.js`: khoi dong server, DB va recovery.
+- `backend/src/routes/sdlc.js`: SDLC routes.
+- `backend/src/controllers/SdlcController.js`: HTTP/SSE handlers.
+
+Nhom API chinh:
+
+```text
+Repo/workers
+  POST /api/v1/sdlc/upload-repo
+  POST /api/v1/sdlc/run-intent-agent
+  POST /api/v1/sdlc/run-po-agent
+  POST /api/v1/sdlc/run-ux-agent
+  POST /api/v1/sdlc/run-dev-agent
+  POST /api/v1/sdlc/run-qa-agent
+
+Task/gate
+  GET  /api/v1/sdlc/tasks/:task_id
+  GET  /api/v1/sdlc/tasks/:task_id/events
+  GET  /api/v1/sdlc/status/:task_id
+  POST /api/v1/sdlc/tasks/:task_id/decision
+  POST /api/v1/sdlc/tasks/:task_id/cancel
+  GET  /api/v1/sdlc/approvals
+  POST /api/v1/sdlc/approvals/:approval_id
+
+Workflow/release
+  GET  /api/v1/sdlc/workflow-status
+  GET  /api/v1/sdlc/workflow/:id/timeline
+  GET  /api/v1/sdlc/projects/:project_id/artifacts
+  POST /api/v1/sdlc/projects/:project_id/release-decision
+  GET  /api/v1/sdlc/projects/:project_id/release-files/:file_name
+
+Primary UI board
+  POST /api/v1/sdlc/demo/seed-board
+  GET  /api/v1/sdlc/demo/board
+  POST /api/v1/sdlc/demo/flow/:project_id/retry
+```
+
+### 3.3 Orchestrator
+
+`backend/src/services/SdlcWorkflowService.js` la orchestrator trung tam.
+
+Trach nhiem:
+
+- Tao task cho tung stage.
+- Build context tu approved upstream artifacts.
+- Chon execution path.
+- Chay worker va luu output.
+- Validate artifact.
+- Auto-approve output an toan hoac dung tai human review.
+- Tao `a2a_handoff.v1`.
+- Khoi dong worker tiep theo.
+- Chon mot coherent task chain cho workflow status.
+- Tong hop final review, audit, metrics va release.
+
+Workflow phase khong duoc persist thanh mot field rieng. Backend suy ra phase
+hien tai tu task chain, decision, gate va release state.
+
+### 3.4 Runtime and worker control
+
+Hai service tach trach nhiem runtime:
+
+- `taskLifecycleService.js`: kiem soat state transition va ghi `AgentEvent`.
+- `taskWorkerService.js`: claim task, heartbeat, execution timeout va stale-task
+  recovery.
+
+Task execution state:
+
+```text
+queued
+  -> dispatched
+  -> running
+      -> awaiting_gate
+          -> running
+      -> completed
+      -> failed
+      -> cancelled
+      -> timeout
+```
+
+Task co `lockedBy`, `heartbeatAt`, `attempt`, `startedAt` va `finishedAt`.
+Human gate wait khong bi tinh vao execution-time budget.
+
+## 4. Business workflow
+
+### 4.1 Main flow
+
+```text
+Open/upload repo
         |
         v
 PO Agent -- route has_ui=false --------------------+
   | route has_ui=true                              |
   v                                                |
-UX Agent + Penpot SVG                              |
+UX Agent                                           |
   |                                                |
   +-------------------------> DEV Agent <-----------+
                                 |
@@ -30,165 +190,403 @@ UX Agent + Penpot SVG                              |
                        Owner/Admin Release Gate
                                 |
                                 v
-              branch + commit/diff + final.md + QA report
+             branch + commit/diff + final.md + qa-report.md
 ```
 
-Question gate tai PO hoac DEV khoa downstream. QA chi duoc tao khi DEV cua
-dung workflow chain da `completed`, `committed` va khong con gate.
+Optional `intent-agent` API van ton tai cho flow yeu cau co intent review, nhung
+primary `/aifa` board hien khoi dong PO flow.
 
-## 3. Components
+### 4.2 Ordering invariants
 
-### Frontend
+- PO route quyet dinh co chay UX hay khong.
+- Downstream chi chay khi source task `completed` va `committed`.
+- Source artifact khong duoc co status `INVALID`.
+- Source phai co `a2a_handoff.v1` va output hash khop.
+- Question gate khoa downstream cua project.
+- QA chi chay tu dung DEV source va khi DEV khong con pending gate.
+- Khong tao trung downstream task cho cung mot source task.
+- Workflow status khong ghep QA cu voi DEV moi.
+- Loi khoi dong downstream khong duoc doi upstream da committed thanh failed.
 
-`frontend/src/pages/AifaDemo/index.tsx` cung cap mot man hinh:
+## 5. Execution architecture
 
-- Open folder va upload repo.
-- Theo doi flow PO/UX/DEV/QA.
-- Hien Penpot mock.
-- Resolve question gate va tool approval gate.
-- Review output theo stage.
-- Approve release, download release bundle.
-- Ghi report vao `final.md` local bang File System Access API.
-- Poll workflow/audit va theo doi SSE.
+### 5.1 Execution path selection
 
-### Backend API
-
-Backend Node.js/Express chiu trach nhiem:
-
-- Repo upload/clone va workflow start.
-- Task state va A2A handoff.
-- Gate pending/resolve.
-- Validation va QA quality gate.
-- Audit, release decision va release files.
-
-Endpoint chinh:
+`SdlcWorkflowService._runAgent` chon adapter dua tren environment:
 
 ```text
-POST /api/v1/sdlc/upload-repo
-POST /api/v1/sdlc/run-po-agent
-GET  /api/v1/sdlc/workflow-status
-GET  /api/v1/sdlc/approvals
-POST /api/v1/sdlc/approvals/:approval_id
-POST /api/v1/sdlc/tasks/:task_id/gate-decision
-POST /api/v1/sdlc/projects/:project_id/release-decision
-GET  /api/v1/sdlc/projects/:project_id/release-files/:file_name
+EXECUTION_PATH=claude-code
+  -> _runClaudeCodePath
+      -> USE_MOCK_CLAUDE_CODE=true
+           -> mockClaudeCodeRunner
+      -> USE_MOCK_CLAUDE_CODE=false
+           -> claudeCodeRunner
+           -> @anthropic-ai/claude-agent-sdk query()
+
+EXECUTION_PATH khac
+  -> USE_MOCK_AGENTS=true
+       -> deterministic _buildMockOutput
+  -> USE_MOCK_AGENTS=false
+       -> AgentService
+       -> Python FastAPI /v1/agent/run
+       -> LangChain worker
 ```
 
-### Orchestrator
+Tat ca execution paths ket thuc tai `_saveAgentData`; khong path nao duoc bo qua
+artifact persistence va gate validation.
 
-`SdlcWorkflowService.js` la state machine trung tam:
-
-- Chon execution path.
-- Chay worker.
-- Validate output.
-- Auto-approve output an toan.
-- Tao A2A handoff.
-- Khoi dong agent tiep theo.
-- Chon mot coherent task chain cho workflow status.
-- Tao final review va release bundle.
-
-### Claude Code path
+### 5.2 Real Claude Agent SDK path
 
 ```text
-mockClaudeCodeScripts
-  -> mockClaudeCodeRunner
-  -> onGate(tool/question)
-  -> riskClassifier + gateBridge
-  -> write file neu allow
-  -> output
-  -> validation + handoff
+SdlcWorkflowService
+  -> claudeCodeRunner.runAgent
+  -> Agent SDK query()
+  -> canUseTool
+  -> AIFA onGate
+  -> claudePermissionDispatcher
+  -> riskClassifier / gateBridge
+  -> normalized agent-io.v3 output
+  -> _saveAgentData
 ```
 
-`claudeCodeRunner.js` that hien la stub. Khi tich hop that, runner phai gan
-`canUseTool=onGate` va giu nguyen contract output.
+`claudeCodeRunner.js` da la real runner, khong con la stub. Runner:
 
-### Repo and release
+- Load prompt theo role.
+- Chay Claude Agent SDK trong repo/sandbox working directory.
+- Chuyen absolute tool path thanh repo-relative path cho risk classification.
+- Gan `canUseTool` vao AIFA permission dispatcher.
+- Retry mot so transient runtime/network failure.
+- Parse va normalize final JSON.
+- Kiem tra output theo `agent-io.v3`.
 
-`repoService.js` quan ly:
+### 5.3 Python agents path
 
-- Clone/open/uploaded repo.
-- Branch `aifa/<slug>`.
-- Commit va diff.
-- Secret/path safety.
-- Workspace cleanup.
-
-`workflowReport.js` tao:
-
-- `final.md`
-- `qa-report.md`
-- branch/commit metadata
-- release decision
-
-Backend ghi report vao repo copy tren server. Frontend co the ghi noi dung
-`final.md` ve file local da ton tai neu user cap quyen folder.
-
-## 4. Validation and gates
-
-Moi output di qua:
+`AgentService.js` gui request toi `agents/main.py`.
 
 ```text
-agent-io output
-  -> schema validation
-  -> semantic validation
-  -> risk validation
+Backend AgentService
+  -> POST agents:/v1/agent/run
+  -> FastAPI parse Pydantic input
+  -> model router
+  -> PO / UX / DEV / QA LangChain worker
+  -> SSE progress/completed/error
+  -> backend parse completed output
+```
+
+Python DEV path co sandbox/local fallback logic rieng. Backend van la noi quyet
+dinh artifact validity, handoff va release.
+
+## 6. Contract and validation architecture
+
+Co hai lop contract:
+
+| Contract | Source of truth | Vai tro |
+| --- | --- | --- |
+| `agent-io.v3` | `backend/src/services/agentContract.js` | Required non-empty output keys cho moi agent |
+| `gate-output.v4` | `SdlcWorkflowService.OUTPUT_CONTRACTS` | Rule chi tiet theo schema, semantic va risk |
+
+Validation pipeline:
+
+```text
+Raw worker output
+  -> agent-io.v3 conformance
+  -> save files + AgentArtifact rows
+  -> gate-output.v4 validation
+      -> schema layer
+      -> semantic layer
+      -> risk layer
   -> artifact VALID / INVALID
   -> gate policy
-  -> approved handoff
+  -> approved output
+  -> a2a_handoff.v1
 ```
 
-Gate modes:
+BLOCKER o bat ky layer nao:
 
-- PO, UX, DEV: confidence gate, auto-approve khi PASS va an toan.
-- QA: strict-manual, luon can human review.
-- Final release: owner/admin only.
+- Danh dau artifact cua task la `INVALID`.
+- Khong tao approved handoff.
+- Khong khoi dong downstream.
 
-Tool actions duoc phan loai:
+Gate mode mac dinh:
+
+| Stage | Mode |
+| --- | --- |
+| Intent | `strict_manual` |
+| PO | `confidence_based` |
+| UX | `confidence_based` |
+| DEV | `confidence_based` |
+| QA | `strict_manual` |
+
+Confidence threshold cho auto-approval hien la `0.80`. Output chi auto-approve
+khi validation PASS va khong co warning/risk issue can human.
+
+## 7. Gate and HITL architecture
+
+Co ba cap human interaction:
+
+1. Tool/question gate trong luc agent dang chay.
+2. Stage output review sau khi worker hoan tat.
+3. Final release decision.
+
+### 7.1 Tool and question gate
+
+```text
+Claude tool call / AskUserQuestion
+  -> claudePermissionDispatcher
+  -> read-only policy hoac riskClassifier
+  -> auto allow | block | approval
+  -> gateBridge.requestGate
+  -> PendingGate persisted
+  -> task awaiting_gate
+  -> human resolveApproval
+  -> gateBridge.resolveGate
+  -> task running
+  -> agent continues
+```
+
+Tool risk tiers:
 
 - `auto`: cho phep va audit.
 - `approval`: tam dung cho human.
 - `block`: tu choi ngay.
 
-## 5. State and observability
+Interactive tool/question gates duoc dieu khien boi
+`CLAUDE_CODE_INTERACTIVE_GATES=true`.
 
-- Task/artifact/HITL decision duoc luu qua model backend.
-- Pending gate metadata duoc persist, nhung live continuation cua `onGate` van
-  phu thuoc Promise trong process.
-- Restart backend danh dau gate dang cho thanh `interrupted`; chua full-resume.
-- SSE phat `progress`, `completed`, `error`, `gate_pending` va heartbeat.
-- UI poll workflow status, pending gate, artifact va audit.
+### 7.2 Stage review
 
-## 6. Environment
+`submitStructuredDecision` ho tro:
 
-```env
-EXECUTION_PATH=claude-code
-USE_MOCK_CLAUDE_CODE=true
-USE_MOCK_AGENTS=true
-MAX_PARALLEL_WORKFLOWS=3
-```
+- Idempotency bang `decision_id`.
+- Optimistic locking bang `base_output_version`.
+- `approve`.
+- `edit_approve`.
+- `reject` va rerun owning worker.
+- Retry limit va escalation.
 
-## 7. Boundaries
+### 7.3 Final release gate
 
-- Khong tu dong chay script trong uploaded repo.
-- Khong doc secret-like files.
-- Browser folder upload tao ban sao tren server.
-- Ghi nguoc file local chi hoat dong khi co File System Access API va quyen
-  `readwrite`.
+Release chi duoc approve khi QA chain va evidence dat dieu kien. Release
+decision yeu cau reviewer role owner/admin.
 
-## 8. Kien truc dich tiep theo
+## 8. Persistence architecture
 
-Kien truc hien tai la baseline demo, khong phai kien truc execution cuoi cung.
+State duoc chia thanh ba lop.
 
-1. [AIFA_DEMO_1_WEEK_ROADMAP.md](AIFA_DEMO_1_WEEK_ROADMAP.md) se chuan hoa
-   persisted `AgentTask`, `AgentEvent`, state machine, worker heartbeat va
-   DB-driven gate recovery.
-2. [AIFA_REAL_DATA_3_WEEK_ROADMAP.md](AIFA_REAL_DATA_3_WEEK_ROADMAP.md) se them
-   `AgentRunner` adapter, real Claude Code child process, filesystem/git/test
-   evidence va hardening.
+### 8.1 SQLite / Prisma
 
-Kien truc dich tach ro:
+Model quan trong:
+
+| Model | Noi dung |
+| --- | --- |
+| `Task` | Stage run, execution state, raw/approved output va worker lock |
+| `AgentEvent` | Persisted ordered event stream |
+| `AgentArtifact` | Artifact metadata, file reference, hash va VALID/INVALID |
+| `HitlDecision` | Stage/release decisions va idempotency key |
+| `PendingGate` | Persisted metadata cua tool/question gate |
+| `Project` / `ProjectMembership` | Project ownership va authorization |
+| `FeatureBacklog` | Backlog item va task linkage |
+
+### 8.2 Filesystem workspace
 
 ```text
-Backend Control Plane -> persisted task/gate/event
-Internal Worker       -> claim, heartbeat, recovery
-AgentRunner adapter   -> mock hoac real execution, normalized AgentEvent
+workspace/
+  demo-board.json
+  projects/
+    <projectId>/
+      repo/                 uploaded/cloned repo copy
+      <taskId>/             generated artifact files
+      release/              release files khi khong co repo
+      sandbox/              runner sandbox data
 ```
+
+`AgentArtifact` thuong luu metadata va `FILE:<path>`/file reference, con noi
+dung artifact lon nam tren filesystem.
+
+### 8.3 In-memory state
+
+Mot so runtime state van o trong process:
+
+- Live Promise continuation cua `gateBridge`.
+- Gate subscribers.
+- In-memory gate audit cache.
+- Active task heartbeat timers.
+- Demo review holds.
+
+Vi vay restart khong the resume dung tai tool call cu.
+
+## 9. Recovery and resilience
+
+Backend startup:
+
+```text
+connect Prisma
+  -> mark orphaned pending gates as interrupted
+  -> sweep stale running/dispatched tasks
+  -> start periodic stale-task sweeper
+  -> recoverInterruptedGates
+```
+
+Interrupted gate recovery:
+
+1. Pending gate metadata cu duoc danh dau `interrupted`.
+2. Backend tim task dang `awaiting_gate`.
+3. Rebuild context tu persisted task/artifact/repo data.
+4. Re-dispatch rieng stage bi gian doan.
+5. Agent co the tao gate moi.
+
+Day la stage-level recovery. Live SDK/Promise continuation cua tool call cu
+khong duoc khoi phuc.
+
+Resilience khac:
+
+- Atomic-ish worker claim bang `lockedBy`.
+- Heartbeat va stale-task sweep.
+- Execution timeout khong tinh human wait.
+- Task cancel resolve pending gate de tranh treo.
+- Persisted `AgentEvent` co sequence de SSE replay.
+
+## 10. Event delivery and UI synchronization
+
+### 10.1 Task SSE
+
+Endpoint:
+
+```text
+GET /api/v1/sdlc/status/:task_id
+```
+
+Event:
+
+- `agent_event`
+- `progress`
+- `completed`
+- `error`
+- `gate_pending`
+- `gate_resolved`
+- heartbeat comment
+
+Persisted `AgentEvent` co the replay bang `Last-Event-ID` hoac
+`after_sequence`.
+
+### 10.2 Primary UI polling
+
+Primary UI `/aifa` khong subscribe task SSE truc tiep. No poll:
+
+```text
+GET /api/v1/sdlc/demo/board
+```
+
+moi 2.5 giay. `demoBoardService` tong hop workflow status, stage card, pending
+gate va release state. Timeline va artifact duoc tai khi user mo.
+
+## 11. Repo and release architecture
+
+### 11.1 Browser folder upload
+
+```text
+showDirectoryPicker / file input
+  -> multipart files[] + paths[]
+  -> SdlcController.uploadRepo
+  -> repoService.prepareUploadedRepo
+  -> workspace/projects/<projectId>/repo
+  -> git init + import commit
+```
+
+Backend:
+
+- Bo qua `.git` goc.
+- Chan path traversal.
+- Khong tu dong chay script trong uploaded repo.
+- Flag secret-like files.
+- Tao git repo va working branch rieng.
+
+### 11.2 Release bundle
+
+```text
+Owner/admin APPROVE
+  -> submitReleaseDecision
+  -> workflowReport.writeReleaseBundle
+  -> final.md
+  -> qa-report.md
+  -> branch/commit/diff/release metadata
+```
+
+Backend ghi release bundle vao repo copy tren server hoac thu muc release cua
+project. Frontend co the tai `final.md` va tao mot report file moi trong folder
+local da duoc user cap quyen; frontend khong ghi de `final.md` local co san.
+
+## 12. Security boundaries
+
+- SDLC routes nam sau auth middleware.
+- Project action co membership/role check tai service layer.
+- Final release chi cho owner/admin.
+- Uploaded repo la ban copy tren server.
+- Khong tu dong chay script trong uploaded repo.
+- Secret-like path bi chan/flag.
+- Tool ghi ra ngoai repo bi block.
+- Push thang vao main va mass delete bi block.
+- Browser chi co quyen trong folder user da chon.
+- Real runner chi duoc thao tac qua allowed tools va permission dispatcher.
+
+## 13. Important environment switches
+
+```env
+# Chon execution adapter
+EXECUTION_PATH=claude-code
+
+# Trong claude-code path: mock hay real Claude Agent SDK
+USE_MOCK_CLAUDE_CODE=false
+
+# Trong non-claude-code path: mock output hay Python agents
+USE_MOCK_AGENTS=false
+
+# Hien tool/question gate tren UI
+CLAUDE_CODE_INTERACTIVE_GATES=true
+
+# Gioi han workflow dong thoi
+MAX_PARALLEL_WORKFLOWS=3
+
+# Timeout gate va worker heartbeat
+GATE_TIMEOUT_MS=600000
+TASK_HEARTBEAT_MS=15000
+TASK_HEARTBEAT_STALE_MS=60000
+```
+
+Gia tri thuc te duoc doc tu cac file `.env`; block tren mo ta cac switch kien
+truc quan trong, khong phai mot cau hinh bat buoc duy nhat.
+
+## 14. Current limitations
+
+- `SdlcWorkflowService.js` dang gom nhieu trach nhiem va la diem phuc tap lon
+  nhat cua backend.
+- Live gate continuation van phu thuoc Promise trong backend process.
+- Restart chi re-dispatch stage, khong resume dung tool call/SDK session cu.
+- Primary UI dung polling thay vi task SSE.
+- Demo board va review holds co mot phan state in-memory/file-based.
+- SQLite duoc harden bang WAL va mot connection, nhung khong phai persistence
+  phu hop cho scale ngang nhieu backend instance.
+- Python worker path va Claude Agent SDK path co logic execution khac nhau; backend
+  contract/validation la lop giu chung hanh vi.
+- Uploaded repo scripts khong duoc tu dong chay; evidence co the den tu mock,
+  sandbox hoac runner tuy execution path.
+
+## 15. Architecture reading path
+
+De doc kien truc tu tong quan den chi tiet:
+
+1. `docs/AIFA_NOTES.md`
+2. `backend/prisma/schema.prisma`
+3. `backend/src/server.js`
+4. `backend/src/services/SdlcWorkflowService.js`
+5. `backend/src/services/taskLifecycleService.js`
+6. `backend/src/services/taskWorkerService.js`
+7. `backend/src/services/agentContract.js`
+8. `backend/src/agents/claudePermissionDispatcher.js`
+9. `backend/src/services/gateBridge.js`
+10. `backend/src/agents/claudeCodeRunner.js`
+11. `backend/src/services/repoService.js`
+12. `backend/src/services/workflowReport.js`
+13. `backend/src/services/demoBoardService.js`
+14. `frontend/src/pages/AifaDemo/index.tsx`
+15. `agents/main.py`

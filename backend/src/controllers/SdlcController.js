@@ -1,3 +1,9 @@
+// HTTP/SSE adapter for the SDLC control plane.
+//
+// Beginner reading guide: this class validates transport-level input and shapes
+// responses. It delegates workflow decisions to SdlcWorkflowService and
+// repository handling to repoService.
+
 const SdlcWorkflowService = require('../services/SdlcWorkflowService');
 const repoService = require('../services/repoService');
 const gateBridge = require('../services/gateBridge');
@@ -631,7 +637,7 @@ class SdlcController {
     } catch (err) { next(err); }
   }
 
-  // ─── Demo board (3 independent flows parked at PO / DEV / QA) ─────────────
+  // ─── Primary /aifa board endpoints ─────────────────────────────────────────
 
   async seedDemoBoard(req, res, next) {
     try {

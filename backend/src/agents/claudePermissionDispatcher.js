@@ -1,6 +1,9 @@
-// Thin dispatcher from Claude Agent SDK permission/user-input callbacks to
-// AIFA's persisted gate system. It deliberately contains no workflow
-// transitions; gateBridge/taskLifecycle own the task wait/resume states.
+// Policy adapter from Claude Agent SDK callbacks to AIFA's persisted gate system.
+//
+// Beginner reading guide: dispatch() first handles non-interactive mode, then
+// separates AskUserQuestion from tool calls. Read-only tools are checked here;
+// write/shell risk classification is delegated to riskClassifier. gateBridge
+// owns wait/resume persistence, so this file contains no workflow ordering.
 
 const path = require('path');
 const gateBridge = require('../services/gateBridge');

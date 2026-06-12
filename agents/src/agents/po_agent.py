@@ -1,6 +1,8 @@
-"""
-PO Agent — Generates PRD, User Stories, Acceptance Criteria, and Scope
-from a Feature Request + Project Context.
+"""PO worker: turn a feature request into product artifacts.
+
+Beginner reading guide: build the prompt, optionally call mock MCP tools, invoke
+the configured chat model, parse strict JSON, and return POAgentOutput. Backend
+validation decides whether these artifacts may be handed to UX/DEV.
 """
 from __future__ import annotations
 import json
