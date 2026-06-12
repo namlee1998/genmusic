@@ -62,22 +62,18 @@ service rieng va duoc backend goi qua HTTP/SSE.
 Entry points:
 
 - `frontend/src/main.tsx`: khoi tao React.
-- `frontend/src/App.tsx`: router; `/aifa` la UI chinh.
-- `frontend/src/pages/AifaDemo/index.tsx`: board hien tai.
+- `frontend/src/App.tsx`: router; `/sdlc` va `/sdlc/hitl` la UI chinh.
+- `frontend/src/pages/SdlcDashboard/index.tsx`: board hien tai.
 - `frontend/src/services/api/sdlcApi.ts`: SDLC API client.
 
-`AifaDemo`:
+`SdlcDashboard` (trang chinh `/sdlc`):
 
 - Mo folder bang File System Access API hoac file input fallback.
 - Upload repo copy len backend.
-- Seed va poll demo board moi 2.5 giay.
 - Hien stage review, pending tool/question gate va timeline.
 - Resolve approval, retry flow va release decision.
 - Tai `final.md` tu backend va tao file report moi trong folder local neu co
   quyen `readwrite`.
-
-`frontend/src/pages/SdlcDashboard/index.tsx` la dashboard cu co task SSE client,
-nhung `/sdlc/*` hien redirect sang `/aifa`.
 
 ### 3.2 Backend API
 
@@ -113,11 +109,6 @@ Workflow/release
   GET  /api/v1/sdlc/projects/:project_id/artifacts
   POST /api/v1/sdlc/projects/:project_id/release-decision
   GET  /api/v1/sdlc/projects/:project_id/release-files/:file_name
-
-Primary UI board
-  POST /api/v1/sdlc/demo/seed-board
-  GET  /api/v1/sdlc/demo/board
-  POST /api/v1/sdlc/demo/flow/:project_id/retry
 ```
 
 ### 3.3 Orchestrator
@@ -384,7 +375,7 @@ Model quan trong:
 | `AgentArtifact` | Artifact metadata, file reference, hash va VALID/INVALID |
 | `HitlDecision` | Stage/release decisions va idempotency key |
 | `PendingGate` | Persisted metadata cua tool/question gate |
-| `Project` / `ProjectMembership` | Project ownership va authorization |
+| `Project` | Project info va ownership |
 | `FeatureBacklog` | Backlog item va task linkage |
 
 ### 8.2 Filesystem workspace
@@ -471,14 +462,9 @@ Persisted `AgentEvent` co the replay bang `Last-Event-ID` hoac
 
 ### 10.2 Primary UI polling
 
-Primary UI `/aifa` khong subscribe task SSE truc tiep. No poll:
-
-```text
-GET /api/v1/sdlc/demo/board
-```
-
-moi 2.5 giay. `demoBoardService` tong hop workflow status, stage card, pending
-gate va release state. Timeline va artifact duoc tai khi user mo.
+Primary UI `/sdlc` su dung task SSE (`GET /api/v1/sdlc/status/:task_id`) de
+cap nhat trang thai tung task. Board tong hop duoc tai qua
+`GET /api/v1/sdlc/workflow-status`. Timeline va artifact duoc tai khi user mo.
 
 ## 11. Repo and release architecture
 
@@ -518,9 +504,9 @@ local da duoc user cap quyen; frontend khong ghi de `final.md` local co san.
 
 ## 12. Security boundaries
 
-- SDLC routes nam sau auth middleware.
-- Project action co membership/role check tai service layer.
-- Final release chi cho owner/admin.
+- Khong co yeu cau xac thuc nguoi dung; he thong chay o che do single-user local.
+- Project action khong con co membership/role check; moi hanh dong deu duoc phep.
+- Final release chi yeu cau workflow QA da completed.
 - Uploaded repo la ban copy tren server.
 - Khong tu dong chay script trong uploaded repo.
 - Secret-like path bi chan/flag.
@@ -587,6 +573,5 @@ De doc kien truc tu tong quan den chi tiet:
 10. `backend/src/agents/claudeCodeRunner.js`
 11. `backend/src/services/repoService.js`
 12. `backend/src/services/workflowReport.js`
-13. `backend/src/services/demoBoardService.js`
-14. `frontend/src/pages/AifaDemo/index.tsx`
-15. `agents/main.py`
+13. `frontend/src/pages/SdlcDashboard/index.tsx`
+14. `agents/main.py`

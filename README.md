@@ -92,7 +92,7 @@ Set-Location backend && npm run dev
 Set-Location frontend && npm run dev
 ```
 
-Truy cập <http://localhost:5173>. Đăng nhập: `admin@vfs.com` / `admin123`
+Truy cập <http://localhost:5173>. Không cần đăng nhập — hệ thống tự động bypass auth và vào thẳng Dashboard.
 
 ### Quick Start Demo
 
@@ -122,9 +122,6 @@ Set-Location backend && npm.cmd test
 
 # Frontend (Vitest)
 Set-Location frontend && npm.cmd test
-
-# Demo preflight (6 scenario, DB cô lập)
-Set-Location backend && npm.cmd run demo:smoke
 ```
 
 ---
@@ -136,10 +133,8 @@ Backend lắng nghe tại cổng `3000` (mặc định).
 | Prefix                  | Mục đích                              |
 |-------------------------|---------------------------------------|
 | `GET /health`           | Health check                          |
-| `/api/v1/auth`          | Đăng nhập, đăng ký, OAuth            |
-| `/api/v1/projects`      | Quản lý project và thành viên         |
+| `/api/v1/projects`      | Quản lý project (tạo, xoá, liệt kê)  |
 | `/api/v1/sdlc`          | Workflow chính (PO → UX → DEV → QA)  |
-| `/api/v1/admin`         | Dashboard admin                       |
 
 Endpoints SDLC chính:
 
