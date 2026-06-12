@@ -63,6 +63,7 @@ describe('SdlcDashboard Component', () => {
       releaseDecision: vi.fn(),
       setProjectId: vi.fn(),
       setError: vi.fn(),
+      cleanupConnections: vi.fn(),
     });
   });
 
@@ -114,6 +115,7 @@ describe('SdlcDashboard Component', () => {
       releaseDecision: vi.fn(),
       setProjectId: vi.fn(),
       setError: vi.fn(),
+      cleanupConnections: vi.fn(),
     });
 
     render(
@@ -155,6 +157,7 @@ describe('SdlcDashboard Component', () => {
       releaseDecision: vi.fn(),
       setProjectId: vi.fn(),
       setError: vi.fn(),
+      cleanupConnections: vi.fn(),
     });
 
     render(
