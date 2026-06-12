@@ -7,7 +7,7 @@
 const SdlcWorkflowService = require('../services/SdlcWorkflowService');
 const repoService = require('../services/repoService');
 const gateBridge = require('../services/gateBridge');
-const demoBoardService = require('../services/demoBoardService');
+
 
 // Demo scenarios exposed by the dev-only scenario selector endpoint.
 const DEFAULT_MOCK_SCENARIO = 'happy_path';
@@ -637,38 +637,7 @@ class SdlcController {
     } catch (err) { next(err); }
   }
 
-  // ─── Primary /aifa board endpoints ─────────────────────────────────────────
 
-  async seedDemoBoard(req, res, next) {
-    try {
-      const reset = req.query.reset === 'true' || req.body?.reset === true;
-      const sourceRepoPath = req.body?.sourceRepoPath || req.body?.source_repo_path || null;
-      const mode = req.body?.mode || 'three_flow';
-      const data = await demoBoardService.seedBoard({ reset, sourceRepoPath, mode });
-      return res.json({ status: 'success', data });
-    } catch (err) { next(err); }
-  }
-
-  async getDemoBoard(req, res, next) {
-    try {
-      const data = await demoBoardService.getBoard();
-      return res.json({ status: 'success', data: data || { status: 'empty', flows: [] } });
-    } catch (err) { next(err); }
-  }
-
-  async getDemoUxDoc(req, res, next) {
-    try {
-      const data = await demoBoardService.getUxDoc(req.params.project_id);
-      return res.json({ status: 'success', data });
-    } catch (err) { next(err); }
-  }
-
-  async retryDemoFlow(req, res, next) {
-    try {
-      const data = await demoBoardService.retryFlow(req.params.project_id);
-      return res.json({ status: 'success', data });
-    } catch (err) { next(err); }
-  }
 
   // ─── Kanban Backlog ──────────────────────────────────────────────────────
 

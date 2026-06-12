@@ -1,4 +1,3 @@
-import { getStoredAuthSession } from './authStorage';
 import api, { getBaseURL } from './client';
 import type {
   ExtractFlowsRequest,
@@ -100,11 +99,7 @@ export async function getLatestTask(documentId: string): Promise<TaskItem | null
  */
 export function createTaskEventSource(taskId: string): EventSource {
   const baseURL = getBaseURL();
-  const session = getStoredAuthSession();
-  const query = session?.access_token
-    ? `?access_token=${encodeURIComponent(session.access_token)}`
-    : '';
-  const url = `${baseURL}/workflows/status/${taskId}${query}`;
+  const url = `${baseURL}/workflows/status/${taskId}`;
   return new EventSource(url);
 }
 

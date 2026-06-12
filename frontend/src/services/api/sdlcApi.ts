@@ -6,7 +6,6 @@
 // available for task-level clients and the legacy dashboard.
 
 import api, { getBaseURL } from './client';
-import { getStoredAuthSession } from './authStorage';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -73,7 +72,7 @@ export interface PipelineResponse {
 const BASE = '/sdlc';
 
 export const startPipelineReal = (repoUrl: string, request: string): Promise<{ workflowId: string; status: string }> =>
-  api.post(`${BASE}/run-po-agent`, { repo_url: repoUrl, request }).then((r) => r.data);
+  api.post(`${BASE}/run-po-agent`, { repo_path: repoUrl, request }).then((r) => r.data);
 
 export interface SdlcError {
   message: string;
@@ -120,11 +119,7 @@ export const subscribeWorkflowSSEReal = (
 
   const connect = async () => {
     try {
-      const session = getStoredAuthSession();
       const headers: Record<string, string> = {};
-      if (session?.access_token) {
-        headers['Authorization'] = `Bearer ${session.access_token}`;
-      }
 
       const baseUrl = getBaseURL().replace(/\/$/, '');
       const response = await fetch(`${baseUrl}${BASE}/stream/${workflowId}`, {

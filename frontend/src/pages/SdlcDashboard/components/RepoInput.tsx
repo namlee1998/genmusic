@@ -35,18 +35,19 @@ export default function RepoInput() {
     }
   }, [searchParams, setSearchParams]);
 
-  const validateUrl = (value: string) => {
-    if (!value) return 'Repository URL is required';
-    const regex = /^(https?:\/\/)?(www\.)?(github|gitlab)\.com\/[\w-]+\/[\w.-]+(\.git)?\/?$/i;
-    if (!regex.test(value)) {
-      return 'Please enter a valid GitHub or GitLab repository URL (e.g., https://github.com/user/repo.git)';
+  const validatePath = (value: string) => {
+    if (!value.trim()) return 'Local folder path is required';
+    const isWindowsAbsolute = /^[a-zA-Z]:[\\/]/i.test(value.trim());
+    const isUnixAbsolute = value.trim().startsWith('/') || value.trim().startsWith('\\\\');
+    if (!isWindowsAbsolute && !isUnixAbsolute) {
+      return 'Please enter a valid absolute local directory path (e.g., C:\\Projects\\my-app or /Users/name/my-app)';
     }
     return '';
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const err = validateUrl(url);
+    const err = validatePath(url);
     if (err) {
       setValidationError(err);
       return;
@@ -59,15 +60,15 @@ export default function RepoInput() {
     <div className="repo-input-card">
       <div className="repo-input-card__header">
         <GitBranch className="repo-input-card__icon" size={20} />
-        <h3>Repository & Feature Integration</h3>
+        <h3>Local Folder & Feature Integration</h3>
       </div>
       <form onSubmit={handleSubmit} className="repo-input-card__form">
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <label style={{ fontSize: '11px', color: '#908fa0', fontWeight: 600, letterSpacing: '0.05em' }}>🔗 TARGET REPOSITORY URL</label>
+            <label style={{ fontSize: '11px', color: '#908fa0', fontWeight: 600, letterSpacing: '0.05em' }}>📁 TARGET LOCAL FOLDER PATH</label>
             <input
               type="text"
-              placeholder="https://github.com/username/repository.git"
+              placeholder="C:\Projects\my-project-dir or absolute local directory path"
               value={url}
               onChange={(e) => {
                 setUrl(e.target.value);

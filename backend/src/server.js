@@ -75,6 +75,9 @@ app.use('/ux-previews', express.static(path.join(__dirname, '../../public/ux-pre
   setHeaders(res) { res.setHeader('Cache-Control', 'no-store'); },
 }));
 
+// Serve uploaded files statically
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
 // API routes
 app.use('/api/v1', routes);
 

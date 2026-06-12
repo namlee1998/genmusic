@@ -83,8 +83,8 @@ describe('SdlcDashboard Component', () => {
         <SdlcDashboard />
       </MemoryRouter>
     );
-    expect(screen.getByText('Repository & Feature Integration')).toBeInTheDocument();
-    expect(screen.getByText('🔗 TARGET REPOSITORY URL')).toBeInTheDocument();
+    expect(screen.getByText('Local Folder & Feature Integration')).toBeInTheDocument();
+    expect(screen.getByText('📁 TARGET LOCAL FOLDER PATH')).toBeInTheDocument();
     expect(screen.getByText('📝 FEATURE SPECIFICATION / REQUEST')).toBeInTheDocument();
   });
 

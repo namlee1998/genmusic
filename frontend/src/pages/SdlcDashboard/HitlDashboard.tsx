@@ -113,7 +113,7 @@ export default function HitlDashboard() {
             disabled={isLoading}
           >
             <RefreshCw size={14} className={isLoading ? 'spin' : ''} />
-            <span>{t('landing.demo.aiGenerated', 'Refresh')}</span>
+            <span>{t('common.refresh', 'Refresh')}</span>
           </button>
         </div>
       </header>

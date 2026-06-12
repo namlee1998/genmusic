@@ -7,7 +7,6 @@
 const express = require('express');
 const multer = require('multer');
 const SdlcController = require('../controllers/SdlcController');
-const quotaMiddleware = require('../middleware/quotaMiddleware');
 
 const router = express.Router();
 
@@ -18,17 +17,17 @@ const repoUpload = multer({
 });
 
 // ── IntentGate ─────────────────────────────────────────────────────────────
-router.post('/run-intent-agent', quotaMiddleware, SdlcController.runIntentAgent.bind(SdlcController));
+router.post('/run-intent-agent', SdlcController.runIntentAgent.bind(SdlcController));
 
 // ── Repo folder upload (T1.4 "Open folder") ───────────────────────────────
 // POST /api/v1/sdlc/upload-repo  (multipart: files[] + paths[] + project_id)
 router.post('/upload-repo', repoUpload.array('files'), SdlcController.uploadRepo.bind(SdlcController));
 
-// ── Run Agents (quota checked) ────────────────────────────────────────────
-router.post('/run-po-agent',  quotaMiddleware, SdlcController.runPOAgent.bind(SdlcController));
-router.post('/run-ux-agent',  quotaMiddleware, SdlcController.runUXAgent.bind(SdlcController));
-router.post('/run-dev-agent', quotaMiddleware, SdlcController.runDEVAgent.bind(SdlcController));
-router.post('/run-qa-agent',  quotaMiddleware, SdlcController.runQAAgent.bind(SdlcController));
+// ── Run Agents ────────────────────────────────────────────────────────────
+router.post('/run-po-agent',  SdlcController.runPOAgent.bind(SdlcController));
+router.post('/run-ux-agent',  SdlcController.runUXAgent.bind(SdlcController));
+router.post('/run-dev-agent', SdlcController.runDEVAgent.bind(SdlcController));
+router.post('/run-qa-agent',  SdlcController.runQAAgent.bind(SdlcController));
 
 // ── HITL Gate ────────────────────────────────────────────────────────────
 // POST /api/v1/sdlc/tasks/:task_id/gate-decision  { decision, comment }
@@ -68,16 +67,6 @@ router.get('/projects/:project_id/release-files/:file_name', SdlcController.down
 // ── Dev-only: demo scenario selector (MOCK_SCENARIO) ───────────────────────
 router.get('/dev/mock-scenario',  SdlcController.getMockScenario.bind(SdlcController));
 
-// ── Primary /aifa board (single real flow or staged multi-flow demo) ───────
-// POST /api/v1/sdlc/demo/seed-board[?reset=true]   provision (idempotent)
-// GET  /api/v1/sdlc/demo/board                     aggregated board state
-router.post('/demo/seed-board', SdlcController.seedDemoBoard.bind(SdlcController));
-router.get('/demo/board',       SdlcController.getDemoBoard.bind(SdlcController));
-// GET /api/v1/sdlc/demo/flow/:project_id/ux-doc  → UX markdown to write into the opened folder
-router.get('/demo/flow/:project_id/ux-doc', SdlcController.getDemoUxDoc.bind(SdlcController));
-// POST /api/v1/sdlc/demo/flow/:project_id/retry  → re-run a failed agent from its committed source
-router.post('/demo/flow/:project_id/retry', SdlcController.retryDemoFlow.bind(SdlcController));
-
 // ── Backlog / Kanban ──────────────────────────────────────────────────────
 router.get('/projects/:project_id/backlog',           SdlcController.getBacklogs.bind(SdlcController));
 router.post('/projects/:project_id/backlog',          SdlcController.createBacklog.bind(SdlcController));
@@ -85,3 +74,4 @@ router.patch('/backlog/:id/move',                     SdlcController.moveBacklog
 
 
 module.exports = router;
+
