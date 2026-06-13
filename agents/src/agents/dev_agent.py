@@ -1,7 +1,6 @@
 """DEV worker for the optional Python/LangChain execution path.
 
-Beginner reading guide: E2B can execute when explicitly enabled; otherwise the
-module asks the configured model for a patch, runs the local sandbox checker,
+Beginner reading guide: the module asks the configured model for a patch, runs the local sandbox checker,
 and retries a bounded number of times. Node remains the source of truth for
 artifact validation, gates, and downstream QA ordering.
 """
@@ -15,17 +14,6 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from src.schemas.aidlc import DEVAgentInput, DEVAgentOutput, ChangedFile
-
-# E2B is optional; local fallback remains available when it is not installed.
-try:
-    # Add sandbox to sys.path so we can import e2b_runtime
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    sandbox_dir = os.path.join(current_dir, "..", "..", "sandbox")
-    if sandbox_dir not in sys.path:
-        sys.path.append(sandbox_dir)
-    from e2b_runtime import E2BRuntime
-except ImportError:
-    E2BRuntime = None
 
 logger = logging.getLogger(__name__)
 
@@ -146,55 +134,6 @@ async def run_dev_agent(input_data: DEVAgentInput, model_config=None, trace_cont
                           summary=p.get("summary","DEV Agent completed"))
 
 async def stream_dev_agent(input_data: DEVAgentInput, model_config=None, trace_context=None):
-    if E2BRuntime is not None and os.getenv("USE_E2B_SANDBOX") == "true":
-        yield {"event": "progress", "data": {"step": "dev_agent", "token": "🚀 Khởi động E2B Sandbox...\n"}}
-        
-        runtime = E2BRuntime()
-        context_data = {
-            "prd_context": input_data.prd,
-            "ux_spec": input_data.ux_spec
-        }
-        
-        result = runtime.execute_dev_agent(context_data)
-        
-        if "error" in result:
-            yield {"event": "progress", "data": {"step": "sandbox_gate", "token": f"❌ Lỗi Sandbox: {result['error']}\n"}}
-            # Fallback to local LLM if needed, but for now we just return error output
-            parsed = {
-                "architecture_ledger_update": "",
-                "implementation_plan": "",
-                "mock_code_diff": "",
-                "changed_files": [],
-                "risk_assessment": "High risk due to sandbox failure",
-                "risk_level": "HIGH",
-                "sandbox_report": result['error'],
-                "patch_branch": "",
-                "patch_commit": "",
-                "summary": "Failed in E2B Sandbox"
-            }
-            yield {"event":"completed", "data":{**parsed, "token_usage":{"input":0,"output":0}}}
-            return
-            
-        yield {"event": "progress", "data": {"step": "sandbox_gate", "token": f"✅ E2B Sandbox chạy thành công!\n{result.get('sandbox_report', '')}"}}
-        
-        parsed = result
-        files = [ChangedFile(**f) if isinstance(f, dict) else f for f in parsed.get("changed_files", [])]
-        final_output = DEVAgentOutput(
-            architecture_ledger_update=parsed.get("architecture_ledger_update",""),
-            implementation_plan=parsed.get("implementation_plan",""),
-            mock_code_diff=parsed.get("mock_code_diff",""),
-            changed_files=files,
-            risk_assessment=parsed.get("risk_assessment",""),
-            risk_level=parsed.get("risk_level","LOW"),
-            sandbox_report=parsed.get("sandbox_report",""),
-            patch_branch=parsed.get("patch_branch",""),
-            patch_commit=parsed.get("patch_commit",""),
-            summary=parsed.get("summary","DEV Agent completed via E2B Sandbox")
-        )
-        yield {"event":"completed","data":{**final_output.model_dump(),"token_usage":{"input":0,"output":0}}}
-        return
-
-    # --- LOCAL FALLBACK (Original Logic) ---
     from src.tools.sandbox import run_sandbox_test
     
     llm = _get_llm(model_config)

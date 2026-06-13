@@ -250,98 +250,115 @@ export default function HumanGatePanel({
     || (action === 'reject' && (!comment.trim() || !blockingIssue.trim() || !expectedFix.trim() || !acceptanceChecks.trim()));
 
   return (
-    <div className="gate-panel">
-      <div className="gate-panel__header">
-        <h2>{requiresFeedbackRerun ? `${workerLabel} output needs human review` : 'Human review gate'}</h2>
-        <p className="gate-panel__sub">
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-[1.1rem] font-bold text-white m-0">{requiresFeedbackRerun ? `${workerLabel} output needs human review` : 'Human review gate'}</h2>
+        <p className="text-[0.78rem] text-slate-400 m-0">
           Task <code>{taskId.slice(0, 8)}…</code> · output v{outputVersion}
           {retryCount > 0 && <> · retries {retryCount}/3</>}
         </p>
       </div>
 
-      <div className="gate-decisions">
-        {visibleActions.map((a) => (
-          <button key={a.value} className={`gate-btn ${action === a.value ? 'gate-btn--selected' : ''}`} onClick={() => selectAction(a.value)}>
-            <div>
-              <div className="gate-btn__label">{requiresFeedbackRerun ? 'Send feedback & rerun worker' : a.label}</div>
-              <div className="gate-btn__desc">{requiresFeedbackRerun ? 'The worker receives your direction, regenerates its output, and runs validation again.' : a.description}</div>
-            </div>
-          </button>
-        ))}
+      <div className="flex flex-col gap-2">
+        {visibleActions.map((a) => {
+          const selectedClass = action === a.value ? {
+            approve: 'border-emerald-500/50 ring-2 ring-emerald-500',
+            edit_approve: 'border-amber-500/50 ring-2 ring-amber-500',
+            reject: 'border-red-500/50 ring-2 ring-red-500'
+          }[a.value] : 'border-[#1e293b]';
+
+          return (
+            <button key={a.value} className={`flex items-center gap-3 p-3.5 rounded border bg-[#0d0e13] text-[#e3e1e9] cursor-pointer text-left transition-all duration-150 hover:bg-white/2 ${selectedClass}`} onClick={() => selectAction(a.value)}>
+              <div>
+                <div className="font-semibold text-[0.85rem] text-white">{requiresFeedbackRerun ? 'Send feedback & rerun worker' : a.label}</div>
+                <div className="text-[0.72rem] text-slate-400 mt-0.5">{requiresFeedbackRerun ? 'The worker receives your direction, regenerates its output, and runs validation again.' : a.description}</div>
+              </div>
+            </button>
+          );
+        })}
       </div>
 
       {gateEvaluation && (
-        <div className={`gate-evaluation ${gateEvaluation.recommendation === 'PASS' ? 'gate-evaluation--pass' : 'gate-evaluation--hold'}`}>
-          <div className="gate-evaluation__header"><strong>{gateEvaluation.gateType === 'qa_quality_gate' ? 'Automated QA gate' : 'Confidence-based review trigger'}</strong><span>{gateEvaluation.complexity?.toUpperCase()} · {gateEvaluation.score}/100</span></div>
-          <p>{gateEvaluation.recommendation}: {gateEvaluation.summary}</p>
+        <div className={`border rounded-lg p-3 text-[12px] ${gateEvaluation.recommendation === 'PASS' ? 'bg-emerald-500/8 border-emerald-500/35' : 'bg-amber-500/8 border-amber-500/35'}`}>
+          <div className="flex justify-between gap-3 text-[#e3e1e9] font-bold">
+            <strong>{gateEvaluation.gateType === 'qa_quality_gate' ? 'Automated QA gate' : 'Confidence-based review trigger'}</strong>
+            <span>{gateEvaluation.complexity?.toUpperCase()} · {gateEvaluation.score}/100</span>
+          </div>
+          <p className="mt-2 text-slate-300 whitespace-pre-line">{gateEvaluation.recommendation}: {gateEvaluation.summary}</p>
           {!!gateEvaluation.issues?.length && (
-            <div className="gate-issues">
-              <strong>Issues requiring attention</strong>
+            <div className="flex flex-col gap-2 mt-3">
+              <strong className="font-bold text-[0.76rem] text-white">Issues requiring attention</strong>
               {gateEvaluation.issues.map((issue) => (
-                <div className="gate-issue" key={`${issue.code}:${issue.detail}`}>
-                  <span>{issue.severity}</span>
-                  <div><b>{issue.code}</b><p>{issue.detail}</p>{issue.suggestedAction && <small>{issue.suggestedAction}</small>}</div>
+                <div className="grid grid-cols-[auto_1fr] gap-2 p-2 border border-amber-500/25 rounded bg-black/35" key={`${issue.code}:${issue.detail}`}>
+                  <span className="self-start px-1.5 py-0.5 rounded bg-amber-500/16 text-amber-400 text-[10px] font-bold">{issue.severity}</span>
+                  <div>
+                    <b className="text-[#e3e1e9] text-[0.72rem] font-bold">{issue.code}</b>
+                    <p className="mt-0.5 text-slate-300">{issue.detail}</p>
+                    {issue.suggestedAction && <small className="block mt-1 text-amber-400 text-[11px]">{issue.suggestedAction}</small>}
+                  </div>
                 </div>
               ))}
             </div>
           )}
-          {approvalBlocked && <small>Approval stays locked until the automated QA gate returns PASS.</small>}
-          {requiresFeedbackRerun && <small>Direct approval is disabled. Add a concrete direction for the worker and rerun it.</small>}
+          {approvalBlocked && <small className="text-amber-400 text-[11px] block mt-2">Approval stays locked until the automated QA gate returns PASS.</small>}
+          {requiresFeedbackRerun && <small className="text-amber-400 text-[11px] block mt-2">Direct approval is disabled. Add a concrete direction for the worker and rerun it.</small>}
         </div>
       )}
 
       {action === 'edit_approve' && (
-        <div className="gate-comment">
-          <label>Edit structured output (JSON) <span className="gate-required">(re-validated on approve)</span></label>
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[12px] font-semibold text-slate-300 block mb-1">Edit structured output (JSON) <span className="text-amber-400">(re-validated on approve)</span></label>
           <textarea
-            className="gate-textarea" rows={12} value={editText} spellCheck={false}
+            className="w-full bg-[#050505] border border-[#1e293b] rounded text-[#e3e1e9] text-[12px] px-3 py-2.5 resize-y focus:outline-none focus:border-indigo-500 font-mono"
+            rows={12}
+            value={editText}
+            spellCheck={false}
             onChange={(e) => { setEditText(e.target.value); setEditError(null); }}
-            style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}
           />
-          {editError && <small className="gate-required">{editError}</small>}
+          {editError && <small className="text-amber-400">{editError}</small>}
         </div>
       )}
 
       {action === 'reject' && (
         <>
-          <button className="gate-demo-fill" type="button" onClick={fillDemoFeedback}>
+          <button className="self-start px-3 py-2 border border-indigo-500/55 rounded bg-indigo-500/14 text-indigo-200 cursor-pointer text-[12px] font-bold hover:bg-indigo-500/24 transition-colors" type="button" onClick={fillDemoFeedback}>
             Fill demo review feedback
           </button>
-          <div className="gate-comment">
-            <label>Retry reason</label>
-            <select className="gate-textarea" value={retryReason} onChange={(e) => setRetryReason(e.target.value)} style={{ height: 36 }}>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[12px] font-semibold text-slate-300 block mb-1">Retry reason</label>
+            <select className="w-full bg-[#050505] border border-[#1e293b] rounded text-[#e3e1e9] text-[13px] px-3 py-1.5 focus:outline-none focus:border-indigo-500 h-9" value={retryReason} onChange={(e) => setRetryReason(e.target.value)}>
               {RETRY_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
           </div>
-          <div className="gate-comment">
-            <label>Target fields <span className="gate-muted">(comma-separated)</span></label>
-            <input className="gate-textarea" value={targetFields} onChange={(e) => setTargetFields(e.target.value)} placeholder="security_notes, callback_handler, sandbox_tests" />
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[12px] font-semibold text-slate-300 block mb-1">Target fields <span className="text-slate-500">(comma-separated)</span></label>
+            <input className="w-full bg-[#050505] border border-[#1e293b] rounded text-[#e3e1e9] text-[13px] px-3 py-2 focus:outline-none focus:border-indigo-500 h-9" value={targetFields} onChange={(e) => setTargetFields(e.target.value)} placeholder="security_notes, callback_handler, sandbox_tests" />
           </div>
-          <div className="gate-comment">
-            <label>Blocking issue <span className="gate-required">(required)</span></label>
-            <textarea className="gate-textarea" rows={2} value={blockingIssue} onChange={(e) => setBlockingIssue(e.target.value)} placeholder="Example: OAuth callback does not validate state against the login session." />
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[12px] font-semibold text-slate-300 block mb-1">Blocking issue <span className="text-amber-400">(required)</span></label>
+            <textarea className="w-full bg-[#050505] border border-[#1e293b] rounded text-[#e3e1e9] text-[13px] px-3 py-2.5 resize-y focus:outline-none focus:border-indigo-500" rows={2} value={blockingIssue} onChange={(e) => setBlockingIssue(e.target.value)} placeholder="Example: OAuth callback does not validate state against the login session." />
           </div>
-          <div className="gate-comment">
-            <label>Expected fix <span className="gate-required">(required)</span></label>
-            <textarea className="gate-textarea" rows={2} value={expectedFix} onChange={(e) => setExpectedFix(e.target.value)} placeholder="Example: Add state generation and callback validation, then rerun sandbox tests." />
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[12px] font-semibold text-slate-300 block mb-1">Expected fix <span className="text-amber-400">(required)</span></label>
+            <textarea className="w-full bg-[#050505] border border-[#1e293b] rounded text-[#e3e1e9] text-[13px] px-3 py-2.5 resize-y focus:outline-none focus:border-indigo-500" rows={2} value={expectedFix} onChange={(e) => setExpectedFix(e.target.value)} placeholder="Example: Add state generation and callback validation, then rerun sandbox tests." />
           </div>
-          <div className="gate-comment">
-            <label>Acceptance checks <span className="gate-required">(one per line)</span></label>
-            <textarea className="gate-textarea" rows={3} value={acceptanceChecks} onChange={(e) => setAcceptanceChecks(e.target.value)} placeholder={'Reject callback when state does not match\nAttach passing security checklist and sandbox test evidence'} />
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[12px] font-semibold text-slate-300 block mb-1">Acceptance checks <span className="text-amber-400">(one per line)</span></label>
+            <textarea className="w-full bg-[#050505] border border-[#1e293b] rounded text-[#e3e1e9] text-[13px] px-3 py-2.5 resize-y focus:outline-none focus:border-indigo-500" rows={3} value={acceptanceChecks} onChange={(e) => setAcceptanceChecks(e.target.value)} placeholder={'Reject callback when state does not match\nAttach passing security checklist and sandbox test evidence'} />
           </div>
         </>
       )}
 
-      <div className="gate-comment">
-        <label>Review comment {action === 'reject' && <span className="gate-required">(required)</span>}</label>
-        <textarea className="gate-textarea" rows={3} value={comment} onChange={(e) => setComment(e.target.value)} placeholder={requiresFeedbackRerun ? feedbackPlaceholder : 'Review notes, requested changes, or the rejection reason.'} />
+      <div className="flex flex-col gap-1.5">
+        <label className="text-[12px] font-semibold text-slate-300 block mb-1">Review comment {action === 'reject' && <span className="text-amber-400">(required)</span>}</label>
+        <textarea className="w-full bg-[#050505] border border-[#1e293b] rounded text-[#e3e1e9] text-[13px] px-3 py-2.5 resize-y focus:outline-none focus:border-indigo-500" rows={3} value={comment} onChange={(e) => setComment(e.target.value)} placeholder={requiresFeedbackRerun ? feedbackPlaceholder : 'Review notes, requested changes, or the rejection reason.'} />
       </div>
 
-      {error && <div className="delivery-error" style={{ margin: '0 0 8px' }}>{error}</div>}
+      {error && <div className="mb-2 p-3 bg-red-500/10 border border-red-500/20 rounded text-red-200 text-[12px]">{error}</div>}
 
-      <div className="gate-actions">
-        <button className="gate-cancel" onClick={onClose}>Cancel</button>
-        <button className="gate-submit" onClick={submit} disabled={submitDisabled}>
+      <div className="flex justify-end gap-3">
+        <button className="px-4 py-2 bg-transparent border border-[#1e293b] rounded text-[#c7c4d7] cursor-pointer text-[13px] font-medium hover:bg-white/5 transition-colors" onClick={onClose}>Cancel</button>
+        <button className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded border-0 font-semibold cursor-pointer text-[13px] transition-colors disabled:opacity-45 disabled:cursor-not-allowed" onClick={submit} disabled={submitDisabled}>
           {loading ? 'Submitting…' : requiresFeedbackRerun ? 'Send feedback & rerun' : `Submit: ${action || '-'}`}
         </button>
       </div>

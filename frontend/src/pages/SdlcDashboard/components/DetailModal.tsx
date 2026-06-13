@@ -24,7 +24,7 @@ export default function DetailModal({ artifactType, onClose }: DetailModalProps)
         if (active) {
           setContent(res.content);
         }
-      } catch (err) {
+      } catch {
         if (active) {
           setContent('Failed to load artifact content.');
         }
@@ -45,7 +45,7 @@ export default function DetailModal({ artifactType, onClose }: DetailModalProps)
       await navigator.clipboard.writeText(content);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
+    } catch {
       // ignore
     }
   };
@@ -66,38 +66,38 @@ export default function DetailModal({ artifactType, onClose }: DetailModalProps)
   };
 
   return (
-    <div className="detail-modal-card">
-      <div className="detail-modal-card__header">
-        <div className="detail-modal-card__title">
+    <div className="bg-[#121318] border border-[#1e293b] rounded-lg shadow-2xl overflow-hidden flex flex-col h-[80vh] max-h-[700px] w-[min(800px,95vw)]">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-[#1e293b] bg-[#0d0e13]">
+        <div className="flex items-center gap-2.5">
           <FileText size={18} className="text-blue-500" />
-          <h3>{getTitle()}</h3>
+          <h3 className="text-[15px] font-bold text-white m-0">{getTitle()}</h3>
         </div>
-        <div className="detail-modal-card__actions">
+        <div className="flex items-center gap-2">
           <button
             onClick={handleCopy}
-            className="btn-icon"
+            className="bg-transparent border-0 text-[#908fa0] cursor-pointer w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-150 hover:bg-white/5 hover:text-white disabled:opacity-50"
             title="Copy to clipboard"
             disabled={loading}
           >
             {copied ? <Check size={16} className="text-emerald-500" /> : <Clipboard size={16} />}
           </button>
-          <button onClick={onClose} className="btn-icon" title="Close">
+          <button onClick={onClose} className="bg-transparent border-0 text-[#908fa0] cursor-pointer w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-150 hover:bg-white/5 hover:text-white" title="Close">
             <X size={18} />
           </button>
         </div>
       </div>
-      <div className="detail-modal-card__body">
+      <div className="flex-1 overflow-y-auto p-6">
         {loading ? (
-          <div className="detail-modal-card__loading">
+          <div className="flex flex-col items-center justify-center h-full gap-3 text-[#908fa0] text-[13px]">
             <Loader2 className="animate-spin text-blue-500" size={32} />
             <p>Loading artifact content...</p>
           </div>
         ) : artifactType === 'code_diff' ? (
-          <pre className="detail-modal-code-diff">
+          <pre className="bg-[#050505] border border-[#1e293b] rounded-lg p-4 font-mono text-[12px] leading-normal overflow-x-auto text-[#89ceff] m-0">
             <code>{content}</code>
           </pre>
         ) : (
-          <div className="detail-modal-markdown artifact-markdown">
+          <div className="markdown-preview text-[13px] leading-relaxed text-slate-300">
             <ReactMarkdown>{content}</ReactMarkdown>
           </div>
         )}

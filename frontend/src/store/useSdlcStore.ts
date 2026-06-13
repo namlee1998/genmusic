@@ -156,6 +156,11 @@ export interface SdlcState {
   // ── SSE Controller ─────────────────────────────────────────────────────
   sseAbortController: AbortController | null;
 
+  projectId: string | null;
+  isFeatureRequestFormOpen: boolean;
+  auditEvents: AuditEvent[];
+  phaseTransitions: PhaseTransition[];
+
   // ── Actions ────────────────────────────────────────────────────────────
   startPipeline: (repoUrl: string, request: string) => Promise<void>;
   resolveGate: (gateId: string, action: 'approve' | 'reject', comment?: string) => Promise<void>;
@@ -164,41 +169,10 @@ export interface SdlcState {
   setError: (msg: string | null) => void;
   resetState: () => void;
   cleanupConnections: () => void;
-
-  // ── Backward Compatibility Properties/Actions (Legacy mapping) ────────
-  projectId: string | null;
-  pipelineStatus: string;
-  currentStep: number;
-  approvals: any[];
-  submitRepo: (url: string) => Promise<void>;
-  approveItem: (id: string, action: 'approve' | 'reject', comment?: string) => Promise<void>;
   setProjectId: (id: string | null) => void;
-
-  workflowStatus: WorkflowStatus | null;
-  workflowLoading: boolean;
-  activeTaskId: string | null;
-  activePhase: AgentPhase | null;
-  taskStatus: any | null;
-  sseLogs: string[];
-  sseActive: boolean;
-  artifacts: Artifact[];
-  selectedArtifact: Artifact | null;
-  auditEvents: AuditEvent[];
-  phaseTransitions: PhaseTransition[];
-  isFeatureRequestFormOpen: boolean;
-
-  setWorkflowStatus: (ws: WorkflowStatus) => void;
-  setWorkflowLoading: (v: boolean) => void;
-  setActiveTask: (taskId: string | null, phase: AgentPhase | null) => void;
-  appendSseLog: (log: string) => void;
-  setSseActive: (v: boolean) => void;
-  setTaskStatus: (status: any | null) => void;
-  setArtifacts: (artifacts: Artifact[]) => void;
-  selectArtifact: (artifact: Artifact | null) => void;
+  setFeatureRequestFormOpen: (isOpen: boolean) => void;
   setAuditEvents: (events: AuditEvent[]) => void;
   setPhaseTransitions: (transitions: PhaseTransition[]) => void;
-  setFeatureRequestFormOpen: (isOpen: boolean) => void;
-  clearTask: () => void;
 }
 
 const DEFAULT_PHASES: sdlcApi.PhaseStatus[] = [
@@ -223,43 +197,24 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
     }
   };
 
-  const startPolling = (wfId: string) => {
+  const startPolling = () => {
     if (pollInterval) clearInterval(pollInterval);
     pollInterval = setInterval(async () => {
-      try {
-        const res = await sdlcApi.getPipelineStatus(wfId);
-        // Sync everything on poll except active gates, which are event-driven
-        set({
-          status: res.status,
-          pipelineStatus: res.status,
-          currentStep: phaseToStep(res.status),
-          routeType: res.routeType,
-          pipelinePhases: res.pipelinePhases,
-          auditLog: res.auditLog,
-          qaResult: res.qaResult || null,
-          releaseStatus: res.releaseStatus || 'pending',
-          repoInfo: res.repoInfo || null
-        });
-        
-        // Sync gates
-        if (res.pendingGates) {
-          set({ pendingGates: res.pendingGates });
-        }
-
-        // Halt polling if completed, idle or failed
-        if (res.status === 'idle' || res.status === 'failed' || res.releaseStatus === 'approved') {
+      const { status } = get();
+      if (status === 'qa_complete' || status === 'failed') {
+        if (pollInterval) {
           clearInterval(pollInterval);
           pollInterval = null;
         }
-      } catch (err: any) {
-        console.error('Polling error:', err);
+        return;
       }
-    }, 3000);
+      await get().pollStatus();
+    }, 4000);
   };
 
   return {
     repoUrl: '',
-    featureRequest: 'add google login',
+    featureRequest: '',
     workflowId: null,
     routeType: null,
     pipelinePhases: DEFAULT_PHASES,
@@ -275,39 +230,16 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
     repoInfo: null,
     sseAbortController: null,
 
-    // Legacy values
     projectId: 'default-project',
-    pipelineStatus: 'idle',
-    currentStep: 0,
-    approvals: [],
-    
-    workflowStatus: null,
-    workflowLoading: false,
-    activeTaskId: null,
-    activePhase: null,
-    taskStatus: null,
-    sseLogs: [],
-    sseActive: false,
-    artifacts: [],
-    selectedArtifact: null,
+    isFeatureRequestFormOpen: false,
     auditEvents: [],
     phaseTransitions: [],
-    isFeatureRequestFormOpen: false,
 
     setProjectId: (id) => set({ projectId: id }),
     setError: (msg) => set({ error: msg }),
-    setWorkflowStatus: (ws) => set({ workflowStatus: ws }),
-    setWorkflowLoading: (v) => set({ workflowLoading: v }),
-    setActiveTask: (taskId, phase) => set({ activeTaskId: taskId, activePhase: phase }),
-    appendSseLog: (log) => set(s => ({ sseLogs: [...s.sseLogs.slice(-200), log] })),
-    setSseActive: (v) => set({ sseActive: v }),
-    setTaskStatus: (status) => set({ taskStatus: status }),
-    setArtifacts: (artifacts) => set({ artifacts }),
-    selectArtifact: (artifact) => set({ selectedArtifact: artifact }),
+    setFeatureRequestFormOpen: (isOpen) => set({ isFeatureRequestFormOpen: isOpen }),
     setAuditEvents: (events) => set({ auditEvents: events }),
     setPhaseTransitions: (transitions) => set({ phaseTransitions: transitions }),
-    setFeatureRequestFormOpen: (isOpen) => set({ isFeatureRequestFormOpen: isOpen }),
-    clearTask: () => set({ activeTaskId: null, activePhase: null, taskStatus: null, sseLogs: [], sseActive: false }),
 
     resetState: () => {
       cleanupConnections();
@@ -323,9 +255,7 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
         auditLog: [],
         qaResult: null,
         releaseStatus: null,
-        repoInfo: null,
-        pipelineStatus: 'idle',
-        currentStep: 0
+        repoInfo: null
       });
     },
 
@@ -337,8 +267,6 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
         repoUrl,
         featureRequest: request,
         status: 'cloning',
-        pipelineStatus: 'cloning',
-        currentStep: 1,
         pipelinePhases: request.toLowerCase().includes('backend')
           ? [
               { agent: 'PO', status: 'pending' },
@@ -355,7 +283,7 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
 
       try {
         const { workflowId, status } = await sdlcApi.startPipeline(repoUrl, request);
-        set({ workflowId, status, pipelineStatus: status, projectId: workflowId });
+        set({ workflowId, status, projectId: workflowId });
 
         // Connect SSE stream
         const abort = sdlcApi.subscribeWorkflowSSE(workflowId, {
@@ -363,8 +291,6 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
             if (event === 'progress') {
               set({
                 status: (data.status as string) || get().status,
-                pipelineStatus: (data.status as string) || get().pipelineStatus,
-                currentStep: phaseToStep((data.status as string) || get().status),
                 pipelinePhases: (data.pipelinePhases as sdlcApi.PhaseStatus[]) || get().pipelinePhases,
                 auditLog: (data.auditLog as sdlcApi.AuditEntry[]) || get().auditLog
               });
@@ -375,8 +301,7 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
                 const updatedGates = exists ? s.pendingGates : [...s.pendingGates, newGate];
                 return {
                   pendingGates: updatedGates,
-                  status: 'awaiting_approval',
-                  pipelineStatus: 'awaiting_approval'
+                  status: 'awaiting_approval'
                 };
               });
             } else if (event === 'gate_resolved') {
@@ -387,32 +312,28 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
             } else if (event === 'completed') {
               set({
                 status: 'qa_complete',
-                pipelineStatus: 'qa_complete',
                 qaResult: (data.qaResult as sdlcApi.QAResult) || null
               });
             } else if (event === 'error') {
               set({
                 status: 'failed',
-                pipelineStatus: 'failed',
                 error: (data.message as string) || 'An error occurred during execution'
               });
             }
           },
           onError: (err) => {
             console.error('SSE Error:', err);
-            // Non-blocking fallback: start polling status if SSE goes down
             if (get().workflowId) {
-              startPolling(get().workflowId!);
+              startPolling();
             }
           }
         });
 
         set({ sseAbortController: abort });
-        // Proactively start fallback polling alongside SSE for maximum stability
-        startPolling(workflowId);
+        startPolling();
 
       } catch (err: any) {
-        set({ error: err.message || 'Failed to start SDLC pipeline workflow', status: 'failed', pipelineStatus: 'failed' });
+        set({ error: err.message || 'Failed to start SDLC pipeline workflow', status: 'failed' });
       } finally {
         set({ isLoading: false });
       }
@@ -422,7 +343,6 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
       const { workflowId } = get();
       if (!workflowId) return;
 
-      // Remove immediately from active UI array for responsive updates
       set(s => ({
         pendingGates: s.pendingGates.filter(g => g.id !== gateId),
         isLoading: true
@@ -430,7 +350,6 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
 
       try {
         await sdlcApi.resolveGate(gateId, action, comment);
-        // Sync layout status after resolving
         await get().pollStatus();
       } catch (err: any) {
         set({ error: err.message || 'Failed to resolve risk control gate' });
@@ -466,8 +385,6 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
         const res = await sdlcApi.getPipelineStatus(workflowId);
         set({
           status: res.status,
-          pipelineStatus: res.status,
-          currentStep: phaseToStep(res.status),
           routeType: res.routeType,
           pipelinePhases: res.pipelinePhases,
           pendingGates: res.pendingGates,
@@ -479,31 +396,8 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
       } catch (err: any) {
         set({ error: err.message || 'Failed to check status updates' });
       }
-    },
-
-    // Legacy action mapping wrappers
-    submitRepo: async (url) => {
-      await get().startPipeline(url, get().featureRequest);
-    },
-
-    approveItem: async (id, action, comment) => {
-      await get().resolveGate(id, action, comment);
     }
   };
 });
 
-// Helper function to map pipeline status to legacy stepper steps
-const phaseToStep = (status: string): number => {
-  switch (status) {
-    case 'cloning': return 1;
-    case 'analyzing': return 1;
-    case 'po_running': return 2;
-    case 'awaiting_approval': return 2;
-    case 'ux_running': return 3;
-    case 'dev_running': return 4;
-    case 'sandbox_testing': return 5;
-    case 'qa_running': return 6;
-    case 'qa_complete': return 6;
-    default: return 0;
-  }
-};
+

@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useSdlcStore } from '@/store/useSdlcStore';
 import DiffViewer from './DiffViewer';
 import { ShieldAlert, HelpCircle, Check, X, FileText, Lock } from 'lucide-react';
+import { GateItem } from '@/services/api/sdlcApi';
 
 export default function GatePanel() {
   const { pendingGates, resolveGate, isLoading } = useSdlcStore();
@@ -20,8 +21,8 @@ export default function GatePanel() {
 }
 
 interface GateFormProps {
-  activeGate: any;
-  resolveGate: any;
+  activeGate: GateItem;
+  resolveGate: (gateId: string, action: 'approve' | 'reject', comment?: string) => Promise<any>;
   isLoading: boolean;
 }
 
@@ -69,44 +70,44 @@ function GateForm({ activeGate, resolveGate, isLoading }: GateFormProps) {
   return (
     <div 
       data-gate-id={activeGate.id}
-      className={`gate-panel-card ${activeGate.status !== 'PENDING' ? 'gate-panel-card--resolved' : ''}`}
+      className={`mx-[18px] my-4 p-5 rounded-lg bg-gradient-to-br from-[#30293b]/10 to-[#0d0e13]/98 border transition-all duration-300 ease-in-out ${activeGate.status !== 'PENDING' ? 'border-[#1e293b] shadow-[0_10px_30px_rgba(0,0,0,0.25)]' : 'border-red-500 shadow-[0_10px_30px_rgba(239,68,68,0.08)]'}`}
     >
-      <div className="gate-panel-card__header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div className="flex items-center justify-between border-b border-[#1e293b] pb-3 mb-4">
+        <div className="flex items-center gap-2">
           {activeGate.type === 'DEV_FILE_GATE' ? (
             <>
               <ShieldAlert className="text-red-500" size={20} />
-              <h3 className="gate-panel-card__title">Security Governance Gate</h3>
+              <h3 className="flex items-center gap-2.5 text-white text-base font-bold m-0">Security Governance Gate</h3>
             </>
           ) : (
             <>
               <HelpCircle className="text-amber-500" size={20} />
-              <h3 className="gate-panel-card__title">Product Requirements Gate</h3>
+              <h3 className="flex items-center gap-2.5 text-white text-base font-bold m-0">Product Requirements Gate</h3>
             </>
           )}
         </div>
-        <span className={`gate-badge ${activeGate.type === 'DEV_FILE_GATE' ? 'gate-badge--approval' : 'gate-badge--clarify'}`}>
+        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${activeGate.type === 'DEV_FILE_GATE' ? 'bg-red-500/10 border-red-500/30 text-red-300' : 'bg-amber-500/10 border-amber-500/30 text-amber-300'}`}>
           {activeGate.type === 'DEV_FILE_GATE' ? 'DEV RISK GATE (A)' : 'PO CLARIFY GATE (B)'}
         </span>
       </div>
 
-      <div className="gate-panel-card__body">
+      <div className="flex flex-col gap-3.5">
         {activeGate.type === 'DEV_FILE_GATE' ? (
           // DEV File Risk layout
           <>
-            <div className="gate-info-box">
-              <div className="gate-info-box__title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div className="bg-red-500/3 border border-red-500/15 rounded-lg p-3 text-[13px] text-slate-300 leading-normal">
+              <div className="font-bold text-white mb-1 flex items-center gap-1.5">
                 <Lock size={14} className="text-red-400" />
                 <span>RISK ASSESSMENT TRIGGERED</span>
               </div>
-              <p style={{ margin: 0, fontSize: '12px', color: '#cbd5e1' }}>
-                The agent attempted to modify <code style={{ color: '#fca5a5', background: 'rgba(239, 68, 68, 0.1)', padding: '2px 4px', borderRadius: '3px' }}>{activeGate.payload.path}</code>. 
+              <p style={{ margin: 0 }}>
+                The agent attempted to modify <code className="text-red-300 bg-red-500/10 px-1 py-0.5 rounded">{activeGate.payload.path}</code>. 
                 This action is flagged as <strong>{activeGate.payload.reason}</strong> and requires manual code review and human override approval.
               </p>
             </div>
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <span style={{ fontSize: '11px', color: '#908fa0', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[11px] text-[#908fa0] font-semibold flex items-center gap-1">
                 <FileText size={12} />
                 CODE PATCH DIFF
               </span>
@@ -116,9 +117,9 @@ function GateForm({ activeGate, resolveGate, isLoading }: GateFormProps) {
         ) : (
           // PO Clarification layout
           <>
-            <div className="gate-info-box" style={{ background: 'rgba(245, 158, 11, 0.03)', borderColor: 'rgba(245, 158, 11, 0.15)' }}>
-              <div className="gate-info-box__title" style={{ color: '#fbbf24' }}>REQUIREMENTS CLARIFICATION</div>
-              <p style={{ margin: 0, fontSize: '12px', color: '#cbd5e1' }}>
+            <div className="bg-amber-500/3 border border-amber-500/15 rounded-lg p-3 text-[13px] text-slate-300 leading-normal">
+              <div className="font-bold text-[#fbbf24] mb-1">REQUIREMENTS CLARIFICATION</div>
+              <p style={{ margin: 0 }}>
                 To create a comprehensive PRD, the PO agent requests choices on the assumptions. 
                 Unselected options will assume default behavior.
               </p>
@@ -129,17 +130,17 @@ function GateForm({ activeGate, resolveGate, isLoading }: GateFormProps) {
               const selectedValue = poAnswers[qIdx] || options[0];
 
               return (
-                <div key={qIdx} style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderLeft: '2px solid #334155', paddingLeft: '12px' }}>
-                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc' }}>
+                <div key={qIdx} className="flex flex-col gap-2 border-l-2 border-slate-600 pl-3">
+                  <span className="text-[13px] font-semibold text-[#f8fafc]">
                     Q{qIdx + 1}: {question}
                   </span>
-                  <div className="gate-options-container">
+                  <div className="flex flex-col gap-2.5">
                     {options.map((opt, oIdx) => {
                       const isSelected = selectedValue === opt;
                       return (
                         <div 
                           key={oIdx} 
-                          className={`gate-option ${isSelected ? 'gate-option--selected' : ''}`}
+                          className={`flex items-start gap-2.5 bg-black/30 border rounded-lg p-3 cursor-pointer transition-all duration-150 ${isSelected ? 'border-indigo-500 bg-indigo-500/6' : 'border-[#1e293b] hover:border-indigo-500/30 hover:bg-indigo-500/2'}`}
                           onClick={() => handleOptionSelect(qIdx, opt)}
                         >
                           <input 
@@ -148,8 +149,9 @@ function GateForm({ activeGate, resolveGate, isLoading }: GateFormProps) {
                             checked={isSelected}
                             onChange={() => {}} // Controlled by parent click
                             disabled={isLoading}
+                            className="mt-1"
                           />
-                          <span className="gate-option__text">{opt}</span>
+                          <span className="text-[13px] text-slate-300 leading-snug">{opt}</span>
                         </div>
                       );
                     })}
@@ -161,8 +163,8 @@ function GateForm({ activeGate, resolveGate, isLoading }: GateFormProps) {
         )}
 
         {/* Comment field */}
-        <div className="gate-comment-field">
-          <label htmlFor="gate-comment">
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="gate-comment" className="text-[12px] font-semibold text-slate-300">
             {activeGate.type === 'DEV_FILE_GATE' ? 'Review Comments / Feedback' : 'Additional Assumptions / Custom Instructions'}
           </label>
           <textarea
@@ -171,27 +173,26 @@ function GateForm({ activeGate, resolveGate, isLoading }: GateFormProps) {
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             disabled={isLoading}
+            className="bg-[#090a0f] border border-[#1e293b] rounded-lg text-[#e3e1e9] text-[13px] px-3 py-2.5 min-h-[70px] resize-y transition-all duration-150 focus:outline-none focus:border-indigo-500"
           />
         </div>
 
         {/* Action buttons */}
-        <div className="gate-actions-row">
+        <div className="flex justify-end gap-2.5 mt-2.5">
           <button
             type="button"
-            className="btn-danger"
+            className="bg-red-600/90 text-white rounded-md px-4 py-2 hover:bg-red-600 transition-colors flex items-center justify-center font-bold text-[13px] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed gap-1.5"
             onClick={() => handleResolve('reject')}
             disabled={isLoading}
-            style={{ gap: '6px' }}
           >
             <X size={14} />
             <span>{activeGate.type === 'DEV_FILE_GATE' ? 'Reject & Rerun' : 'Cancel Pipeline'}</span>
           </button>
           <button
             type="button"
-            className="btn-success"
+            className="bg-emerald-600/90 text-white rounded-md px-4 py-2 hover:bg-emerald-600 transition-colors flex items-center justify-center font-bold text-[13px] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed gap-1.5"
             onClick={() => handleResolve('approve')}
             disabled={isLoading}
-            style={{ gap: '6px' }}
           >
             <Check size={14} />
             <span>{activeGate.type === 'DEV_FILE_GATE' ? 'Approve Override' : 'Submit Choices'}</span>
