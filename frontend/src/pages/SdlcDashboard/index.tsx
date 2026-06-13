@@ -1,11 +1,8 @@
-import './sdlc.css';
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Workflow } from 'lucide-react';
 import { useSdlcStore } from '@/store/useSdlcStore';
 import { useSearchParams } from 'react-router-dom';
-import RepoInput from './components/RepoInput';
-import PipelineStepper from './components/PipelineStepper';
+import AgentTaskBoard from './components/AgentTaskBoard';
 import GatePanel from './components/GatePanel';
 import AuditLog from './components/AuditLog';
 import FinalApproval from './components/FinalApproval';
@@ -44,9 +41,9 @@ export default function SdlcDashboard() {
       const el = document.querySelector(`[data-gate-id="${highlightGate}"]`);
       if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        el.classList.add('hitl-highlight-pulse');
+        el.classList.add('animate-hitl-highlight');
         setTimeout(() => {
-          el.classList.remove('hitl-highlight-pulse');
+          el.classList.remove('animate-hitl-highlight');
         }, 3000);
       }
       
@@ -58,37 +55,23 @@ export default function SdlcDashboard() {
   }, [highlightGate, searchParams, setSearchParams]);
 
   return (
-    <main className="sdlc-dashboard" style={{ maxWidth: '1000px', margin: '0 auto', padding: '24px 16px' }}>
-      <header className="delivery-header" style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <p className="delivery-header__eyebrow" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Workflow size={14} className="text-indigo-400" /> 
-            <span>AIFA Autonomy Panel</span>
-          </p>
-          <h1>SDLC Control Center</h1>
-          <p style={{ margin: '4px 0 0 0', color: '#908fa0', fontSize: '13px' }}>
-            Risk-based pipeline control with autonomous developer agents and automated human gates.
-          </p>
-        </div>
-      </header>
+    <main 
+      className="flex flex-col gap-0 p-0 h-full min-h-0 overflow-y-auto bg-[#090a0f] text-[#e3e1e9] font-sans antialiased" 
+      style={{ 
+        maxWidth: '100%', 
+        padding: '24px 32px',
+        backgroundImage: 'radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.05) 0px, transparent 50%), radial-gradient(at 100% 0%, rgba(14, 165, 233, 0.05) 0px, transparent 50%)'
+      }}
+    >
 
       {error && (
-        <div className="delivery-error" style={{ 
-          margin: '0 18px 16px', 
-          padding: '12px 16px', 
-          background: 'rgba(239, 68, 68, 0.08)', 
-          border: '1px solid rgba(239, 68, 68, 0.25)', 
-          borderRadius: '8px', 
-          color: '#fca5a5', 
-          fontSize: '13px' 
-        }}>
+        <div className="mx-[18px] mb-4 p-3 bg-red-500/10 border border-red-500/25 rounded-lg text-red-300 text-[13px]">
           {error}
         </div>
       )}
 
-      <div className="sdlc-dashboard__content" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-        <RepoInput />
-        <PipelineStepper />
+      <div className="flex flex-col gap-5">
+        <AgentTaskBoard setActiveDetailType={setActiveDetailType} />
         <GatePanel />
         <FinalApproval />
         <AuditLog />
@@ -96,8 +79,8 @@ export default function SdlcDashboard() {
 
       <AnimatePresence>
         {activeDetailType && (
-          <motion.div className="sdlc-modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <motion.div className="sdlc-modal" initial={{ scale: .96, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: .96, opacity: 0 }}>
+          <motion.div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[999] backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <motion.div className="bg-[#121318] border border-[#1e293b] rounded-lg shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto" initial={{ scale: .96, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: .96, opacity: 0 }}>
               <DetailModal artifactType={activeDetailType} onClose={() => setActiveDetailType(null)} />
             </motion.div>
           </motion.div>

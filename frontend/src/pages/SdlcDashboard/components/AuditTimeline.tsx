@@ -125,9 +125,9 @@ export default function AuditTimeline({ events }: Props) {
   }
 
   return (
-    <div className="audit-timeline-container flex flex-col h-full min-h-0 bg-surface-container p-4 rounded-lg border border-outline-variant/20">
+    <div className="flex flex-col h-full min-h-0 bg-surface-container p-4 rounded-lg border border-outline-variant/20">
       {/* Control Bar: Bộ Lọc (Task 3.1) */}
-      <div className="audit-filters flex flex-wrap gap-4 items-center justify-between border-b border-outline-variant/20 pb-3 mb-4">
+      <div className="flex flex-wrap gap-4 items-center justify-between border-b border-outline-variant/20 pb-3 mb-4">
         <div className="flex flex-wrap gap-2 items-center">
           <span className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant flex items-center gap-1">
             <span className="material-symbols-outlined text-xs">filter_alt</span> {t('audit.filterRole')}
@@ -136,7 +136,7 @@ export default function AuditTimeline({ events }: Props) {
             <button
               key={filter}
               onClick={() => setActorFilter(filter)}
-              className={`px-2.5 py-1 rounded text-[10px] font-semibold transition-all ${
+              className={`px-2.5 py-1 rounded text-[10px] font-semibold transition-all cursor-pointer ${
                 actorFilter === filter
                   ? 'bg-primary text-on-primary'
                   : 'bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant'
@@ -155,7 +155,7 @@ export default function AuditTimeline({ events }: Props) {
             <button
               key={filter}
               onClick={() => setTypeFilter(filter)}
-              className={`px-2.5 py-1 rounded text-[10px] font-semibold transition-all ${
+              className={`px-2.5 py-1 rounded text-[10px] font-semibold transition-all cursor-pointer ${
                 typeFilter === filter
                   ? 'bg-primary text-on-primary'
                   : 'bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant'
@@ -174,14 +174,14 @@ export default function AuditTimeline({ events }: Props) {
       </div>
 
       {/* Timeline list */}
-      <div className="audit-timeline flex-1 overflow-y-auto pr-1 flex flex-col gap-4 custom-scrollbar max-h-[500px]">
+      <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-4 custom-scrollbar max-h-[500px]">
         {filteredEvents.length === 0 ? (
           <div className="text-center py-10 text-xs text-on-surface-variant">
             {t('audit.noEvents')}
           </div>
         ) : (
           filteredEvents.map((ev, i) => (
-            <div key={i} className={`audit-event audit-event--${ev.type} flex gap-3 relative`}>
+            <div key={i} className="flex gap-3 relative">
               {/* Line connector */}
               {i < filteredEvents.length - 1 && (
                 <div className="absolute left-[13px] top-[26px] bottom-[-22px] w-[2px] bg-outline-variant/30 z-0" />
@@ -189,7 +189,7 @@ export default function AuditTimeline({ events }: Props) {
 
               {/* Dot Icon */}
               <div
-                className="audit-event__dot w-7 h-7 rounded-full flex items-center justify-center text-xs shrink-0 z-10 border border-outline-variant/40"
+                className="w-7 h-7 rounded-full flex items-center justify-center text-xs shrink-0 z-10 border border-outline-variant/40"
                 style={{
                   background: ev.decision
                     ? `${DECISION_COLORS[ev.decision]}20`
@@ -204,10 +204,10 @@ export default function AuditTimeline({ events }: Props) {
               </div>
 
               {/* Body */}
-              <div className="audit-event__body flex-1 bg-surface-container-high/40 border border-outline-variant/10 rounded-lg p-3 flex flex-col gap-1.5">
-                <div className="audit-event__header flex items-center justify-between flex-wrap gap-1">
+              <div className="flex-1 bg-surface-container-high/40 border border-outline-variant/10 rounded-lg p-3 flex flex-col gap-1.5">
+                <div className="flex items-center justify-between flex-wrap gap-1">
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="audit-event__actor text-xs font-bold text-on-surface">
+                    <span className="text-xs font-bold text-on-surface">
                       {ev.actor}
                     </span>
                     <span className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-surface-container-highest border border-outline-variant/30 text-on-surface-variant font-mono">
@@ -217,12 +217,12 @@ export default function AuditTimeline({ events }: Props) {
                       {ev.version}
                     </span>
                   </div>
-                  <span className="audit-event__time text-[9px] text-on-surface-variant font-mono">
+                  <span className="text-[9px] text-on-surface-variant font-mono">
                     {new Date(ev.timestamp).toLocaleTimeString()} {new Date(ev.timestamp).toLocaleDateString()}
                   </span>
                 </div>
 
-                <div className="audit-event__action text-xs text-on-surface-variant leading-relaxed">
+                <div className="text-xs text-on-surface-variant leading-relaxed">
                   {ev.type === 'hitl_decision' ? (
                     <div className="flex flex-col gap-1">
                       <div className="flex items-center gap-1.5">
@@ -245,7 +245,7 @@ export default function AuditTimeline({ events }: Props) {
 
                 {/* Granular state-machine transition */}
                 {(ev.stateFrom || ev.stateTo) && (
-                  <div className="audit-event__transition text-xs text-on-surface-variant">
+                  <div className="text-xs text-on-surface-variant">
                     {ev.stateFrom && <code className="bg-surface-container-highest px-1 py-0.5 rounded">{ev.stateFrom}</code>}
                     {ev.stateFrom && ev.stateTo && <span> → </span>}
                     {ev.stateTo && <code className="bg-surface-container-highest px-1 py-0.5 rounded">{ev.stateTo}</code>}
@@ -254,14 +254,14 @@ export default function AuditTimeline({ events }: Props) {
 
                 {/* A2A handoff source → target */}
                 {ev.type === 'a2a_handoff' && (ev.fromAgent || ev.toAgent) && (
-                  <div className="audit-event__handoff text-xs text-on-surface-variant">
+                  <div className="text-xs text-on-surface-variant">
                     <code className="bg-surface-container-highest px-1 py-0.5 rounded">{ev.fromAgent}</code> → <code className="bg-surface-container-highest px-1 py-0.5 rounded">{ev.toAgent}</code>
                     {ev.attempt != null && <span className="px-1.5 py-0.5 rounded text-[8px] bg-surface-container-highest ml-1.5">{t('audit.attempt')} {ev.attempt}</span>}
                   </div>
                 )}
 
                 {/* Tags / chips */}
-                <div className="audit-event__tags flex flex-wrap gap-1.5 mt-1">
+                <div className="flex flex-wrap gap-1.5 mt-1">
                   {ev.versionTag && <span className="px-1.5 py-0.5 rounded text-[8px] bg-surface-container-highest border border-outline-variant/30 text-on-surface-variant font-mono">{ev.versionTag}</span>}
                   {ev.type !== 'a2a_handoff' && ev.attempt != null && ev.attempt > 1 && (
                     <span className="px-1.5 py-0.5 rounded text-[8px] bg-surface-container-highest border border-outline-variant/30 text-on-surface-variant font-mono">{t('audit.attempt')} {ev.attempt}</span>
@@ -284,12 +284,12 @@ export default function AuditTimeline({ events }: Props) {
                 </div>
 
                 {ev.comment && (
-                  <div className="audit-event__comment text-xs font-medium italic text-on-surface bg-surface-container-highest/50 border border-outline-variant/20 rounded p-2 mt-1">
+                  <div className="text-xs font-medium italic text-on-surface bg-surface-container-highest/50 border border-outline-variant/20 rounded p-2 mt-1">
                     💬 &quot;{ev.comment}&quot;
                   </div>
                 )}
                 {ev.taskId && (
-                  <div className="audit-event__meta text-[9px] text-on-surface-variant font-mono opacity-80 mt-1">
+                  <div className="text-[9px] text-on-surface-variant font-mono opacity-80 mt-1">
                     Task ID: <code>{ev.taskId.slice(0, 8)}…</code>
                   </div>
                 )}

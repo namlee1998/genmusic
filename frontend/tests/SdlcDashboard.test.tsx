@@ -67,26 +67,9 @@ describe('SdlcDashboard Component', () => {
     });
   });
 
-  it('renders the core dashboard header when loaded', () => {
-    render(
-      <MemoryRouter>
-        <SdlcDashboard />
-      </MemoryRouter>
-    );
-    expect(screen.getByText('SDLC Control Center')).toBeInTheDocument();
-    expect(screen.getByText(/Risk-based pipeline control with autonomous developer agents/i)).toBeInTheDocument();
-  });
 
-  it('renders the Repository & Feature Integration input form', () => {
-    render(
-      <MemoryRouter>
-        <SdlcDashboard />
-      </MemoryRouter>
-    );
-    expect(screen.getByText('Local Folder & Feature Integration')).toBeInTheDocument();
-    expect(screen.getByText('📁 TARGET LOCAL FOLDER PATH')).toBeInTheDocument();
-    expect(screen.getByText('📝 FEATURE SPECIFICATION / REQUEST')).toBeInTheDocument();
-  });
+
+
 
   it('renders the Pipeline Stepper when pipeline starts running', () => {
     mockUseSdlcStore.mockReturnValue({

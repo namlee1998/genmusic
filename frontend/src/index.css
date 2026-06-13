@@ -41,6 +41,44 @@
   --font-headline: 'Outfit', sans-serif;
   --font-body: 'Inter', sans-serif;
   --font-label: 'Inter', sans-serif;
+
+  /* Custom Animations for SDLC Dashboard */
+  --animate-border-pulse-blue: border-pulse-blue 2s infinite ease-in-out;
+  --animate-border-pulse-orange: border-pulse-orange 2s infinite ease-in-out;
+  --animate-glow-pulse-blue: glow-pulse-blue 2s infinite ease-in-out;
+  --animate-glow-pulse-orange: glow-pulse-orange 2s infinite ease-in-out;
+  --animate-hitl-highlight: highlight-pulse-animation 2.5s cubic-bezier(0.4, 0, 0.2, 1);
+
+  @keyframes border-pulse-blue {
+    0%, 100% { border-color: rgba(59, 130, 246, 0.3); box-shadow: 0 0 8px rgba(59, 130, 246, 0.04); }
+    50% { border-color: rgba(59, 130, 246, 0.65); box-shadow: 0 0 16px rgba(59, 130, 246, 0.15); }
+  }
+
+  @keyframes border-pulse-orange {
+    0%, 100% { border-color: rgba(245, 158, 11, 0.3); box-shadow: 0 0 8px rgba(245, 158, 11, 0.04); }
+    50% { border-color: rgba(245, 158, 11, 0.65); box-shadow: 0 0 16px rgba(245, 158, 11, 0.15); }
+  }
+
+  @keyframes glow-pulse-blue {
+    0%, 100% { box-shadow: 0 0 4px rgba(59, 130, 246, 0.1); }
+    50% { box-shadow: 0 0 8px rgba(59, 130, 246, 0.3); }
+  }
+
+  @keyframes glow-pulse-orange {
+    0%, 100% { box-shadow: 0 0 4px rgba(245, 158, 11, 0.1); }
+    50% { box-shadow: 0 0 8px rgba(245, 158, 11, 0.3); }
+  }
+
+  @keyframes highlight-pulse-animation {
+    0%, 100% {
+      box-shadow: 0 0 0 0px rgba(99, 102, 241, 0);
+      border-color: rgba(99, 102, 241, 0.25);
+    }
+    15%, 45% {
+      box-shadow: 0 0 0 6px rgba(99, 102, 241, 0.35), 0 0 20px rgba(99, 102, 241, 0.25);
+      border-color: rgba(99, 102, 241, 0.85);
+    }
+  }
 }
 
 :root.dark {
