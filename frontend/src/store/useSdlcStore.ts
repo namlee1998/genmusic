@@ -82,6 +82,9 @@ export interface AuditEvent {
   severity?: string | null;
   retryReason?: string | null;
   blockingIssueCount?: number;
+  status?: string | null;
+  handoffId?: string | null;
+  artifactHash?: string | null;
   type: 'agent_run' | 'agent_complete' | 'hitl_decision' | 'a2a_handoff' | 'escalation' | 'release_decision' | 'failure';
 }
 

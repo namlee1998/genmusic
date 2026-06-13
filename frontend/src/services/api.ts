@@ -4,4 +4,3 @@ export * from './api/testScenariosApi';
 export * from './api/types';
 export * from './api/yamlApi';
 
-export { default } from './api/client';

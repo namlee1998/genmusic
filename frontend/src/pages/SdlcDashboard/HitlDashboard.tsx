@@ -37,6 +37,7 @@ export default function HitlDashboard() {
   const totalCount = interventions.length;
   const securityCount = interventions.filter((item) => item.type === 'DEV_FILE_GATE').length;
   const poCount = interventions.filter((item) => item.type === 'PO_CLARIFY').length;
+  const releaseCount = interventions.filter((item) => item.type === 'FINAL_RELEASE').length;
 
   const handleResolve = (item: GlobalInterventionItem) => {
     // 1. Clear any stale store state from prior project
@@ -101,73 +102,70 @@ export default function HitlDashboard() {
         backgroundImage: 'radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.05) 0px, transparent 50%), radial-gradient(at 100% 0%, rgba(14, 165, 233, 0.05) 0px, transparent 50%)'
       }}
     >
-      {/* Header section */}
-      <header className="flex items-center justify-between gap-[18px] p-[18px_20px] border border-[#1e293b] rounded-[10px] bg-gradient-to-br from-[#6366f1]/13 to-[#0d0e13]/96 mx-[18px] mt-4 mb-0 flex-wrap sm:flex-nowrap">
-        <div>
-          <p className="flex items-center gap-1.5 m-0 text-[#a5b4fc] font-mono text-[10px] font-bold tracking-[0.12em] uppercase">
-            <Gavel size={14} className="text-amber-500" /> {t('dashboard.workspace', 'AIDLC delivery workspace')}
-          </p>
-          <h1 className="mt-[5px] mb-1 text-white text-[22px] font-bold">{t('hitl.title', 'Intervention Center')}</h1>
-          <p className="m-0 text-[#a8a7b5] text-[13px] leading-relaxed">
-            Centralized overview of pending security gates, product manager inputs, and release approvals across active repositories.
-          </p>
+      {/* Control Bar: Page Title & Refresh Button */}
+      <div className="flex items-center justify-between mx-[18px] mb-6 flex-wrap gap-3">
+        <div className="flex items-center gap-2.5">
+          <Gavel size={20} className="text-amber-500" />
+          <h1 className="text-xl font-bold text-white tracking-tight">
+            {t('hitl.title', 'Intervention Center')}
+          </h1>
         </div>
-        <div>
-          <button
-            className="inline-flex items-center gap-1.5 flex-shrink-0 px-3.5 py-2.5 border border-indigo-400/45 rounded-lg bg-indigo-500 text-white font-bold text-[12px] cursor-pointer hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
-            onClick={() => void fetchInterventions()}
-            disabled={isLoading}
-          >
-            <RefreshCw size={14} className={isLoading ? 'spin' : ''} />
-            <span>{t('common.refresh', 'Refresh')}</span>
-          </button>
-        </div>
-      </header>
+
+        {/* Refresh Button */}
+        <button
+          className="inline-flex items-center gap-1.5 flex-shrink-0 px-3.5 py-2.5 border border-indigo-400/45 rounded-lg bg-indigo-500 text-white font-bold text-[12px] cursor-pointer hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+          onClick={() => void fetchInterventions()}
+          disabled={isLoading}
+        >
+          <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
+          <span>{t('common.refresh', 'Refresh')}</span>
+        </button>
+      </div>
 
       {/* Stats Bar */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-5 mb-6">
-        <div className="flex items-center gap-4 p-[18px_20px] rounded-xl border border-white/4 bg-gradient-to-br from-[#1e293b]/45 to-[#0f172a]/80 backdrop-blur-lg shadow-[0_4px_30px_rgba(0,0,0,0.2)] transition-all duration-250 hover:-translate-y-0.5 hover:border-indigo-500/20">
-          <div className="flex items-center justify-center w-11 h-11 rounded-lg flex-shrink-0 bg-indigo-500/12 text-indigo-400">
-            <Activity size={18} />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mx-[18px] mb-6">
+        <div className="flex items-center gap-3 p-3 px-4 rounded-lg border border-[#1e293b] bg-[#11131a]/60 transition-all hover:border-indigo-500/20">
+          <div className="flex items-center justify-center w-9 h-9 rounded-md flex-shrink-0 bg-indigo-500/12 text-indigo-400">
+            <Activity size={16} />
           </div>
           <div>
-            <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 m-0 mb-1">{t('hitl.totalPending', 'Total Pending')}</h3>
-            <p className="text-2xl font-black m-0 leading-none text-white">{totalCount}</p>
+            <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 m-0 mb-0.5">{t('hitl.totalPending', 'Total Pending')}</h3>
+            <p className="text-xl font-bold m-0 leading-none text-white">{totalCount}</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-4 p-[18px_20px] rounded-xl border border-white/4 bg-gradient-to-br from-[#1e293b]/45 to-[#0f172a]/80 backdrop-blur-lg shadow-[0_4px_30px_rgba(0,0,0,0.2)] transition-all duration-250 hover:-translate-y-0.5 hover:border-indigo-500/20">
-          <div className="flex items-center justify-center w-11 h-11 rounded-lg flex-shrink-0 bg-red-500/12 text-red-400">
-            <ShieldAlert size={18} />
+        <div className="flex items-center gap-3 p-3 px-4 rounded-lg border border-[#1e293b] bg-[#11131a]/60 transition-all hover:border-red-500/20">
+          <div className="flex items-center justify-center w-9 h-9 rounded-md flex-shrink-0 bg-red-500/12 text-red-400">
+            <ShieldAlert size={16} />
           </div>
           <div>
-            <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 m-0 mb-1">{t('hitl.securityRisks', 'Security Risks')}</h3>
-            <p className="text-2xl font-black m-0 leading-none text-red-500">{securityCount}</p>
+            <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 m-0 mb-0.5">{t('hitl.securityRisks', 'Security Risks')}</h3>
+            <p className="text-xl font-bold m-0 leading-none text-red-400">{securityCount}</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-4 p-[18px_20px] rounded-xl border border-white/4 bg-gradient-to-br from-[#1e293b]/45 to-[#0f172a]/80 backdrop-blur-lg shadow-[0_4px_30px_rgba(0,0,0,0.2)] transition-all duration-250 hover:-translate-y-0.5 hover:border-indigo-500/20">
-          <div className="flex items-center justify-center w-11 h-11 rounded-lg flex-shrink-0 bg-amber-500/12 text-amber-400">
-            <HelpCircle size={18} />
+        <div className="flex items-center gap-3 p-3 px-4 rounded-lg border border-[#1e293b] bg-[#11131a]/60 transition-all hover:border-amber-500/20">
+          <div className="flex items-center justify-center w-9 h-9 rounded-md flex-shrink-0 bg-amber-500/12 text-amber-400">
+            <HelpCircle size={16} />
           </div>
           <div>
-            <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 m-0 mb-1">{t('hitl.poQuestions', 'PO Questions')}</h3>
-            <p className="text-2xl font-black m-0 leading-none text-amber-500">{poCount}</p>
+            <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 m-0 mb-0.5">{t('hitl.poQuestions', 'PO Questions')}</h3>
+            <p className="text-xl font-bold m-0 leading-none text-amber-400">{poCount}</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-4 p-[18px_20px] rounded-xl border border-white/4 bg-gradient-to-br from-[#1e293b]/45 to-[#0f172a]/80 backdrop-blur-lg shadow-[0_4px_30px_rgba(0,0,0,0.2)] transition-all duration-250 hover:-translate-y-0.5 hover:border-indigo-500/20">
-          <div className="flex items-center justify-center w-11 h-11 rounded-lg flex-shrink-0 bg-emerald-500/12 text-emerald-400">
-            <Clock size={18} />
+        <div className="flex items-center gap-3 p-3 px-4 rounded-lg border border-[#1e293b] bg-[#11131a]/60 transition-all hover:border-emerald-500/20">
+          <div className="flex items-center justify-center w-9 h-9 rounded-md flex-shrink-0 bg-emerald-500/12 text-emerald-400">
+            <CheckCircle size={16} />
           </div>
           <div>
-            <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 m-0 mb-1">{t('hitl.avgResolution', 'Avg Resolution')}</h3>
-            <p className="text-2xl font-black m-0 leading-none text-white">~12 min</p>
+            <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 m-0 mb-0.5">{t('hitl.releaseApprovals', 'Release Gates')}</h3>
+            <p className="text-xl font-bold m-0 leading-none text-emerald-400">{releaseCount}</p>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-start mx-[18px]">
         {/* Main grid of pending gates */}
         <section className="flex flex-col gap-4 min-h-[400px]">
           {error && (
@@ -183,17 +181,17 @@ export default function HitlDashboard() {
           {isLoading && totalCount === 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="hitl-card--skeleton flex flex-col p-5 rounded-xl border border-[#1e293b] bg-[#0d0e13] min-h-[280px] shadow-[0_4px_20px_rgba(0,0,0,0.15)] pointer-events-none animate-pulse">
-                  <div className="w-[90px] h-4 bg-slate-800/60 rounded mb-4"></div>
-                  <div className="w-[160px] h-5 bg-slate-800/60 rounded mb-2"></div>
-                  <div className="w-[200px] h-3 bg-slate-800/60 rounded mb-6"></div>
-                  <div className="w-full h-[70px] bg-slate-800/60 rounded mb-5"></div>
-                  <div className="w-full h-8 bg-slate-800/60 rounded"></div>
+                <div key={i} className="hitl-card--skeleton flex flex-col p-4 rounded-lg border border-[#1e293b] bg-[#11131a]/60 shadow-[0_4px_20px_rgba(0,0,0,0.15)] pointer-events-none animate-pulse">
+                  <div className="w-[80px] h-3 bg-slate-800/60 rounded mb-3"></div>
+                  <div className="w-[140px] h-4 bg-slate-800/60 rounded mb-2"></div>
+                  <div className="w-[180px] h-3 bg-slate-800/60 rounded mb-4"></div>
+                  <div className="w-full h-[50px] bg-slate-800/60 rounded mb-4"></div>
+                  <div className="w-full h-7 bg-slate-800/60 rounded"></div>
                 </div>
               ))}
             </div>
           ) : totalCount === 0 ? (
-            <div className="flex flex-col items-center justify-center text-center p-8 bg-[#0d0e13] border border-dashed border-[#1e293b] rounded-xl min-h-[350px]">
+            <div className="flex flex-col items-center justify-center text-center p-8 bg-[#11131a]/60 border border-dashed border-[#1e293b] rounded-lg min-h-[300px]">
               <CheckCircle size={48} className="text-green-500 animate-bounce" />
               <h2 className="text-base font-bold text-white m-0 mt-4 mb-2">{t('hitl.emptyState', 'All clear! No pending interventions.')}</h2>
               <p className="text-slate-400 text-sm max-w-sm m-0 leading-relaxed">
@@ -221,8 +219,8 @@ export default function HitlDashboard() {
                 const badgeClass = badgeClasses[item.type] || '';
 
                 return (
-                  <div key={item.id} className={`flex flex-col p-5 rounded-xl border border-[#1e293b] bg-[#0d0e13] transition-all duration-200 min-h-[280px] shadow-[0_4px_20px_rgba(0,0,0,0.15)] ${hoverClass}`}>
-                    <div className="flex items-center justify-between mb-3">
+                  <div key={item.id} className={`flex flex-col p-4 rounded-lg border border-[#1e293b] bg-[#11131a]/60 transition-all duration-200 shadow-[0_4px_20px_rgba(0,0,0,0.15)] ${hoverClass}`}>
+                    <div className="flex items-center justify-between mb-2">
                       <span className={`font-mono text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${badgeClass}`}>
                         {getGateTypeLabel(item.type)}
                       </span>
@@ -231,27 +229,27 @@ export default function HitlDashboard() {
                       </span>
                     </div>
 
-                    <h2 className="text-base font-bold text-white m-0 mb-1.5">{item.projectName}</h2>
-                    <div className="flex items-center gap-1.5 font-mono text-[10px] text-slate-500 mb-4">
-                      <ExternalLink size={12} className="text-on-surface-variant/50" />
+                    <h2 className="text-sm font-bold text-white m-0 mb-1">{item.projectName}</h2>
+                    <div className="flex items-center gap-1.5 font-mono text-[9.5px] text-slate-400 mb-3">
+                      <ExternalLink size={11} className="text-slate-500" />
                       <span className="overflow-hidden text-overflow-ellipsis white-space-nowrap">{item.repoUrl}</span>
                     </div>
 
-                    <div className="flex-1 flex flex-col mb-5">
+                    <div className="flex-1 flex flex-col mb-4">
                       {item.type === 'PO_CLARIFY' && item.payload.questions && (
-                        <div className="bg-[#050505] border border-[#1e293b] rounded-lg p-3 flex-1 flex flex-col">
-                          <p className="text-[11px] text-slate-400 m-0 mb-2">
-                            {t('hitl.phaseLabel', 'Phase:')} <span className="font-semibold text-amber-500">PO Requirements Grooming</span>
+                        <div className="bg-[#050505]/40 border border-[#1e293b] rounded-lg p-2.5 flex-1 flex flex-col">
+                          <p className="text-[10px] text-slate-400 m-0 mb-1.5">
+                            {t('hitl.phaseLabel', 'Phase:')} <span className="font-semibold text-amber-500">PO Requirements</span>
                           </p>
-                          <ul className="list-none p-0 m-0 flex flex-col gap-1.5 text-[11.5px] text-slate-300">
+                          <ul className="list-none p-0 m-0 flex flex-col gap-1 text-[11px] text-slate-300">
                             {item.payload.questions.slice(0, 2).map((q, idx) => (
                               <li key={idx} className="truncate">
                                 • {q}
                               </li>
                             ))}
                             {item.payload.questions.length > 2 && (
-                              <li className="text-[10px] text-on-surface-variant/60 font-semibold italic pl-3">
-                                + {item.payload.questions.length - 2} more clarification questions
+                              <li className="text-[10px] text-slate-500 font-semibold italic pl-3">
+                                + {item.payload.questions.length - 2} more questions
                               </li>
                             )}
                           </ul>
@@ -259,39 +257,39 @@ export default function HitlDashboard() {
                       )}
 
                       {item.type === 'DEV_FILE_GATE' && (
-                        <div className="bg-[#050505] border border-[#1e293b] rounded-lg p-3 flex-1 flex flex-col">
-                          <p className="text-[11px] text-slate-400 m-0 mb-2">
-                            {t('hitl.phaseLabel', 'Phase:')} <span className="font-semibold text-red-500">Development Bypass Gate</span>
+                        <div className="bg-[#050505]/40 border border-[#1e293b] rounded-lg p-2.5 flex-1 flex flex-col">
+                          <p className="text-[10px] text-slate-400 m-0 mb-1.5">
+                            {t('hitl.phaseLabel', 'Phase:')} <span className="font-semibold text-red-500">Security Check</span>
                           </p>
-                          <div className="flex items-center gap-1.5 bg-red-500/5 border border-red-500/15 rounded px-2 py-1 mb-2">
-                            <FileCode size={13} className="text-red-500" />
-                            <span className="font-mono text-xs text-red-400 truncate">{item.payload.path}</span>
+                          <div className="flex items-center gap-1.5 bg-red-500/5 border border-red-500/15 rounded px-2 py-0.5 mb-1.5">
+                            <FileCode size={12} className="text-red-500" />
+                            <span className="font-mono text-[10.5px] text-red-400 truncate">{item.payload.path}</span>
                           </div>
-                          <p className="text-[11.5px] text-slate-400 leading-normal m-0 truncate mt-1.5">
+                          <p className="text-[11px] text-slate-400 leading-normal m-0 line-clamp-2">
                             {item.payload.reason}
                           </p>
                         </div>
                       )}
 
                       {item.type === 'FINAL_RELEASE' && (
-                        <div className="bg-[#050505] border border-[#1e293b] rounded-lg p-3 flex-1 flex flex-col">
-                          <p className="text-[11px] text-slate-400 m-0 mb-2">
-                            {t('hitl.phaseLabel', 'Phase:')} <span className="font-semibold text-blue-500">Final Release Acceptance Gate</span>
+                        <div className="bg-[#050505]/40 border border-[#1e293b] rounded-lg p-2.5 flex-1 flex flex-col">
+                          <p className="text-[10px] text-slate-400 m-0 mb-1.5">
+                            {t('hitl.phaseLabel', 'Phase:')} <span className="font-semibold text-blue-500">Final Release</span>
                           </p>
-                          <p className="text-[11.5px] text-slate-400 leading-normal m-0 line-clamp-2 mt-1">
+                          <p className="text-[11px] text-slate-400 leading-normal m-0 line-clamp-2">
                             {item.payload.reason}
                           </p>
                         </div>
                       )}
                     </div>
 
-                    <div className="mt-auto">
+                    <div>
                       <button
                         onClick={() => handleResolve(item)}
-                        className="bg-indigo-500/10 border border-indigo-500/25 text-indigo-200 text-[12px] font-bold px-3.5 py-2 rounded-lg cursor-pointer transition-all duration-200 hover:bg-indigo-500 hover:border-indigo-500 hover:text-white flex items-center justify-between w-full"
+                        className="bg-indigo-500/10 border border-indigo-500/25 text-indigo-200 text-[11px] font-bold px-3 py-1.5 rounded-md cursor-pointer transition-all duration-200 hover:bg-indigo-500 hover:border-indigo-500 hover:text-white flex items-center justify-between w-full"
                       >
                         <span>{t('hitl.navigateResolve', 'Navigate to Resolve')}</span>
-                        <ArrowRight size={14} />
+                        <ArrowRight size={12} />
                       </button>
                     </div>
                   </div>
@@ -302,7 +300,7 @@ export default function HitlDashboard() {
         </section>
 
         {/* Global timeline of manual override events */}
-        <aside className="bg-[#0d0e13] border border-[#1e293b] rounded-xl p-5">
+        <aside className="bg-[#11131a]/60 border border-[#1e293b] rounded-lg p-4">
           <h2 className="text-[12px] font-bold uppercase tracking-wider text-slate-300 m-0 mb-4 pb-2.5 border-b border-[#1e293b]">{t('hitl.timelineTitle', 'Audit Logs & Override Events')}</h2>
           <div className="flex flex-col gap-4">
             {mockAuditTrail.map((event, idx) => {

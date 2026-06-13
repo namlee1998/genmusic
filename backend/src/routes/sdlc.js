@@ -42,6 +42,7 @@ router.post('/tasks/:task_id/cancel', SdlcController.cancelTask.bind(SdlcControl
 // POST /api/v1/sdlc/approvals/:approval_id  { action, comment } | { answers }
 router.get('/approvals',               SdlcController.listPendingApprovals.bind(SdlcController));
 router.post('/approvals/:approval_id', SdlcController.resolveApproval.bind(SdlcController));
+router.get('/interventions',           SdlcController.listAllInterventions.bind(SdlcController));
 
 // ── Task Status ──────────────────────────────────────────────────────────
 router.get('/tasks/:task_id',              SdlcController.getTaskStatus.bind(SdlcController));

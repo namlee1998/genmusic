@@ -237,6 +237,13 @@ class SdlcController {
     } catch (err) { next(err); }
   }
 
+  async listAllInterventions(req, res, next) {
+    try {
+      const interventions = await SdlcWorkflowService.getAllInterventions(req.user);
+      return res.json({ status: 'success', data: interventions });
+    } catch (err) { next(err); }
+  }
+
   // ─── V4 Pipeline & Stream ────────────────────────────────────────────────
 
   async getPipelineStatus(req, res, next) {

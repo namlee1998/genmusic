@@ -95,7 +95,7 @@ export async function moveDocument(
   return data;
 }
 
-export async function listProjects(): Promise<ListProjectsResponse> {
+async function listProjects(): Promise<ListProjectsResponse> {
   const { data } = await api.get<ListProjectsResponse>('/projects');
   return data;
 }
@@ -120,14 +120,14 @@ export async function deleteProject(projectId: string): Promise<void> {
   await api.delete(`/projects/${projectId}`);
 }
 
-export async function listProjectMembers(projectId: string): Promise<ProjectMemberItem[]> {
+async function listProjectMembers(projectId: string): Promise<ProjectMemberItem[]> {
   const { data } = await api.get<{ status: string; data: ProjectMemberItem[] }>(
     `/projects/${projectId}/members`,
   );
   return data.data;
 }
 
-export async function inviteProjectMember(
+async function inviteProjectMember(
   projectId: string,
   payload: { email: string; role: Exclude<ProjectRole, 'owner'> },
 ): Promise<ProjectInvitationItem> {
@@ -138,14 +138,14 @@ export async function inviteProjectMember(
   return data.data;
 }
 
-export async function listProjectInvitations(projectId: string): Promise<ProjectInvitationItem[]> {
+async function listProjectInvitations(projectId: string): Promise<ProjectInvitationItem[]> {
   const { data } = await api.get<{ status: string; data: ProjectInvitationItem[] }>(
     `/projects/${projectId}/invitations`,
   );
   return data.data;
 }
 
-export async function updateProjectMemberRole(
+async function updateProjectMemberRole(
   projectId: string,
   userId: string,
   role: ProjectRole,
@@ -157,11 +157,11 @@ export async function updateProjectMemberRole(
   return data.data;
 }
 
-export async function removeProjectMember(projectId: string, userId: string): Promise<void> {
+async function removeProjectMember(projectId: string, userId: string): Promise<void> {
   await api.delete(`/projects/${projectId}/members/${userId}`);
 }
 
-export async function revokeProjectInvitation(
+async function revokeProjectInvitation(
   projectId: string,
   invitationId: string,
 ): Promise<ProjectInvitationItem> {
@@ -171,14 +171,14 @@ export async function revokeProjectInvitation(
   return data.data;
 }
 
-export async function listMyInvitations(): Promise<ProjectInvitationItem[]> {
+async function listMyInvitations(): Promise<ProjectInvitationItem[]> {
   const { data } = await api.get<{ status: string; data: ProjectInvitationItem[] }>(
     '/invitations/mine',
   );
   return data.data;
 }
 
-export async function acceptInvitation(payload: {
+async function acceptInvitation(payload: {
   invitation_id?: string;
   token?: string;
 }): Promise<ProjectInvitationItem> {
@@ -189,7 +189,7 @@ export async function acceptInvitation(payload: {
   return data.data;
 }
 
-export async function listFolders(projectId: string): Promise<ListFoldersResponse> {
+async function listFolders(projectId: string): Promise<ListFoldersResponse> {
   const { data } = await api.get<ListFoldersResponse>('/folders', {
     params: { project_id: projectId },
   });
