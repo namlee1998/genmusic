@@ -72,7 +72,7 @@ export interface PipelineResponse {
 
 const BASE = '/sdlc';
 
-export const startPipelineReal = (repoUrl: string, request: string): Promise<{ workflowId: string; status: string }> =>
+const startPipelineReal = (repoUrl: string, request: string): Promise<{ workflowId: string; status: string }> =>
   api.post(`${BASE}/run-po-agent`, { repo_path: repoUrl, request }).then((r) => r.data);
 
 export interface SdlcError {
@@ -97,18 +97,18 @@ export const parseApiError = (error: unknown, fallback: string): SdlcError => {
   };
 };
 
-export const getPipelineStatusReal = (workflowId: string): Promise<PipelineResponse> =>
+const getPipelineStatusReal = (workflowId: string): Promise<PipelineResponse> =>
   api.get(`${BASE}/pipeline/${workflowId}`).then((r) => r.data.data);
 
-export const resolveGateReal = (gateId: string, action: 'approve' | 'reject', comment?: string): Promise<{ success: boolean }> =>
+const resolveGateReal = (gateId: string, action: 'approve' | 'reject', comment?: string): Promise<{ success: boolean }> =>
   api.post(`${BASE}/approvals/${gateId}`, { action, comment }).then((r) => r.data);
 
-export const releaseDecisionReal = (projectId: string, action: 'approve' | 'reject'): Promise<{ success: boolean; branch?: string; finalMd?: string }> =>
+const releaseDecisionReal = (projectId: string, action: 'approve' | 'reject'): Promise<{ success: boolean; branch?: string; finalMd?: string }> =>
   api.post(`${BASE}/projects/${projectId}/release-decision`, { action }).then((r) => r.data);
 
 // ── Real SSE Subscription ──────────────────────────────────────────────────
 
-export const subscribeWorkflowSSEReal = (
+const subscribeWorkflowSSEReal = (
   workflowId: string,
   handlers: {
     onMessage?: (event: string, data: Record<string, unknown>) => void;
@@ -226,7 +226,7 @@ export interface GateDecisionPayload {
   comment?: string;
 }
 
-export const submitGateDecision = (taskId: string, payload: GateDecisionPayload) =>
+const submitGateDecision = (taskId: string, payload: GateDecisionPayload) =>
   api.post(`${BASE}/tasks/${taskId}/gate-decision`, payload).then((r) => r.data);
 
 // Structured stage-review decision: idempotent and optimistic-locked.
@@ -245,17 +245,17 @@ export interface StructuredDecisionBody {
   };
 }
 
-export const submitStructuredDecision = (taskId: string, body: StructuredDecisionBody) =>
+const submitStructuredDecision = (taskId: string, body: StructuredDecisionBody) =>
   api.post(`${BASE}/tasks/${taskId}/decision`, body).then((r) => r.data);
 
 // ── Status ────────────────────────────────────────────────────────────────
 
-export const getSdlcTaskStatus = (taskId: string) =>
+const getSdlcTaskStatus = (taskId: string) =>
   api.get(`${BASE}/tasks/${taskId}`).then((r) => r.data.data);
 
-export const getFinalReviewPacket = (projectId: string) =>
+const getFinalReviewPacket = (projectId: string) =>
   api.get(`${BASE}/final-review-packet/${projectId}`).then((r) => r.data.data);
-export const submitReleaseDecision = (
+const submitReleaseDecision = (
   projectId: string,
   body: { decision_id: string; decision: 'APPROVE' | 'REJECT'; comment?: string },
 ) => api.post(`${BASE}/projects/${projectId}/release-decision`, body).then((r) => r.data);
@@ -268,7 +268,7 @@ export const submitReleaseDecision = (
  * Pass `repoUrl` to clone a remote repo, or `repoPath` to use an already-cloned
  * local folder ("Open folder" flow). Both are optional — omit for a repo-less run.
  */
-export const runWorkflow = (
+const runWorkflow = (
   projectId: string,
   request: string,
   repoUrl?: string,
@@ -323,12 +323,12 @@ export interface PendingGate {
   createdAt?: string;
 }
 
-export const resolveApproval = (
+const resolveApproval = (
   approvalId: string,
   body: { action?: 'approve' | 'reject'; comment?: string; answers?: string[] | Record<string, string> },
 ) => api.post(`${BASE}/approvals/${approvalId}`, body).then((r) => r.data.data);
 
-export const downloadReleaseFile = (projectId: string, fileName: 'final.md' | 'qa-report.md') =>
+const downloadReleaseFile = (projectId: string, fileName: 'final.md' | 'qa-report.md') =>
   api.get(`${BASE}/projects/${projectId}/release-files/${fileName}`, { responseType: 'blob' })
     .then((r) => r.data as Blob);
 
@@ -342,7 +342,7 @@ export interface MockScenarioState {
   available: string[];
 }
 
-export const getMockScenario = (): Promise<MockScenarioState> =>
+const getMockScenario = (): Promise<MockScenarioState> =>
   api.get(`${BASE}/dev/mock-scenario`).then((r) => r.data.data);
 
 // ── Primary /aifa board: real_single or staged three_flow mode ─────────────
@@ -450,25 +450,25 @@ export interface WorkflowTimeline {
 // misleading "timeout exceeded" banner while a real run is provisioning.
 const BOARD_TIMEOUT_MS = 120_000;
 
-export const seedDemoBoard = (
+const seedDemoBoard = (
   reset = false,
   sourceRepoPath?: string,
   mode: 'three_flow' | 'real_single' = 'three_flow',
 ): Promise<DemoBoard> =>
   api.post(`${BASE}/demo/seed-board`, { reset, sourceRepoPath, mode }, { timeout: BOARD_TIMEOUT_MS }).then((r) => r.data.data);
 
-export const getDemoBoard = (): Promise<DemoBoard> =>
+const getDemoBoard = (): Promise<DemoBoard> =>
   api.get(`${BASE}/demo/board`, { timeout: BOARD_TIMEOUT_MS }).then((r) => r.data.data);
 
 export interface UxDoc { taskId: string; fileName: string; markdown: string; }
 
-export const getDemoUxDoc = (projectId: string): Promise<UxDoc | null> =>
+const getDemoUxDoc = (projectId: string): Promise<UxDoc | null> =>
   api.get(`${BASE}/demo/flow/${projectId}/ux-doc`).then((r) => r.data.data);
 
-export const retryDemoFlow = (projectId: string): Promise<{ retried: boolean; stage?: string; reason?: string }> =>
+const retryDemoFlow = (projectId: string): Promise<{ retried: boolean; stage?: string; reason?: string }> =>
   api.post(`${BASE}/demo/flow/${projectId}/retry`, {}, { timeout: BOARD_TIMEOUT_MS }).then((r) => r.data.data);
 
-export const getWorkflowTimeline = (projectId: string): Promise<WorkflowTimeline> =>
+const getWorkflowTimeline = (projectId: string): Promise<WorkflowTimeline> =>
   api.get(`${BASE}/workflow/${projectId}/timeline`).then((r) => r.data.data);
 
 // ── Global HITL Interventions ──
@@ -482,7 +482,7 @@ export interface GlobalInterventionItem extends GateItem {
   updatedAt: string;        // ISO timestamp for sorting
 }
 
-export const getAllInterventionsReal = (): Promise<GlobalInterventionItem[]> =>
+const getAllInterventionsReal = (): Promise<GlobalInterventionItem[]> =>
   api.get(`${BASE}/interventions`).then((r) => r.data.data);
 
 export const getAllInterventions = (): Promise<GlobalInterventionItem[]> => {

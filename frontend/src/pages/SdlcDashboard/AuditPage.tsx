@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Workflow, RefreshCw } from 'lucide-react';
+import { Workflow, RefreshCw, GitCompare, History } from 'lucide-react';
 import { useSdlcStore } from '@/store/useSdlcStore';
 import { useAppStore } from '@/store/useAppStore';
 import * as sdlcApi from '@/services/api/sdlcApi';
 import AuditTimeline from './components/AuditTimeline';
+import A2aHandoffTimeline from './components/A2aHandoffTimeline';
 import WorkflowMetricsPanel from './components/WorkflowMetricsPanel';
 import PhaseTransitionStrip from './components/PhaseTransitionStrip';
 import CiPreflightPanel from './components/CiPreflightPanel';
 import DeliveryErrorBanner from './components/DeliveryErrorBanner';
 import EmptyProjectState from './components/EmptyProjectState';
 import type { WorkflowMetrics } from '@/store/useSdlcStore';
+
 
 /**
  * Audit & Logs page (/sdlc/audit).
@@ -27,6 +29,7 @@ export default function AuditPage() {
 
   const [loading, setLoading] = useState(false);
   const [metrics, setMetrics] = useState<WorkflowMetrics | null>(null);
+  const [activeView, setActiveView] = useState<'a2a' | 'all'>('a2a');
 
   // Keep the SDLC store's projectId in sync with the globally selected project.
   useEffect(() => {
@@ -59,54 +62,84 @@ export default function AuditPage() {
 
   return (
     <main 
-      className="flex flex-col gap-0 p-0 h-full min-h-0 overflow-y-auto bg-[#090a0f] text-[#e3e1e9] font-sans antialiased" 
+      className="flex flex-col gap-0 p-0 w-full bg-[#090a0f] text-[#e3e1e9] font-sans antialiased" 
       style={{ 
-        maxWidth: '1000px', 
-        margin: '0 auto', 
-        padding: '24px 16px',
+        maxWidth: '100%', 
+        padding: '24px 32px',
         backgroundImage: 'radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.05) 0px, transparent 50%), radial-gradient(at 100% 0%, rgba(14, 165, 233, 0.05) 0px, transparent 50%)'
       }}
     >
-      <header className="flex items-center justify-between gap-[18px] p-[18px_20px] border border-[#1e293b] rounded-[10px] bg-gradient-to-br from-[#6366f1]/13 to-[#0d0e13]/96 mx-[18px] mt-4 mb-6 flex-wrap sm:flex-nowrap">
-        <div>
-          <p className="flex items-center gap-1.5 m-0 text-[#a5b4fc] font-mono text-[10px] font-bold tracking-[0.12em] uppercase">
-            <Workflow size={14} className="text-indigo-400" />
-            <span>AIDLC delivery workspace</span>
-          </p>
-          <h1 className="mt-[5px] mb-1 text-white text-[22px] font-bold">Audit &amp; Logs</h1>
-          <p className="m-0 text-[#a8a7b5] text-[13px] leading-relaxed">
-            Run timeline, A2A handoffs, and every human-in-the-loop decision for this project.
-          </p>
+      <DeliveryErrorBanner error={error} onDismiss={() => setError(null)} />
+
+      {/* Control Bar: View Switcher & Refresh Button */}
+      <div className="flex items-center justify-between mx-[18px] mb-6 flex-wrap gap-3">
+        {/* View Switcher Pills */}
+        <div className="flex bg-[#11131a]/60 border border-[#1e293b] rounded-lg p-1">
+          <button
+            onClick={() => setActiveView('a2a')}
+            className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-md transition-all cursor-pointer ${
+              activeView === 'a2a'
+                ? 'bg-indigo-500 text-white shadow-[0_2px_8px_rgba(99,102,241,0.2)]'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <GitCompare size={14} />
+            <span>A2A Handoff Flow</span>
+          </button>
+          <button
+            onClick={() => setActiveView('all')}
+            className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-md transition-all cursor-pointer ${
+              activeView === 'all'
+                ? 'bg-indigo-500 text-white shadow-[0_2px_8px_rgba(99,102,241,0.2)]'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <History size={14} />
+            <span>Full Run Timeline</span>
+          </button>
         </div>
+
+        {/* Refresh Button */}
         <button 
-          className="inline-flex items-center gap-1.5 flex-shrink-0 px-3.5 py-2.5 border border-indigo-400/45 rounded-lg bg-indigo-500 text-white font-bold text-[12px] cursor-pointer hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed" 
+          className="inline-flex items-center gap-1.5 flex-shrink-0 px-3.5 py-2.5 border border-indigo-400/45 rounded-lg bg-indigo-500 text-white font-bold text-[12px] cursor-pointer hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all" 
           onClick={() => void refreshAudit()} 
           disabled={loading}
         >
-          <RefreshCw size={16} className={loading ? 'spin' : ''} /> Refresh
+          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
         </button>
-      </header>
+      </div>
 
-      <DeliveryErrorBanner error={error} onDismiss={() => setError(null)} />
-
-      <section className="flex flex-col border border-[#1e293b] rounded-lg bg-[#121318] p-5 mx-[18px] mb-6 overflow-hidden">
+      <section className="flex flex-col border border-[#1e293b] rounded-lg bg-[#121318] p-5 mx-[18px] mb-6">
         <div className="w-full flex flex-col gap-6">
-          <div>
-            <h2 className="text-[13px] font-bold text-[#f8fafc] uppercase tracking-wider mb-2 mt-4">Workflow metrics</h2>
-            <WorkflowMetricsPanel metrics={metrics} />
-          </div>
-          <div>
-            <h2 className="text-[13px] font-bold text-[#f8fafc] uppercase tracking-wider mb-2 mt-4">CI preflight mock</h2>
-            <CiPreflightPanel />
-          </div>
-          <div>
-            <h2 className="text-[13px] font-bold text-[#f8fafc] uppercase tracking-wider mb-2 mt-4">Phase transitions</h2>
-            <PhaseTransitionStrip transitions={phaseTransitions} />
-          </div>
-          <div>
-            <h2 className="text-[13px] font-bold text-[#f8fafc] uppercase tracking-wider mb-2 mt-4">Run timeline</h2>
-            <AuditTimeline events={auditEvents} />
-          </div>
+          {activeView === 'all' && (
+            <>
+              <div>
+                <h2 className="text-[13px] font-bold text-[#f8fafc] uppercase tracking-wider mb-2 mt-4">Workflow metrics</h2>
+                <WorkflowMetricsPanel metrics={metrics} />
+              </div>
+              <div>
+                <h2 className="text-[13px] font-bold text-[#f8fafc] uppercase tracking-wider mb-2 mt-4">CI preflight mock</h2>
+                <CiPreflightPanel />
+              </div>
+              <div>
+                <h2 className="text-[13px] font-bold text-[#f8fafc] uppercase tracking-wider mb-2 mt-4">Phase transitions</h2>
+                <PhaseTransitionStrip transitions={phaseTransitions} />
+              </div>
+              <div>
+                <h2 className="text-[13px] font-bold text-[#f8fafc] uppercase tracking-wider mb-2 mt-4">Run timeline</h2>
+                <AuditTimeline events={auditEvents} />
+              </div>
+            </>
+          )}
+
+          {activeView === 'a2a' && (
+            <div>
+              <h2 className="text-[13px] font-bold text-[#f8fafc] uppercase tracking-wider mb-4 mt-2">
+                Agent-to-Agent Handoff Contracts
+              </h2>
+              <A2aHandoffTimeline events={auditEvents} />
+            </div>
+          )}
         </div>
       </section>
     </main>

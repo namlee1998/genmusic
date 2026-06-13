@@ -1121,6 +1121,71 @@ class SdlcWorkflowService {
     return [...memory, ...interrupted.filter((gate) => !memory.some((item) => item.approvalId === gate.approvalId))];
   }
 
+  /** List and enrich all active/interrupted pending interventions across all projects. */
+  async getAllInterventions(user) {
+    const prisma = require('../config/database');
+
+    // 1. Get all pending gates
+    const gates = await this.listPendingGates();
+
+    // 2. Enrich each gate with Project and Task info
+    const enriched = [];
+    for (const gate of gates) {
+      if (!gate.projectId) continue;
+
+      // Fetch project to get the name
+      const project = await prisma.project.findUnique({
+        where: { id: gate.projectId },
+      });
+
+      const task = await Task.findById(gate.taskId);
+
+      if (!project || !task) continue;
+
+      // Extract raw payload
+      const payloadParsed = gate.payload || {};
+
+      // Parse questions if kind is question
+      let questionsList = [];
+      if (gate.kind === 'question' && Array.isArray(payloadParsed.questions)) {
+        questionsList = payloadParsed.questions.map((q) =>
+          typeof q === 'object' && q !== null ? q.question : String(q)
+        );
+      }
+
+      // Map PendingGate to GlobalInterventionItem format
+      let type = 'HITL_REVIEW';
+      if (gate.role === 'PO' || gate.role === 'po-agent') {
+        type = 'PO_CLARIFY';
+      } else if (gate.role === 'DEV' || gate.role === 'dev-agent' || gate.kind === 'tool') {
+        type = 'DEV_FILE_GATE';
+      } else if (gate.role === 'RELEASE' || gate.role === 'qa-agent') {
+        type = 'FINAL_RELEASE';
+      }
+
+      enriched.push({
+        id: gate.approvalId,
+        type,
+        status: (gate.status || 'PENDING').toUpperCase(),
+        payload: {
+          path: payloadParsed.file_path || (payloadParsed.display && payloadParsed.display.filePath) || '',
+          reason: payloadParsed.reason || '',
+          diff: payloadParsed.diff || (payloadParsed.display && payloadParsed.display.diffPreview) || '',
+          questions: questionsList,
+        },
+        createdAt: new Date(gate.createdAt).toISOString(),
+        updatedAt: new Date(gate.updatedAt || gate.createdAt).toISOString(),
+        projectId: project.id,
+        projectName: project.name,
+        repoUrl: '',
+        pipelineStatus: task.status,
+        currentPhase: task.type.replace('-agent', '').toUpperCase(),
+      });
+    }
+
+    return enriched;
+  }
+
   // =========================================================================
   // Targeted Rework Logic
   // =========================================================================

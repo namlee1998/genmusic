@@ -53,7 +53,7 @@ export interface Agent2InputSnapshot {
   flows: FlowSection[];
 }
 
-export function getScenarioData(tc: TestcaseItem): ScenarioData | null {
+function getScenarioData(tc: TestcaseItem): ScenarioData | null {
   if (!tc.scenarioData) return null;
   const d = tc.scenarioData as Record<string, unknown>;
   return {
