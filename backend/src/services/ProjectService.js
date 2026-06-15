@@ -1,19 +1,16 @@
 const { v4: uuidv4 } = require('uuid');
-const { Project, Folder, Document, ProjectMember } = require('../models');
+const { Project, Folder, Document } = require('../models');
 const DocumentService = require('./DocumentService');
-const MembershipService = require('./MembershipService');
-const QuotaService = require('./QuotaService');
 const prisma = require('../config/database');
 const { ApiError } = require('../middleware/errorHandler');
 
 class ProjectService {
   async listProjects(user) {
-    const projectIds = await MembershipService.listAccessibleProjectIds(user.id);
-    const projects = await Project.listByIds(projectIds);
-    return Promise.all(projects.map(async (project) => ({
+    const projects = await Project.list();
+    return projects.map((project) => ({
       ...project,
-      role: await MembershipService.getUserProjectRole(user.id, project.id),
-    })));
+      role: 'owner',
+    }));
   }
 
   async createProject(name, user) {
@@ -22,29 +19,23 @@ class ProjectService {
     }
     if (!user?.id) throw new ApiError(401, 'Authenticated user is required');
 
-    // Auth/quota gating disabled for local execution — no plan project cap.
-
     const project = await Project.create({
       id: uuidv4(),
       name: name.trim(),
       createdBy: user.id,
     });
-    await MembershipService.createOwnerMembership(project.id, user.id);
     return { ...project, role: 'owner' };
   }
 
   async renameProject(projectId, name, user) {
-    await MembershipService.requireProjectRole(user.id, projectId, ['owner', 'admin']);
     const project = await Project.findById(projectId);
     if (!project) throw new ApiError(404, 'Project not found');
     if (!name || !name.trim()) throw new ApiError(400, 'Project name is required');
     const updated = await Project.update(projectId, { name: name.trim() });
-    const role = await MembershipService.getUserProjectRole(user.id, projectId);
-    return { ...updated, role };
+    return { ...updated, role: 'owner' };
   }
 
   async deleteProject(projectId, user) {
-    await MembershipService.requireProjectRole(user.id, projectId, ['owner']);
     const project = await Project.findById(projectId);
     if (!project) throw new ApiError(404, 'Project not found');
 
@@ -70,21 +61,14 @@ class ProjectService {
       prisma.hitlDecision.deleteMany({ where: { projectId } }),
       prisma.featureBacklog.deleteMany({ where: { projectId } }),
       prisma.sessionState.deleteMany({ where: { projectId } }),
-      prisma.usageLog.updateMany({
-        where: { projectId },
-        data: { projectId: null, taskId: null },
-      }),
       prisma.task.deleteMany({ where: { projectId } }),
       prisma.folder.deleteMany({ where: { projectId } }),
-      prisma.projectInvitation.deleteMany({ where: { projectId } }),
-      prisma.projectMembership.deleteMany({ where: { projectId } }),
       prisma.project.delete({ where: { id: projectId } }),
     ]);
     return true;
   }
 
   async getProjectTree(projectId, user) {
-    await MembershipService.requireProjectRole(user.id, projectId, ['owner', 'admin', 'editor', 'viewer']);
     const project = await Project.findById(projectId);
     if (!project) throw new ApiError(404, 'Project not found');
 
@@ -102,3 +86,4 @@ class ProjectService {
 }
 
 module.exports = new ProjectService();
+

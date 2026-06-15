@@ -18,14 +18,7 @@ Tài liệu này ghi nhận trạng thái hiện tại, các chức năng đã h
 
 ## 🖥️ Chi tiết các Trang & Thành phần (Pages & Components Status)
 
-### 1. Landing Page (`/` hoặc `/landing`)
-Trang giới thiệu chính của sản phẩm với giao diện tối ưu hóa SEO, hiện đại, và mượt mà.
-- [x] Giao diện giới thiệu sản phẩm (Hero Section)
-- [x] Hiển thị các bước quy trình SDLC (Pipeline Steps)
-- [x] Tích hợp i18n chuyển đổi ngôn ngữ
-- [x] Nút điều hướng CTA (Call-to-Action) dẫn tới Dashboard/Auth
-
-### 2. SDLC Dashboard (`/sdlc`)
+### 1. SDLC Dashboard (`/sdlc`)
 Bảng điều khiển trung tâm quản lý toàn bộ vòng đời phát triển phần mềm tự động (SDLC) qua các AI Agent. Được cấu trúc thành 3 View (trang) chuyên biệt điều hướng qua thanh Sub-navigation:
 
 *   **Build View (`/sdlc`):**
@@ -37,52 +30,25 @@ Bảng điều khiển trung tâm quản lý toàn bộ vòng đời phát tri�
 *   **Audit View (`/sdlc/audit`):**
     *   [x] **WorkflowMetricsPanel:** Biểu diễn trực quan các chỉ số vận hành (Cycle Time, tỷ lệ phê duyệt tự động, số lần chạy lại của Agent, phân phối lỗi).
     *   [x] **AuditTimeline (Run Timeline):** Hiển thị toàn bộ lịch sử chạy của agent, chuyển đổi trạng thái máy (state transitions), các lần chuyển giao A2A (A2A handoffs), và lịch sử kiểm duyệt (hỗ trợ các bộ lọc nâng cao theo vai trò và loại sự kiện).
-*   **Outputs View (`/sdlc/outputs`):**
-    *   [x] **ArtifactViewer:** Quản lý và duyệt toàn bộ danh sách các artifact được tạo ra và lưu trữ của các Agent trên hệ thống.
 *   **Các thành phần tích hợp khác:**
     *   [x] **PenpotPreview:** Component render bản xem trước từ Penpot UI/UX.
     *   [x] **Document Management Panel:** Quản lý upload tài liệu đầu vào (PRD, User Flow, UI Spec) tích hợp ngay trong AppShell.
 
-### 3. Trang Quản trị (Admin Panel - `/admin`)
-- [x] **Admin Dashboard:** Tổng quan thống kê hệ thống (lượt sử dụng, số lượng project, API calls)
-- [x] **Admin Funnel:** Biểu đồ phễu chuyển đổi và tương tác người dùng
-- [x] **Admin Users:** Quản lý danh sách người dùng, phân quyền hệ thống
-
-### 4. Auth & Xác thực (`/auth`)
-- [x] Trang Đăng nhập & Đăng ký tích hợp Supabase Auth
-- [x] Quản lý session và đồng bộ thông tin user về global store (`useAppStore`)
-
-### 5. Profile & Cài đặt dự án (`/profile`, `/settings`)
-- [x] **Profile:** Xem thông tin cá nhân, cập nhật avatar, Metadata công ty & vai trò công việc
-- [x] **Project Settings:** Cấu hình biến môi trường, API keys, các webhook cho dự án cụ thể
-
----
 
 ## 🛠️ Các Lỗi Đã Được Sửa Gần Đây (Recent Bug Fixes)
 
-1.  **Lỗi Types của Supabase User Metadata:**
-    *   *Mô tả:* Metadata của user (`company_name`, `job_title`) trả về từ Supabase mặc định có kiểu `{}` gây ra lỗi build TypeScript.
-    *   *Cách sửa:* Thực hiện ép kiểu tường minh (`as string | undefined`) và bao bọc bằng hàm `String()` khi thực hiện mã hóa URL trong [AppShell.tsx](file:///c:/Users/Admin/Desktop/AI_thucchien/group_project_2/Team_6_End-to-End-Autonomous-Software-Factory-Multi-AI-Agent/frontend/src/components/layout/AppShell.tsx) và [TopBar.tsx](file:///c:/Users/Admin/Desktop/AI_thucchien/group_project_2/Team_6_End-to-End-Autonomous-Software-Factory-Multi-AI-Agent/frontend/src/components/layout/TopBar.tsx).
-2.  **Lỗi khai báo kiểu i18next:**
-    *   *Mô tả:* Lỗi thiếu khai báo kiểu của `react-i18next` gây lỗi biên dịch khi dùng hook `useTranslation`.
-    *   *Cách sửa:* Khởi tạo file định nghĩa kiểu [react-i18next.d.ts](file:///c:/Users/Admin/Desktop/AI_thucchien/group_project_2/Team_6_End-to-End-Autonomous-Software-Factory-Multi-AI-Agent/frontend/src/react-i18next.d.ts) để đồng bộ hóa tự động các keys dịch thuật từ [translation.json](file:///c:/Users/Admin/Desktop/AI_thucchien/group_project_2/Team_6_End-to-End-Autonomous-Software-Factory-Multi-AI-Agent/frontend/src/locales/en/translation.json).
-3.  **Lỗi React imports & Props không khớp:**
-    *   *Mô tả:* Thiếu hàm hook React (`useCallback`) trong `ThemeProvider.tsx` và thừa tham số CSS `color` không hợp lệ trong các thẻ `PipelineStep` ở LandingPage.
-    *   *Cách sửa:* Import đầy đủ các hook và loại bỏ các props CSS dư thừa không định nghĩa trong interface của component.
-4.  **Lỗi chuyển hướng 401 không chính xác:**
-    *   *Mô tả:* Khi phiên làm việc hết hạn, interceptor chuyển hướng về `/auth` chỉ kích hoạt khi path bắt đầu bằng `/app`, tuy nhiên route thực tế là `/sdlc`.
-    *   *Cách sửa:* Sửa điều kiện kiểm tra path trong [client.ts](file:///c:/Users/Admin/Desktop/AI_thucchien/group_project_2/Team_6_End-to-End-Autonomous-Software-Factory-Multi-AI-Agent/frontend/src/services/api/client.ts) từ `/app` thành `/sdlc`.
-5.  **Thiếu Error Boundary toàn cục:**
+1.  **Lỗi Redirect 401 không chính xác đã được xử lý bằng cách vô hiệu hóa auth hoàn toàn:** Hệ thống hiện chạy local single-user, không có auth middleware, không có session expiry.
+2.  **Thiếu Error Boundary toàn cục:**
     *   *Mô tả:* Hệ thống thiếu Error Boundary dẫn đến khi có lỗi runtime phát sinh ở bất cứ component nào, toàn bộ ứng dụng sẽ bị crash thành màn hình trắng.
-    *   *Cách sửa:* Tạo component [ErrorBoundary.tsx](file:///c:/Users/Admin/Desktop/AI_thucchien/group_project_2/Team_6_End-to-End-Autonomous-Software-Factory-Multi-AI-Agent/frontend/src/components/ErrorBoundary.tsx) với giao diện đẹp mắt hỗ trợ song ngữ EN/VI và tích hợp bao bọc ứng dụng trong [main.tsx](file:///c:/Users/Admin/Desktop/AI_thucchien/group_project_2/Team_6_End-to-End-Autonomous-Software-Factory-Multi-AI-Agent/frontend/src/main.tsx).
-6.  **Xung đột kiểu dữ liệu và lỗi Unit Tests sau khi merge Staging:**
-    *   *Mô tả:* Lỗi biên dịch TypeScript do thiếu trường `phase` và `artifact_version` trong `AuditEvent` tại `useSdlcStore.ts`, và kiểu dữ liệu `unknown` trả về từ Supabase `user_metadata` gây ra lỗi build. Đồng thời, bộ kiểm thử của `SdlcDashboard` bị lỗi `useNavigate()` do thiếu ngữ cảnh Router.
-    *   *Cách sửa:* Khai báo thêm các trường tùy chọn trong interface `AuditEvent` tại [useSdlcStore.ts](file:///c:/Users/Admin/Desktop/AI_thucchien/group_project_2/Team_6_End-to-End-Autonomous-Software-Factory-Multi-AI-Agent/frontend/src/store/useSdlcStore.ts). Thực hiện ép kiểu tường minh `as string` cho metadata trong [AppShell.tsx](file:///c:/Users/Admin/Desktop/AI_thucchien/group_project_2/Team_6_End-to-End-Autonomous-Software-Factory-Multi-AI-Agent/frontend/src/components/layout/AppShell.tsx). Cuối cùng, bọc component kiểm thử trong `<MemoryRouter>` và cập nhật các assertions theo giao diện Sub-navigation mới trong [SdlcDashboard.test.tsx](file:///c:/Users/Admin/Desktop/AI_thucchien/group_project_2/Team_6_End-to-End-Autonomous-Software-Factory-Multi-AI-Agent/frontend/tests/SdlcDashboard.test.tsx).
+    *   *Cách sửa:* Tạo component [ErrorBoundary.tsx](../src/components/ErrorBoundary.tsx) với giao diện đẹp mắt hỗ trợ song ngữ EN/VI và tích hợp bao bọc ứng dụng trong [main.tsx](../src/main.tsx).
+3.  **Xung đột kiểu dữ liệu và lỗi Unit Tests sau khi merge Staging:**
+    *   *Mô tả:* Lỗi biên dịch TypeScript do thiếu trường `phase` và `artifact_version` trong `AuditEvent` tại `useSdlcStore.ts`. Đồng thời, bộ kiểm thử của `SdlcDashboard` bị lỗi `useNavigate()` do thiếu ngữ cảnh Router.
+    *   *Cách sửa:* Khai báo thêm các trường tùy chọn trong interface `AuditEvent` tại [useSdlcStore.ts](../src/store/useSdlcStore.ts). Cuối cùng, bọc component kiểm thử trong `<MemoryRouter>` và cập nhật các assertions theo giao diện Sub-navigation mới trong [SdlcDashboard.test.tsx](../tests/SdlcDashboard.test.tsx).
 
 ---
 
 ## 🎉 Các Cải Tiến Lớn Đã Hoàn Thành (Completed Major Improvements)
- 
+
 1. **Tái cấu trúc giao diện SDLC Dashboard thành 3 view chuyên biệt (Build, Audit, Outputs):** Giúp nâng cao trải nghiệm người dùng, hiển thị thông tin rõ ràng và mạch lạc hơn thay thế cho dạng tabs tích hợp cũ.
 2. **Nâng cấp Audit Trail & Workflow Metrics**: Thiết lập thêm các panel phân tích biểu diễn trực quan hiệu năng của Agent (Cycle Time, tỷ lệ phê duyệt tự động, v.v.), tích hợp các trường thông tin chi tiết vào Timeline (State Transitions, A2A handoffs) đi kèm bộ lọc sự kiện trực quan.
 3. **Tối ưu hóa hiệu năng & bundle size:** Thực hiện code-splitting bằng `React.lazy()`, cấu hình Manual Chunks trong Vite config thông minh để triệt tiêu Circular dependencies, chia nhỏ AppShell, tối ưu hóa toàn bộ file bundle dưới 300KB.
@@ -99,8 +65,14 @@ Bảng điều khiển trung tâm quản lý toàn bộ vòng đời phát tri�
    - Cấu hình bổ sung các biến tùy chỉnh mới (`--color-input`, `--color-code-bg`, `--color-code-toolbar`) và thiết lập lớp tiện ích `.input-field` giúp tái sử dụng và bảo trì đồng bộ.
    - Tối ưu hóa ErrorBoundary hỗ trợ đầy đủ thiết kế thích ứng (Responsive & Adaptive Grid Overlay) hiển thị chuẩn xác ở cả hai giao diện sáng và tối.
 10. **Tái cấu trúc SDLC Dashboard theo luồng Repo-first & Multica (Tích hợp mock API)**: Triển khai các component RepoInput, PipelineStepper, ApprovalQueue, QAResultCard, và DetailModal mới hỗ trợ toàn bộ quá trình giả lập và kiểm duyệt SDLC tự động một cách trực quan và mượt mà.
-11. **Vô hiệu hóa cơ chế xác thực cho môi trường Local**: Hỗ trợ bypass đăng nhập ở cả frontend và backend, tự động định tuyến từ trang chủ trực tiếp tới Dashboard SDLC nhằm phục vụ quá trình phát triển và chạy thử nghiệm cục bộ nhanh chóng.
-
+11. **Vô hiệu hóa cơ chế xác thực cho môi trường Local (Hoàn thành):** Đã xóa toàn bộ auth middleware, AuthService, MembershipService và QuotaService. Hệ thống chạy local single-user, điều hướng tự động từ trang chủ trực tiếp tới SDLC Dashboard, không yêu cầu đăng nhập.
+12. **Hoàn thiện AIFA v3 SDLCControlCenter**:
+    - Thiết kế lại GatePanel hỗ trợ kiểm duyệt thủ công từng phase linh hoạt.
+    - Cải tiến PipelineStepper hiển thị trực quan các bước tiến trình SDLC.
+    - AuditLog tích hợp và ghi nhận tất cả hành động kiểm duyệt và trạng thái chuyển dịch của agent.
+    - Hoàn thành giao diện FinalApproval cho việc phê duyệt release cuối cùng và bảng RepoInput nhập repo cần xử lý.
+    - Tích hợp mock simulation hoàn chỉnh (20 giây chạy qua toàn bộ luồng, cấu hình qua biến môi trường `VITE_USE_MOCK=true`).
+    - Cải tiến cơ chế cập nhật trạng thái với SSE (Server-Sent Events) kết hợp polling fallback ổn định khi mất kết nối.
 
 ---
 
@@ -112,5 +84,3 @@ Bảng điều khiển trung tâm quản lý toàn bộ vòng đời phát tri�
 - [ ] **Mở rộng Dashboard Analytics:** Bổ sung giao diện phân tích hiệu suất và biểu đồ thời gian/chi phí vận hành thực tế của mỗi Agent.
 - [x] **Hỗ trợ ngôn ngữ Tiếng Việt (Vietnamese i18n Support):** Bổ sung đầy đủ các key dịch thuật và nội dung tiếng Việt trong file `vi/translation.json` để hệ thống hỗ trợ song ngữ hoàn chỉnh.
 - [x] **Hoàn thiện tính năng chuyển đổi giao diện Sáng/Tối (Light/Dark Mode):** Đồng bộ các biến CSS và phối màu cho các component mới thêm để đảm bảo hiển thị chuẩn xác ở cả chế độ sáng và tối (tránh lỗi lệch màu sắc).
-
-

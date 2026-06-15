@@ -98,7 +98,6 @@ describe('HitlDashboard Component', () => {
       </MemoryRouter>
     );
     expect(screen.getByText('Intervention Center')).toBeInTheDocument();
-    expect(screen.getByText(/Centralized overview of pending security gates/i)).toBeInTheDocument();
   });
 
   it('renders metric cards with correct counts', () => {

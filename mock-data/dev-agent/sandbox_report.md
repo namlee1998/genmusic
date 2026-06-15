@@ -1,4 +1,4 @@
-# Sandbox Report (E2B)
+# Sandbox Report
 
 **Trạng thái: ✅ PASS**
 

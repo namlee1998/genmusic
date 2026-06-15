@@ -134,7 +134,7 @@ class ChangedFile(BaseModel):
     change_type: str = Field(default="modify", description="add / modify / delete")
 
 class SandboxReport(BaseModel):
-    """Structured result of running the patch inside the E2B sandbox."""
+    """Structured result of running the patch inside the local git worktree sandbox."""
     build_ok: bool = Field(default=False, description="Did the patch build/install successfully")
     tests_ran: bool = Field(default=False, description="Were tests actually executed")
     tests_passed: int = Field(default=0)

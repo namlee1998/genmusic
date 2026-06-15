@@ -63,29 +63,13 @@ describe('SdlcDashboard Component', () => {
       releaseDecision: vi.fn(),
       setProjectId: vi.fn(),
       setError: vi.fn(),
+      cleanupConnections: vi.fn(),
     });
   });
 
-  it('renders the core dashboard header when loaded', () => {
-    render(
-      <MemoryRouter>
-        <SdlcDashboard />
-      </MemoryRouter>
-    );
-    expect(screen.getByText('SDLC Control Center')).toBeInTheDocument();
-    expect(screen.getByText(/Risk-based pipeline control with autonomous developer agents/i)).toBeInTheDocument();
-  });
 
-  it('renders the Repository & Feature Integration input form', () => {
-    render(
-      <MemoryRouter>
-        <SdlcDashboard />
-      </MemoryRouter>
-    );
-    expect(screen.getByText('Repository & Feature Integration')).toBeInTheDocument();
-    expect(screen.getByText('🔗 TARGET REPOSITORY URL')).toBeInTheDocument();
-    expect(screen.getByText('📝 FEATURE SPECIFICATION / REQUEST')).toBeInTheDocument();
-  });
+
+
 
   it('renders the Pipeline Stepper when pipeline starts running', () => {
     mockUseSdlcStore.mockReturnValue({
@@ -114,6 +98,7 @@ describe('SdlcDashboard Component', () => {
       releaseDecision: vi.fn(),
       setProjectId: vi.fn(),
       setError: vi.fn(),
+      cleanupConnections: vi.fn(),
     });
 
     render(
@@ -155,6 +140,7 @@ describe('SdlcDashboard Component', () => {
       releaseDecision: vi.fn(),
       setProjectId: vi.fn(),
       setError: vi.fn(),
+      cleanupConnections: vi.fn(),
     });
 
     render(

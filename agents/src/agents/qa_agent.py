@@ -88,16 +88,10 @@ def _parse(raw):
     text = raw.strip()
     fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
     if fence: text = fence.group(1).strip()
-<<<<<<< HEAD
-    try: return json.loads(text)
-    except Exception as e:
-        raise ValueError(f"Agent generated invalid JSON: {str(e)}\nRaw output: {raw}")
-=======
     try:
         return json.loads(text)
     except Exception as exc:
-        raise ValueError(f"QA agent generated invalid JSON: {exc}") from exc
->>>>>>> staging
+        raise ValueError(f"QA agent generated invalid JSON: {exc}\nRaw output: {raw}") from exc
 
 def _build_qa_content(input_data: QAAgentInput) -> str:
     """Build the human message content for QA Agent from all input artifacts."""

@@ -17,32 +17,38 @@ export default function DiffViewer({ diff, fileName }: DiffViewerProps) {
   const lines = diff.split('\n');
 
   return (
-    <div className="diff-viewer">
+    <div className="bg-[#090a0f] border border-[#1e293b] rounded-lg overflow-hidden mt-2.5 font-mono">
       {fileName && (
-        <div className="diff-viewer__file-header">
-          <span className="diff-viewer__file-name">{fileName}</span>
+        <div className="bg-[#111218] border-b border-[#1e293b] px-3 py-2 flex items-center">
+          <span className="text-[11px] font-semibold text-slate-300">{fileName}</span>
         </div>
       )}
-      <div className="diff-viewer__content">
-        <pre className="diff-viewer__pre">
+      <div className="overflow-x-auto max-h-[400px]">
+        <pre className="m-0 py-2">
           <code>
             {lines.map((line, index) => {
-              let className = 'diff-line';
               const displayLine = line;
+              let rowClass = 'flex text-[12px] leading-normal whitespace-pre border-l-[3px] border-transparent px-2 py-0.5';
+              let textClass = 'text-slate-200';
+
               if (line.startsWith('+') && !line.startsWith('+++')) {
-                className += ' diff-line--added';
+                rowClass += ' bg-emerald-500/8 border-l-emerald-500';
+                textClass = 'text-emerald-200';
               } else if (line.startsWith('-') && !line.startsWith('---')) {
-                className += ' diff-line--removed';
+                rowClass += ' bg-red-500/8 border-l-red-500';
+                textClass = 'text-red-300';
               } else if (line.startsWith('@@')) {
-                className += ' diff-line--chunk';
+                rowClass += ' bg-purple-500/5 border-l-purple-500';
+                textClass = 'text-purple-300';
               } else if (line.startsWith('diff --git') || line.startsWith('---') || line.startsWith('+++')) {
-                className += ' diff-line--header';
+                rowClass += ' bg-blue-500/5 font-bold';
+                textClass = 'text-blue-300';
               }
 
               return (
-                <div key={index} className={className}>
-                  <span className="diff-line__number">{index + 1}</span>
-                  <span className="diff-line__text">{displayLine}</span>
+                <div key={index} className={rowClass}>
+                  <span className="text-slate-500 w-10 min-w-10 text-right pr-3 select-none text-[11px]">{index + 1}</span>
+                  <span className={textClass}>{displayLine}</span>
                 </div>
               );
             })}

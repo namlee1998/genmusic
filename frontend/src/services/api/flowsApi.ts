@@ -1,4 +1,3 @@
-import { getStoredAuthSession } from './authStorage';
 import api, { getBaseURL } from './client';
 import type {
   ExtractFlowsRequest,
@@ -21,7 +20,7 @@ import type {
  * Returns immediately; listen to SSE for progress.
  * POST /api/v1/workflows/extract-flows
  */
-export async function extractFlows(payload: ExtractFlowsRequest): Promise<ExtractFlowsResponse> {
+async function extractFlows(payload: ExtractFlowsRequest): Promise<ExtractFlowsResponse> {
   const { data } = await api.post<ExtractFlowsResponse>('/workflows/extract-flows', payload);
   return data;
 }
@@ -30,7 +29,7 @@ export async function extractFlows(payload: ExtractFlowsRequest): Promise<Extrac
  * Send BA/QC resolutions for unknowns from Agent 1 output.
  * POST /api/v1/workflows/resolve-unknowns
  */
-export async function resolveUnknowns(
+async function resolveUnknowns(
   payload: ResolveUnknownsRequest,
 ): Promise<ResolveUnknownsResponse> {
   const { data } = await api.post<ResolveUnknownsResponse>('/workflows/resolve-unknowns', payload);
@@ -81,7 +80,7 @@ export async function listWorkflowTasks(params?: {
  * Get the latest completed task for a document.
  * GET /api/v1/workflows/latest/:documentId
  */
-export async function getLatestTask(documentId: string): Promise<TaskItem | null> {
+async function getLatestTask(documentId: string): Promise<TaskItem | null> {
   const { data } = await api.get<{ status: string; data: TaskItem | null }>(
     `/workflows/latest/${documentId}`,
   );
@@ -100,11 +99,7 @@ export async function getLatestTask(documentId: string): Promise<TaskItem | null
  */
 export function createTaskEventSource(taskId: string): EventSource {
   const baseURL = getBaseURL();
-  const session = getStoredAuthSession();
-  const query = session?.access_token
-    ? `?access_token=${encodeURIComponent(session.access_token)}`
-    : '';
-  const url = `${baseURL}/workflows/status/${taskId}${query}`;
+  const url = `${baseURL}/workflows/status/${taskId}`;
   return new EventSource(url);
 }
 
@@ -238,7 +233,7 @@ export function subscribeTaskSSE(
  * Poll task status until it reaches a terminal state.
  * Returns the final task or rejects on timeout/error.
  */
-export async function pollTaskStatus(
+async function pollTaskStatus(
   taskId: string,
   options?: {
     intervalMs?: number;

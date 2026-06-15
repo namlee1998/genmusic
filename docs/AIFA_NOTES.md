@@ -17,13 +17,13 @@ frontend React
 Workflow chinh:
 
 ```text
-Open/upload repo
+Open/upload folder local
   -> PO
   -> UX (neu route co UI)
   -> DEV
   -> QA
   -> human QA review
-  -> owner/admin release decision
+  -> release decision
   -> final.md + qa-report.md + branch/commit/diff
 ```
 
@@ -44,7 +44,6 @@ PO -> DEV -> QA
 | `backend/src/routes/sdlc.js` | Khai bao SDLC API routes |
 | `backend/src/controllers/SdlcController.js` | HTTP handlers, task SSE va release download |
 | `backend/src/services/SdlcWorkflowService.js` | Orchestrator trung tam: task, validation, handoff, gate policy, workflow status va release |
-| `backend/src/services/demoBoardService.js` | Dieu phoi UI `/aifa`, seed/poll/retry cac demo flow |
 
 ### Execution, gate va safety
 
@@ -75,11 +74,10 @@ PO -> DEV -> QA
 
 | File | Trach nhiem |
 | --- | --- |
-| `frontend/src/App.tsx` | Router; `/aifa` la UI chinh, `/sdlc/*` bi redirect |
-| `frontend/src/pages/AifaDemo/index.tsx` | UI chinh: open folder, poll board, review, live gate, timeline va release |
+| `frontend/src/App.tsx` | Router; `/sdlc` va `/sdlc/hitl` la UI chinh |
+| `frontend/src/pages/SdlcDashboard/index.tsx` | UI chinh: open folder, upload, review, live gate, timeline va release |
 | `frontend/src/services/api/sdlcApi.ts` | SDLC API client, upload, approvals, artifacts, timeline va SSE helper |
-| `frontend/src/services/api/client.ts` | Axios base URL, auth header va error handling |
-| `frontend/src/pages/SdlcDashboard/index.tsx` | Dashboard cu; van minh hoa workflow/SSE nhung khong phai route chinh |
+| `frontend/src/services/api/client.ts` | Axios base URL va error handling |
 
 ### Python agents
 
@@ -99,7 +97,7 @@ PO -> DEV -> QA
 Luot doc ngan nhat de hieu mot request:
 
 ```text
-frontend/src/pages/AifaDemo/index.tsx
+frontend/src/pages/SdlcDashboard/index.tsx
   -> frontend/src/services/api/sdlcApi.ts
   -> backend/src/routes/sdlc.js
   -> backend/src/controllers/SdlcController.js
@@ -107,9 +105,8 @@ frontend/src/pages/AifaDemo/index.tsx
   -> Task / AgentArtifact / AgentEvent
 ```
 
-Voi UI chinh, `AifaDemo` upload repo roi goi demo-board API. Backend
-`demoBoardService` doc workflow status va dieu phoi cac flow. Voi SDLC API truc
-tiep, controller goi `runPOAgent`, `runUXAgent`, `runDEVAgent` hoac `runQAAgent`.
+Voi SDLC API truc tiep, controller goi `runPOAgent`, `runUXAgent`, `runDEVAgent`
+hoac `runQAAgent`.
 
 ## 4. Diem re execution path
 
@@ -250,12 +247,9 @@ No phat:
 - `gate_resolved`
 - heartbeat comment
 
-UI chinh `AifaDemo` khong subscribe task SSE truc tiep. No poll
-`GET /api/v1/sdlc/demo/board` moi 2.5 giay; board service tong hop workflow
-status va pending gate. Timeline va artifact duoc tai khi nguoi dung mo.
-
-`frontend/src/pages/SdlcDashboard/index.tsx` la UI cu co su dung
-`subscribeTaskSSE`, nhung route `/sdlc/*` hien redirect sang `/aifa`.
+UI chinh `SdlcDashboard` subscribe task SSE truc tiep qua
+`GET /api/v1/sdlc/status/:task_id`. Workflow status tong hop duoc tai qua
+`GET /api/v1/sdlc/workflow-status`. Timeline va artifact duoc tai khi nguoi dung mo.
 
 ## 10. Repo upload va release
 
@@ -305,11 +299,10 @@ Doc theo thu tu nay:
 11. `backend/src/agents/claudeCodeRunner.js`
 12. `backend/src/services/repoService.js`
 13. `backend/src/services/workflowReport.js`
-14. `backend/src/services/demoBoardService.js`
-15. `frontend/src/pages/AifaDemo/index.tsx`
-16. `frontend/src/services/api/sdlcApi.ts`
-17. `agents/main.py`
-18. `agents/src/agents/po_agent.py`, `ux_agent.py`, `dev_agent.py`, `qa_agent.py`
+14. `frontend/src/pages/SdlcDashboard/index.tsx`
+15. `frontend/src/services/api/sdlcApi.ts`
+16. `agents/main.py`
+17. `agents/src/agents/po_agent.py`, `ux_agent.py`, `dev_agent.py`, `qa_agent.py`
 
 ## 12. Test quan trong
 
