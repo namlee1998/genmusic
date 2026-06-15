@@ -16,15 +16,10 @@ import {
   List,
   ChevronDown,
   X,
-  Clock,
   CheckCircle2,
   ArrowRight,
   RefreshCw,
   Terminal,
-  Activity,
-  User,
-  Settings,
-  HelpCircle,
   AlertCircle,
   FileCode,
 } from 'lucide-react';
@@ -56,9 +51,31 @@ interface AgentInfo {
   testSuite?: string;
 }
 
+// Helper: format timestamp as relative time ("3m ago", "2h ago")
+const timeAgo = (ts: string): string => {
+  const diff = Date.now() - new Date(ts).getTime();
+  if (diff < 0) return 'just now';
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ${mins % 60}m ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+};
+
+const idleTimeAgo = (ts: string): string => {
+  const diff = Date.now() - new Date(ts).getTime();
+  if (diff < 0) return '<1m';
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return '<1m';
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  return `${hours}h ${mins % 60}m`;
+};
+
 export default function AgentsPage() {
   const { currentProjectId } = useAppStore();
-  const { projectId, pipelinePhases, auditLog, setProjectId } = useSdlcStore();
+  const { projectId, pipelinePhases, auditLog, pendingGates, setProjectId } = useSdlcStore();
 
   const [loading, setLoading] = useState(false);
   const [metrics, setMetrics] = useState<WorkflowMetrics | null>(null);
@@ -110,74 +127,169 @@ export default function AgentsPage() {
     }
   }, [pipelinePhases]);
 
-  const agentsList: AgentInfo[] = useMemo(() => [
-    {
-      key: 'PO',
-      name: 'Product Owner Agent',
-      badge: 'PO',
-      role: 'Requirements Analysis',
-      description: 'Responsible for understanding requirements, generating PRD and ensuring regulatory quality.',
-      icon: <FileText size={18} />,
-      color: 'from-indigo-500 to-purple-600',
-      glowColor: 'rgba(99, 102, 241, 0.12)',
-      agentId: 'agt_po_001',
-      status: resolveStatus('PO', 'running'),
-      currentTask: 'PRD Generation',
-      progress: 78,
-      input: 'feature_request.md',
-      output: 'PRD.md',
-      startedTime: 'started 3m ago',
-    },
-    {
-      key: 'UX',
-      name: 'UI/UX Designer Agent',
-      badge: 'UX',
-      role: 'UI/UX Visual Design',
-      description: 'Responsible for user journey mapping, visual wireframes design, and exporting Penpot assets.',
-      icon: <Palette size={18} />,
-      color: 'from-pink-500 to-rose-600',
-      glowColor: 'rgba(244, 63, 94, 0.12)',
-      agentId: 'agt_ux_002',
-      status: resolveStatus('UX', 'waiting'),
-      waitingFor: 'PRD.md from PO Agent',
-      idleTime: '12m',
-      input: 'PRD.md',
-      output: 'Wireframes.md',
-    },
-    {
-      key: 'DEV',
-      name: 'Developer Agent',
-      badge: 'DEV',
-      role: 'Code Synthesis & Implementation',
-      description: 'Generates and merges code edits, drafts implementation plans, and solves compilation warnings.',
-      icon: <Code2 size={18} />,
-      color: 'from-amber-500 to-orange-600',
-      glowColor: 'rgba(245, 158, 11, 0.12)',
-      agentId: 'agt_dev_003',
-      status: resolveStatus('DEV', 'blocked'),
-      blockedReason: 'Missing API Contract',
-      waitingFor: 'API Contract from UX Agent',
-      startedTime: 'Blocked 18m ago',
-    },
-    {
-      key: 'QA',
-      name: 'Quality Assurance Agent',
-      badge: 'QA',
-      role: 'Sandbox Verification',
-      description: 'Maintains verification sandbox suites, measures code coverage, and checks OWASP compliance.',
-      icon: <ShieldCheck size={18} />,
-      color: 'from-emerald-500 to-teal-600',
-      glowColor: 'rgba(16, 185, 129, 0.12)',
-      agentId: 'agt_qa_004',
-      status: resolveStatus('QA', 'running'),
-      currentTask: 'Regression Testing',
-      progress: 70, // mapped to 142/201
-      progressLabel: '142 / 201',
-      testSuite: 'payment-service',
-      failuresCount: 3,
-      startedTime: 'started 7m ago',
-    },
-  ], [resolveStatus]);
+  // Derive agent display data from real pipeline state, audit log, and pending gates
+  const agentsList: AgentInfo[] = useMemo(() => {
+    const lastAuditFor = (key: string) => {
+      const entries = auditLog.filter(e =>
+        e.actor === key || e.actor === `${key} AGENT` || e.actor === `${key}-agent`
+      );
+      return entries.length > 0 ? entries[entries.length - 1] : null;
+    };
+
+    const firstAuditFor = (key: string) => {
+      const entries = auditLog.filter(e =>
+        e.actor === key || e.actor === `${key} AGENT` || e.actor === `${key}-agent`
+      );
+      return entries.length > 0 ? entries[0] : null;
+    };
+
+    const phaseFor = (key: string) => pipelinePhases.find(p => p.agent === key);
+
+    const relatedGate = (key: string) => {
+      if (key === 'PO') return pendingGates.find(g => g.type === 'PO_CLARIFY');
+      if (key === 'DEV') return pendingGates.find(g => g.type === 'DEV_FILE_GATE');
+      return undefined;
+    };
+
+    const taskLabel = (key: string, status: AgentInfo['status']): string | undefined => {
+      if (status === 'running') {
+        if (key === 'PO') return 'PRD Generation';
+        if (key === 'UX') return 'UX Specification';
+        if (key === 'DEV') return 'Code Implementation';
+        if (key === 'QA') return 'QA Verification';
+      }
+      if (status === 'waiting') return 'Awaiting upstream artifacts';
+      if (status === 'blocked') return 'Blocked';
+      if (status === 'idle') return undefined;
+      return undefined;
+    };
+
+    const inputFile = (key: string): string | undefined => {
+      if (key === 'PO') return 'feature_request.md';
+      if (key === 'UX') return 'PRD.md';
+      if (key === 'DEV') return 'UX_Spec.md';
+      if (key === 'QA') return 'Implementation.md';
+      return undefined;
+    };
+
+    const outputFile = (key: string): string | undefined => {
+      if (key === 'PO') return 'PRD.md';
+      if (key === 'UX') return 'UX_Spec.md';
+      if (key === 'DEV') return 'Code_Patch.md';
+      if (key === 'QA') return 'QA_Report.md';
+      return undefined;
+    };
+
+    const waitingFor = (key: string, status: AgentInfo['status']): string | undefined => {
+      const gate = relatedGate(key);
+      if (gate?.payload?.reason) return gate.payload.reason;
+      if (status === 'waiting') {
+        const upstream = { PO: undefined, UX: 'PRD from PO Agent', DEV: 'UX Spec from UX Agent', QA: 'Implementation from DEV Agent' }[key];
+        return upstream;
+      }
+      if (status === 'blocked') {
+        const upstream = { PO: undefined, UX: 'PRD from PO Agent', DEV: 'UX Spec from UX Agent', QA: 'Implementation from DEV Agent' }[key];
+        return upstream;
+      }
+      return undefined;
+    };
+
+    const agentTimeAgo = (key: string): string | undefined => {
+      const first = firstAuditFor(key);
+      return first ? `started ${timeAgo(first.timestamp)}` : undefined;
+    };
+
+    const agentIdle = (key: string, status: AgentInfo['status']): string | undefined => {
+      const last = lastAuditFor(key);
+      if (!last) return undefined;
+      if (status === 'idle' || status === 'waiting') return idleTimeAgo(last.timestamp);
+      return undefined;
+    };
+
+    const agentLastTask = (key: string): string | undefined => {
+      const last = lastAuditFor(key);
+      return last?.action || undefined;
+    };
+
+    const blockedReason = (key: string, status: AgentInfo['status']): string | undefined => {
+      if (status !== 'blocked') return undefined;
+      const gate = relatedGate(key);
+      return gate?.payload?.reason || 'Pipeline blocked';
+    };
+
+    // Human-readable phase label from phase status
+    const phaseLabel = (key: string): string => {
+      const labels: Record<string, string> = {
+        PO: 'Requirements Analysis',
+        UX: 'UI/UX Visual Design',
+        DEV: 'Code Synthesis & Implementation',
+        QA: 'Sandbox Verification',
+      };
+      return labels[key] || key;
+    };
+
+    const phaseDescription = (key: string): string => {
+      const descs: Record<string, string> = {
+        PO: 'Responsible for understanding requirements, generating PRD and ensuring regulatory quality.',
+        UX: 'Responsible for user journey mapping, visual wireframes design, and exporting Penpot assets.',
+        DEV: 'Generates and merges code edits, drafts implementation plans, and solves compilation warnings.',
+        QA: 'Maintains verification sandbox suites, measures code coverage, and checks OWASP compliance.',
+      };
+      return descs[key] || '';
+    };
+
+    const agentIcons: Record<string, React.ReactNode> = {
+      PO: <FileText size={18} />,
+      UX: <Palette size={18} />,
+      DEV: <Code2 size={18} />,
+      QA: <ShieldCheck size={18} />,
+    };
+
+    const agentColors: Record<string, string> = {
+      PO: 'from-indigo-500 to-purple-600',
+      UX: 'from-pink-500 to-rose-600',
+      DEV: 'from-amber-500 to-orange-600',
+      QA: 'from-emerald-500 to-teal-600',
+    };
+
+    const agentGlow: Record<string, string> = {
+      PO: 'rgba(99, 102, 241, 0.12)',
+      UX: 'rgba(244, 63, 94, 0.12)',
+      DEV: 'rgba(245, 158, 11, 0.12)',
+      QA: 'rgba(16, 185, 129, 0.12)',
+    };
+
+    const agentIds: Record<string, string> = {
+      PO: 'agt_po_001',
+      UX: 'agt_ux_002',
+      DEV: 'agt_dev_003',
+      QA: 'agt_qa_004',
+    };
+
+    return (['PO', 'UX', 'DEV', 'QA'] as const).map(key => {
+      const status = resolveStatus(key, 'idle');
+      return {
+        key,
+        name: `${key === 'PO' ? 'Product Owner' : key === 'UX' ? 'UI/UX Designer' : key === 'DEV' ? 'Developer' : 'Quality Assurance'} Agent`,
+        badge: key,
+        role: phaseLabel(key),
+        description: phaseDescription(key),
+        icon: agentIcons[key],
+        color: agentColors[key],
+        glowColor: agentGlow[key],
+        agentId: agentIds[key],
+        status,
+        currentTask: taskLabel(key, status),
+        input: inputFile(key),
+        output: outputFile(key),
+        waitingFor: waitingFor(key, status),
+        idleTime: agentIdle(key, status),
+        blockedReason: blockedReason(key, status),
+        lastTask: agentLastTask(key),
+        startedTime: agentTimeAgo(key),
+      };
+    });
+  }, [pipelinePhases, auditLog, pendingGates, resolveStatus]);
 
   // Compute status counts
   const statusCounts = useMemo(() => {
@@ -241,22 +353,7 @@ export default function AgentsPage() {
       );
       setCustomLogs(logs);
     } else {
-      // Mock log sequence
-      const time = new Date().toLocaleTimeString();
-      const logs = [
-        `[${time}] [INFO] Starting Agent orchestration hook for ${agent.name}`,
-        `[${time}] [INFO] Loading active policy configuration (max_attempts: 3)`,
-        `[${time}] [INFO] Checking local cache layers...`,
-        `[${time}] [SUCCESS] Task sequence initiated. Running build verification...`,
-      ];
-      if (agent.status === 'running') {
-        logs.push(`[${time}] [INFO] Running task: ${agent.currentTask || 'Execution'}`);
-      } else if (agent.status === 'blocked') {
-        logs.push(`[${time}] [ERROR] Exec blocked: ${agent.blockedReason}`);
-      } else if (agent.status === 'idle') {
-        logs.push(`[${time}] [SUCCESS] Completion handoff published successfully.`);
-      }
-      setCustomLogs(logs);
+      setCustomLogs([]);
     }
   };
 
@@ -454,15 +551,15 @@ export default function AgentsPage() {
                           {agent.key === 'QA' && (
                             <div className="grid grid-cols-2 gap-4 mt-1 pt-2.5 border-t border-[#1e293b]/30">
                               <div>
-                                <span className="text-slate-500 block uppercase tracking-wider text-[8px] font-bold mb-1">Test Suite</span>
+                                <span className="text-slate-500 block uppercase tracking-wider text-[8px] font-bold mb-1">Artifact</span>
                                 <div className="flex items-center gap-1 text-[11px] text-slate-300 font-mono truncate">
                                   <Terminal size={11} className="text-slate-400" />
-                                  <span>{agent.testSuite}</span>
+                                  <span>{agent.output || 'QA Report'}</span>
                                 </div>
                               </div>
                               <div>
-                                <span className="text-slate-500 block uppercase tracking-wider text-[8px] font-bold mb-1">Failures</span>
-                                <span className="text-xs text-red-500 font-bold font-mono">{agent.failuresCount}</span>
+                                <span className="text-slate-500 block uppercase tracking-wider text-[8px] font-bold mb-1">Status</span>
+                                <span className="text-xs text-emerald-500 font-bold font-mono">In Progress</span>
                               </div>
                             </div>
                           )}
@@ -602,7 +699,7 @@ export default function AgentsPage() {
                     </span>
                   </h3>
                   <p className="text-[8.5px] text-slate-500 font-mono mt-0.5">
-                    Since 3m ago | Agent ID: {selectedAgent.agentId}
+                    {selectedAgent.startedTime ? `Since ${selectedAgent.startedTime.replace('started ', '')} | ` : ''}Agent ID: {selectedAgent.agentId}
                   </p>
                 </div>
               </div>
@@ -658,7 +755,7 @@ export default function AgentsPage() {
                           </div>
                           <div className="text-right">
                             <span className="text-slate-500 font-bold uppercase tracking-wider text-[8px] block mb-1">Started</span>
-                            <span className="text-xs text-slate-300 font-medium">{selectedAgent.startedTime || '3m ago'}</span>
+                            <span className="text-xs text-slate-300 font-medium">{selectedAgent.startedTime || 'N/A'}</span>
                           </div>
                         </div>
                       </div>
@@ -678,7 +775,7 @@ export default function AgentsPage() {
                           </div>
                         </div>
                         <div className="p-2 bg-red-500/10 border border-red-500/20 rounded text-[11px] text-slate-400 leading-relaxed">
-                          Workflow execution is blocked. Waiting for dependent artifacts from preceding agents to resolve compilation checks.
+                          Pipeline execution is blocked. Waiting for upstream dependencies to be resolved.
                         </div>
                       </div>
                     ) : (
@@ -688,12 +785,12 @@ export default function AgentsPage() {
                             <span className="text-slate-500 font-bold uppercase tracking-wider text-[8px] block mb-1">Last Task</span>
                             <div className="flex items-center gap-1.5 text-xs text-white font-medium truncate">
                               <Rocket size={12} className="text-slate-400 shrink-0" />
-                              <span>{selectedAgent.lastTask || 'Release Recommendation'}</span>
+                              <span>{selectedAgent.lastTask || 'Idle — no recent activity'}</span>
                             </div>
                           </div>
                           <div className="text-right">
                             <span className="text-slate-500 font-bold uppercase tracking-wider text-[8px] block mb-1">Idle Time</span>
-                            <span className="text-xs text-slate-300 font-mono font-bold">{selectedAgent.idleTime || '1h 24m'}</span>
+                            <span className="text-xs text-slate-300 font-mono font-bold">{selectedAgent.idleTime || 'N/A'}</span>
                           </div>
                         </div>
                       </div>
@@ -701,82 +798,84 @@ export default function AgentsPage() {
                   </div>
 
                   {/* Inputs card details */}
-                  <div className="p-4 rounded-lg bg-[#11131a]/40 border border-white/5 space-y-3">
-                    <span className="text-[8px] uppercase font-bold text-slate-500 tracking-wider block">Inputs</span>
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between p-2 rounded bg-black/40 border border-white/5 text-xs">
-                        <span className="text-slate-300 font-mono flex items-center gap-1.5">
-                          <FileText size={12} className="text-slate-400" />
-                          {selectedAgent.input || 'feature_request.md'}
-                        </span>
-                        <span className="text-[9.5px] text-emerald-400 font-bold font-mono flex items-center gap-1">
-                          Uploaded 3m ago <CheckCircle2 size={12} className="text-emerald-400" />
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between p-2 rounded bg-black/40 border border-white/5 text-xs">
-                        <span className="text-slate-300 font-mono flex items-center gap-1.5">
-                          <FileText size={12} className="text-slate-400" />
-                          business_rules.md
-                        </span>
-                        <span className="text-[9.5px] text-emerald-400 font-bold font-mono flex items-center gap-1">
-                          Uploaded 3m ago <CheckCircle2 size={12} className="text-emerald-400" />
-                        </span>
+                  {selectedAgent.input && (
+                    <div className="p-4 rounded-lg bg-[#11131a]/40 border border-white/5 space-y-3">
+                      <span className="text-[8px] uppercase font-bold text-slate-500 tracking-wider block">Expected Input</span>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between p-2 rounded bg-black/40 border border-white/5 text-xs">
+                          <span className="text-slate-300 font-mono flex items-center gap-1.5">
+                            <FileText size={12} className="text-slate-400" />
+                            {selectedAgent.input}
+                          </span>
+                          <span className="text-[9.5px] text-slate-500 font-bold font-mono">
+                            Artifact
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Outputs card details */}
-                  <div className="p-4 rounded-lg bg-[#11131a]/40 border border-white/5 space-y-3">
-                    <span className="text-[8px] uppercase font-bold text-slate-500 tracking-wider block">Outputs</span>
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between p-2 rounded bg-black/40 border border-white/5 text-xs">
-                        <span className="text-slate-300 font-mono flex items-center gap-1.5">
-                          <FileText size={12} className="text-slate-400" />
-                          {selectedAgent.output || 'PRD.md'}
-                        </span>
-                        {selectedAgent.status === 'running' ? (
-                          <span className="text-[9.5px] text-indigo-400 font-bold font-mono flex items-center gap-1.5">
-                            Generating... <span className="w-2.5 h-2.5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                  {selectedAgent.output && (
+                    <div className="p-4 rounded-lg bg-[#11131a]/40 border border-white/5 space-y-3">
+                      <span className="text-[8px] uppercase font-bold text-slate-500 tracking-wider block">Expected Output</span>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between p-2 rounded bg-black/40 border border-white/5 text-xs">
+                          <span className="text-slate-300 font-mono flex items-center gap-1.5">
+                            <FileText size={12} className="text-slate-400" />
+                            {selectedAgent.output}
                           </span>
-                        ) : (
-                          <span className="text-[9.5px] text-emerald-400 font-bold font-mono flex items-center gap-1">
-                            Completed <CheckCircle2 size={12} className="text-emerald-400" />
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center justify-between p-2 rounded bg-black/40 border border-white/5 text-xs">
-                        <span className="text-slate-300 font-mono flex items-center gap-1.5">
-                          <FileText size={12} className="text-slate-400" />
-                          questions.md
-                        </span>
-                        <span className="text-[9.5px] text-slate-500 font-mono flex items-center gap-1.5">
-                          Pending <span className="w-2.5 h-2.5 rounded-full border border-slate-600" />
-                        </span>
+                          {selectedAgent.status === 'running' ? (
+                            <span className="text-[9.5px] text-indigo-400 font-bold font-mono flex items-center gap-1.5">
+                              Generating... <span className="w-2.5 h-2.5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                            </span>
+                          ) : selectedAgent.status === 'idle' || selectedAgent.status === 'waiting' ? (
+                            <span className="text-[9.5px] text-emerald-400 font-bold font-mono flex items-center gap-1">
+                              Completed <CheckCircle2 size={12} className="text-emerald-400" />
+                            </span>
+                          ) : (
+                            <span className="text-[9.5px] text-slate-500 font-mono flex items-center gap-1.5">
+                              Pending <span className="w-2.5 h-2.5 rounded-full border border-slate-600" />
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Last Handoff Card */}
-                  <div className="p-4 rounded-lg bg-[#11131a]/40 border border-white/5 space-y-3">
-                    <span className="text-[8px] uppercase font-bold text-slate-500 tracking-wider block">Last Handoff</span>
-                    <div className="flex items-center justify-between p-3 rounded bg-black/40 border border-[#1e293b]/40 text-xs">
-                      <div className="flex flex-col">
-                        <span className="text-[8px] uppercase font-bold text-slate-500 tracking-wider">From</span>
-                        <span className="text-white font-bold leading-none mt-1.5 flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Planner Agent
-                        </span>
-                        <span className="text-[9px] text-slate-500 mt-1">2m ago</span>
+                  {(() => {
+                    const handoffEvents = auditLog.filter(e => e.action.toLowerCase().includes('handoff'));
+                    const lastHandoff = handoffEvents.length > 0 ? handoffEvents[handoffEvents.length - 1] : null;
+                    const handoffTime = lastHandoff ? timeAgo(lastHandoff.timestamp) : undefined;
+                    return lastHandoff ? (
+                      <div className="p-4 rounded-lg bg-[#11131a]/40 border border-white/5 space-y-3">
+                        <span className="text-[8px] uppercase font-bold text-slate-500 tracking-wider block">Last Handoff</span>
+                        <div className="flex items-center justify-between p-3 rounded bg-black/40 border border-[#1e293b]/40 text-xs">
+                          <div className="flex flex-col">
+                            <span className="text-[8px] uppercase font-bold text-slate-500 tracking-wider">Event</span>
+                            <span className="text-white font-bold leading-none mt-1.5 flex items-center gap-1 truncate max-w-[180px]">
+                              {lastHandoff.action}
+                            </span>
+                            <span className="text-[9px] text-slate-500 mt-1">{handoffTime}</span>
+                          </div>
+                          <ArrowRight size={14} className="text-slate-600 shrink-0 mx-2" />
+                          <div className="flex flex-col">
+                            <span className="text-[8px] uppercase font-bold text-slate-500 tracking-wider">Actor</span>
+                            <span className="text-white font-bold leading-none mt-1.5 flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" /> {selectedAgent.name}
+                            </span>
+                            <span className="text-[9px] text-slate-500 mt-1">{lastHandoff.status}</span>
+                          </div>
+                        </div>
                       </div>
-                      <ArrowRight size={14} className="text-slate-600 shrink-0 mx-2" />
-                      <div className="flex flex-col">
-                        <span className="text-[8px] uppercase font-bold text-slate-500 tracking-wider">To</span>
-                        <span className="text-white font-bold leading-none mt-1.5 flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" /> {selectedAgent.name}
-                        </span>
-                        <span className="text-[9px] text-slate-500 mt-1">3m ago</span>
+                    ) : (
+                      <div className="p-4 rounded-lg bg-[#11131a]/40 border border-white/5 space-y-3">
+                        <span className="text-[8px] uppercase font-bold text-slate-500 tracking-wider block">Handoff</span>
+                        <p className="text-xs text-slate-500">No handoff events recorded yet.</p>
                       </div>
-                    </div>
-                  </div>
+                    );
+                  })()}
 
                   {/* Description Card */}
                   <div className="p-4 rounded-lg bg-indigo-500/5 border border-indigo-500/10 space-y-2">
@@ -788,28 +887,38 @@ export default function AgentsPage() {
 
               {activeTab === 'tasks' && (
                 <div className="p-4 rounded-lg bg-[#11131a]/40 border border-white/5 space-y-3">
-                  <span className="text-[9.5px] uppercase font-bold text-slate-500 tracking-wider block">Tasks Checklist</span>
-                  <div className="space-y-3 text-xs">
-                    <div className="flex items-center gap-2.5">
-                      <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />
-                      <span className="text-slate-300">Parse workflow instructions</span>
-                    </div>
-                    <div className="flex items-center gap-2.5">
-                      <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />
-                      <span className="text-slate-300">Classify directory scope boundaries</span>
-                    </div>
-                    <div className="flex items-center gap-2.5">
-                      {selectedAgent.status === 'running' ? (
-                        <RefreshCw size={14} className="text-indigo-400 animate-spin shrink-0" />
-                      ) : selectedAgent.status === 'idle' ? (
-                        <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />
-                      ) : (
-                        <Clock size={14} className="text-slate-500 shrink-0" />
-                      )}
-                      <span className={selectedAgent.status === 'running' ? 'text-indigo-300 font-bold' : 'text-slate-300'}>
-                        Generate artifacts specification docs
-                      </span>
-                    </div>
+                  <span className="text-[9.5px] uppercase font-bold text-slate-500 tracking-wider block">Activity Log</span>
+                  <div className="space-y-3 text-xs max-h-[400px] overflow-y-auto">
+                    {auditLog
+                      .filter(e =>
+                        e.actor === selectedAgent.key ||
+                        e.actor === `${selectedAgent.key} AGENT` ||
+                        e.actor === `${selectedAgent.key}-agent`
+                      )
+                      .slice(-10)
+                      .reverse()
+                      .map((entry, idx) => (
+                        <div key={idx} className="flex items-start gap-2.5">
+                          {entry.status === 'error' ? (
+                            <AlertCircle size={14} className="text-red-500 shrink-0 mt-0.5" />
+                          ) : entry.status === 'warning' ? (
+                            <ShieldAlert size={14} className="text-amber-500 shrink-0 mt-0.5" />
+                          ) : (
+                            <CheckCircle2 size={14} className="text-emerald-500 shrink-0 mt-0.5" />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <span className="text-slate-300 block truncate">{entry.action}</span>
+                            <span className="text-[9px] text-slate-500 font-mono">{entry.timestamp}</span>
+                          </div>
+                        </div>
+                      ))}
+                    {auditLog.filter(e =>
+                      e.actor === selectedAgent.key ||
+                      e.actor === `${selectedAgent.key} AGENT` ||
+                      e.actor === `${selectedAgent.key}-agent`
+                    ).length === 0 && (
+                      <div className="text-slate-500 text-center py-4">No activity recorded yet.</div>
+                    )}
                   </div>
                 </div>
               )}
@@ -835,15 +944,18 @@ export default function AgentsPage() {
                 <div className="space-y-3 flex flex-col">
                   <span className="text-[9.5px] uppercase font-bold text-slate-500 tracking-wider block">Logs Output Console</span>
                   <div className="w-full bg-[#050508] border border-white/5 rounded-lg p-3.5 font-mono text-[10px] text-slate-300 overflow-y-auto space-y-2 min-h-[300px]">
-                    {customLogs.map((log, idx) => (
+                    {customLogs.length > 0 ? customLogs.map((log, idx) => (
                       <div key={idx} className="whitespace-pre-wrap leading-normal border-l-2 border-indigo-500/20 pl-2">
                         {log}
                       </div>
-                    ))}
-                    {selectedAgent.status === 'running' && (
+                    )) : selectedAgent.status === 'running' ? (
                       <div className="flex items-center gap-2 text-indigo-400 font-semibold animate-pulse pl-2">
                         <RefreshCw size={11} className="animate-spin" />
                         <span>Processing workflow...</span>
+                      </div>
+                    ) : (
+                      <div className="text-slate-600 text-center py-8 text-xs">
+                        No logs available for this agent yet.
                       </div>
                     )}
                   </div>
@@ -852,20 +964,37 @@ export default function AgentsPage() {
 
               {activeTab === 'handoffs' && (
                 <div className="p-4 rounded-lg bg-[#11131a]/40 border border-white/5 space-y-3">
-                  <span className="text-[9.5px] uppercase font-bold text-slate-500 tracking-wider block">A2A Handoff Chain</span>
-                  <div className="space-y-4 relative pl-3.5 border-l border-white/5">
-                    <div className="relative">
-                      <span className="absolute -left-[19.5px] top-1 w-2.5 h-2.5 bg-emerald-500 rounded-full" />
-                      <span className="text-[10px] text-slate-500 block font-mono">10:32 AM</span>
-                      <span className="text-xs text-white font-bold block mt-0.5">Planner Agent</span>
-                      <p className="text-[10.5px] text-slate-400 leading-normal mt-0.5">Generated feature task mapping & seed variables.</p>
-                    </div>
-                    <div className="relative">
-                      <span className="absolute -left-[19.5px] top-1 w-2.5 h-2.5 bg-blue-500 rounded-full animate-pulse" />
-                      <span className="text-[10px] text-slate-500 block font-mono">10:33 AM</span>
-                      <span className="text-xs text-white font-bold block mt-0.5">{selectedAgent.name}</span>
-                      <p className="text-[10.5px] text-slate-400 leading-normal mt-0.5">Orchestrated PO execution code successfully.</p>
-                    </div>
+                  <span className="text-[9.5px] uppercase font-bold text-slate-500 tracking-wider block">Audit Trail</span>
+                  <div className="space-y-4 relative pl-3.5 border-l border-white/5 max-h-[400px] overflow-y-auto">
+                    {auditLog
+                      .filter(e =>
+                        e.actor === selectedAgent.key ||
+                        e.actor === `${selectedAgent.key} AGENT` ||
+                        e.actor === `${selectedAgent.key}-agent` ||
+                        e.action.toLowerCase().includes('handoff')
+                      )
+                      .slice(-15)
+                      .reverse()
+                      .map((entry, idx) => (
+                        <div key={idx} className="relative">
+                          <span className={`absolute -left-[19.5px] top-1 w-2.5 h-2.5 rounded-full ${
+                            entry.status === 'error' ? 'bg-red-500' :
+                            entry.status === 'warning' ? 'bg-amber-500' :
+                            'bg-emerald-500'
+                          }`} />
+                          <span className="text-[10px] text-slate-500 block font-mono">{entry.timestamp}</span>
+                          <span className="text-xs text-white font-bold block mt-0.5">{entry.actor}</span>
+                          <p className="text-[10.5px] text-slate-400 leading-normal mt-0.5">{entry.action}</p>
+                        </div>
+                      ))}
+                    {auditLog.filter(e =>
+                      e.actor === selectedAgent.key ||
+                      e.actor === `${selectedAgent.key} AGENT` ||
+                      e.actor === `${selectedAgent.key}-agent` ||
+                      e.action.toLowerCase().includes('handoff')
+                    ).length === 0 && (
+                      <div className="text-slate-500 text-center py-4">No audit events recorded yet.</div>
+                    )}
                   </div>
                 </div>
               )}

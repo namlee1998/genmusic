@@ -3,7 +3,10 @@ import { useSdlcStore } from '@/store/useSdlcStore';
 import { CheckCircle2, XCircle, ShieldCheck, GitPullRequest, ShieldAlert } from 'lucide-react';
 
 export default function FinalApproval() {
-  const { status, qaResult, releaseStatus, releaseDecision, isLoading } = useSdlcStore();
+  const { status, qaResult, releaseStatus, releaseDecision, isLoading, featureRequest } = useSdlcStore();
+  const branchName = featureRequest
+    ? `aifa/${featureRequest.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`
+    : 'release-branch';
 
   // Show only when QA has completed or final decision is made
   const showApprovalCard = status === 'qa_complete' || qaResult || releaseStatus === 'approved' || releaseStatus === 'rejected';
@@ -50,11 +53,11 @@ export default function FinalApproval() {
             <div className="bg-black/40 border border-[#1e293b] rounded-lg p-3 mt-2">
               <div className="flex justify-between text-[12px] py-1">
                 <span className="text-slate-400">Target Release Branch:</span>
-                <span className="text-white font-mono">aifa/google-oauth-release</span>
+                <span className="text-white font-mono">{branchName}</span>
               </div>
               <div className="flex justify-between text-[12px] py-1">
                 <span className="text-slate-400">Commit Head:</span>
-                <span className="text-white font-mono">{qaResult?.commitSha || '9ef34ddf7e8a91b'}</span>
+                <span className="text-white font-mono">{qaResult?.commitSha || '—'}</span>
               </div>
             </div>
           </div>
@@ -98,7 +101,7 @@ export default function FinalApproval() {
                 </div>
                 <div className="flex justify-between text-[12px] py-1">
                   <span className="text-slate-400">Build Commit SHA:</span>
-                  <span className="text-white font-mono">{qaResult?.commitSha.slice(0, 7)}</span>
+                  <span className="text-white font-mono">{qaResult?.commitSha?.slice(0, 7) || '—'}</span>
                 </div>
               </div>
             </div>

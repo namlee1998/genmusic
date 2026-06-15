@@ -35,13 +35,14 @@ export const AppShell: React.FC = () => {
   const navigate = useNavigate();
   const isFeatureRequestFormOpen = useSdlcStore((s) => s.isFeatureRequestFormOpen);
   const setFeatureRequestFormOpen = useSdlcStore((s) => s.setFeatureRequestFormOpen);
+  const isDefaultRoute = location.pathname === '/sdlc' || location.pathname === '/sdlc/'; // → HitlDashboard
+  const isBuildRoute = location.pathname === '/sdlc/build' || location.pathname === '/sdlc/build/';
   const isAuditRoute = location.pathname === '/sdlc/audit' || location.pathname === '/sdlc/audit/';
-  const isHitlRoute = location.pathname === '/sdlc/hitl' || location.pathname === '/sdlc/hitl/';
   const isDebugRoute = location.pathname === '/sdlc/debug' || location.pathname === '/sdlc/debug/';
   const isAgentsRoute = location.pathname === '/sdlc/agents' || location.pathname === '/sdlc/agents/';
   const isUnknownAppRoute = location.pathname.startsWith('/sdlc/')
     && location.pathname !== '/sdlc/' && location.pathname !== '/sdlc'
-    && !isAuditRoute && !isHitlRoute && !isDebugRoute && !isAgentsRoute;
+    && !isBuildRoute && !isAuditRoute && !isDebugRoute && !isAgentsRoute;
 
   const [panelCollapsed, setPanelCollapsed] = useState(() => {
     return localStorage.getItem('project-panel-collapsed') === 'true';
@@ -139,9 +140,13 @@ export const AppShell: React.FC = () => {
               <div className="flex flex-col h-full bg-background">
                 <AuditPage />
               </div>
-            ) : isHitlRoute ? (
+            ) : isDefaultRoute ? (
               <div className="flex flex-col h-full bg-background">
                 <HitlDashboard />
+              </div>
+            ) : isBuildRoute ? (
+              <div className="flex flex-col h-full bg-background">
+                <SdlcDashboard />
               </div>
             ) : isDebugRoute ? (
               <div className="flex flex-col h-full bg-background">
@@ -174,7 +179,7 @@ export const AppShell: React.FC = () => {
           onSelect={(projectId) => {
             setCurrentProject(projectId);
             setFeatureRequestFormOpen(false);
-            navigate('/sdlc?focusRequest=true');
+            navigate('/sdlc/build?focusRequest=true');
           }}
         />
       )}

@@ -31,6 +31,6 @@ describe('NotFoundPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /go to app/i }));
 
-    expect(screen.getByTestId('location')).toHaveTextContent('/sdlc/hitl');
+    expect(screen.getByTestId('location')).toHaveTextContent('/sdlc');
   });
 });

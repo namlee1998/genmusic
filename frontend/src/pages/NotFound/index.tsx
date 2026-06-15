@@ -10,7 +10,7 @@ interface NotFoundPageProps {
 export function NotFoundPage({ mode = 'screen' }: NotFoundPageProps) {
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const primaryPath = '/sdlc/hitl';
+  const primaryPath = '/sdlc';
   const PrimaryIcon = LayoutDashboard;
 
   return (
