@@ -2178,6 +2178,27 @@ class SdlcWorkflowService {
     return { success: true, message: 'Task resumed' };
   }
 
+  async getPendingToolApprovals(projectId) {
+    const prisma = require('../config/database');
+    const tasks = await prisma.task.findMany({
+      where: { 
+        projectId, 
+        status: 'PENDING_TOOL_APPROVAL' 
+      },
+      select: {
+        id: true,
+        type: true,
+        agentOutput: true,
+      }
+    });
+
+    return tasks.map(t => ({
+      taskId: t.id,
+      agentType: t.type,
+      data: t.agentOutput ? JSON.parse(t.agentOutput) : null
+    }));
+  }
+
   async _resumeAgentStream(task, approved, feedback) {
     try {
       const axios = require('axios');

@@ -92,7 +92,7 @@ def create_dev_graph(auto_approve: bool = False):
     
     return workflow.compile(checkpointer=memory, interrupt_before=interrupt_before)
 
-async def run_dev_agent(input_data: DEVAgentInput, trace_context=None) -> DEVAgentOutput:
+async def run_dev_agent(input_data: DEVAgentInput, model_config=None, trace_context=None) -> DEVAgentOutput:
     # Fallback sync run (if used)
     graph = create_dev_graph(auto_approve=True)
     prompt = f"PRD: {input_data.prd}\nUX Spec: {input_data.ux_spec}\nFeedback: {input_data.feedback_prompt}"

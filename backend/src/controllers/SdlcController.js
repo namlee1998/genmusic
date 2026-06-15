@@ -613,6 +613,16 @@ class SdlcController {
     }
   }
 
+  async getPendingToolApprovals(req, res, next) {
+    try {
+      const { projectId } = req.params;
+      const data = await SdlcWorkflowService.getPendingToolApprovals(projectId);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async approveToolCall(req, res, next) {
     try {
       const { taskId } = req.params;

@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from src.schemas import RunAgentRequest
 from src.schemas.aidlc import (
@@ -401,19 +401,26 @@ async def resume_agent(request: ResumeAgentRequest):
             graph = create_dev_graph(auto_approve=False)
             config = {"configurable": {"thread_id": request.session_id}}
             
-            if not request.approved:
-                # If rejected, we must inject a ToolMessage with the rejection reason
-                # so the LLM knows its tool call failed.
+            feedback = request.feedback or ""
+            if not request.approved or (request.approved and feedback.strip() != ""):
+                # If rejected OR approved with feedback, we inject a ToolMessage
+                # so the LLM knows it must modify its action.
                 current_state = graph.get_state(config)
                 if current_state.next and "tools" in current_state.next:
                     last_msg = current_state.values["messages"][-1]
                     tool_calls = last_msg.tool_calls
                     tool_msgs = []
+                    
+                    if not request.approved:
+                        message_content = f"Human rejected this action. Reason: {feedback}" if feedback else "Human rejected this action."
+                    else:
+                        message_content = f"Human intercepted execution and requested modification: {feedback}. Please re-generate the corrected tool call based on this."
+                        
                     for tc in tool_calls:
                         tool_msgs.append(ToolMessage(
                             tool_call_id=tc["id"],
                             name=tc["name"],
-                            content=f"Human rejected this action. Reason: {request.feedback}"
+                            content=message_content
                         ))
                     graph.update_state(config, {"messages": tool_msgs}, as_node="tools")
             

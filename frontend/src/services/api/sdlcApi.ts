@@ -257,6 +257,11 @@ export const approveToolCall = async (
   return data;
 };
 
+export const getPendingToolApprovals = async (projectId: string) => {
+  const { data } = await api.get(`/dev/projects/${projectId}/pending-approvals`);
+  return data;
+};
+
 export interface StructuredDecisionBody {
   decision_id: string;
   base_output_version: number;

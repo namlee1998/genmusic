@@ -70,6 +70,9 @@ router.get('/dev/projects/:project_id/artifacts', authenticateDev, SdlcControlle
 // T9 - Get Project Health
 router.get('/dev/projects/:projectId/health', authenticateDev, SdlcController.getProjectHealth.bind(SdlcController));
 
+// Pending Tool Approvals
+router.get('/dev/projects/:projectId/pending-approvals', authenticateDev, SdlcController.getPendingToolApprovals.bind(SdlcController));
+
 // Tool Approval
 router.post('/dev/tasks/:taskId/approve-tool', authenticateDev, SdlcController.approveToolCall.bind(SdlcController));
 
