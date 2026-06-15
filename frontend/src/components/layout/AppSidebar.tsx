@@ -15,6 +15,7 @@ import {
   Search,
   Rocket,
   Bug,
+  Bot,
 } from 'lucide-react';
 
 export interface Project {
@@ -71,11 +72,12 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
   );
 
   // Active path checking helpers
-  const isBuildActive =
+  const isDashboardActive =
     location.pathname === '/sdlc' || location.pathname === '/sdlc/';
+  const isBuildActive = location.pathname.startsWith('/sdlc/build');
   const isAuditActive = location.pathname.startsWith('/sdlc/audit');
-  const isHitlActive = location.pathname.startsWith('/sdlc/hitl');
   const isDebugActive = location.pathname.startsWith('/sdlc/debug');
+  const isAgentsActive = location.pathname.startsWith('/sdlc/agents');
 
   return (
     <aside
@@ -267,22 +269,22 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
           </div>
         )}
 
-        {/* HITL Inbox Link */}
+        {/* Dashboard (Intervention Center) */}
         <button
-          onClick={() => navigate('/sdlc/hitl')}
-          title={collapsed ? t('hitl.title', 'HITL Inbox') : undefined}
+          onClick={() => navigate('/sdlc')}
+          title={collapsed ? 'Dashboard' : undefined}
           className={`
             w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs transition-all border-l-[3px]
             ${
-              isHitlActive
+              isDashboardActive
                 ? 'bg-primary/10 border-primary text-primary font-bold shadow-[inset_0_0_10px_rgba(99,102,241,0.06)]'
                 : 'text-on-surface-variant border-transparent hover:bg-surface-variant hover:text-on-surface'
             }
             ${collapsed ? 'justify-center border-l-0 relative' : ''}
           `}
         >
-          <Gavel size={16} className={isHitlActive ? 'text-primary' : 'text-amber-500'} />
-          {!collapsed && <span className="flex-1 text-left">{t('hitl.title', 'HITL Inbox')}</span>}
+          <Gavel size={16} className={isDashboardActive ? 'text-primary' : 'text-amber-500'} />
+          {!collapsed && <span className="flex-1 text-left">Dashboard</span>}
           {interventions.length > 0 && (
             <span
               className={`
@@ -329,9 +331,9 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
         <nav className="space-y-1">
           {/* Build Dashboard */}
           <button
-            onClick={() => activeProjectId && navigate('/sdlc')}
+            onClick={() => activeProjectId && navigate('/sdlc/build')}
             disabled={!activeProjectId}
-            title={collapsed ? t('dashboard.build', 'Build Dashboard') : undefined}
+            title={collapsed ? 'Agent Tasks' : undefined}
             className={`
               w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs transition-all relative group
               ${
@@ -345,7 +347,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
             `}
           >
             <Layers size={16} className={isBuildActive ? 'text-primary' : 'text-on-surface-variant/80'} />
-            {!collapsed && <span>{t('dashboard.build', 'Build Dashboard')}</span>}
+            {!collapsed && <span>Agent Tasks</span>}
             {collapsed && !activeProjectId && (
               <span className="absolute left-16 top-1/2 -translate-y-1/2 z-50 bg-black text-white text-[10px] px-2 py-1 rounded hidden group-hover:block whitespace-nowrap shadow-xl">
                 {t('layout.chooseProjectFirst')}
@@ -372,6 +374,27 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
           >
             <History size={16} className={isAuditActive ? 'text-primary' : 'text-on-surface-variant/80'} />
             {!collapsed && <span>{t('dashboard.audit', 'Audit Trail')}</span>}
+          </button>
+
+          {/* Agents View */}
+          <button
+            onClick={() => activeProjectId && navigate('/sdlc/agents')}
+            disabled={!activeProjectId}
+            title={collapsed ? 'Agents View' : undefined}
+            className={`
+              w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs transition-all relative group
+              ${
+                !activeProjectId
+                  ? 'opacity-40 cursor-not-allowed text-on-surface-variant/50'
+                  : isAgentsActive
+                  ? 'bg-primary/10 border-l-[3px] border-primary text-primary font-bold shadow-[inset_0_0_10px_rgba(99,102,241,0.06)]'
+                  : 'text-on-surface-variant hover:bg-surface-variant hover:text-on-surface border-l-[3px] border-transparent'
+              }
+              ${collapsed ? 'justify-center border-l-0' : ''}
+            `}
+          >
+            <Bot size={16} className={isAgentsActive ? 'text-primary' : 'text-on-surface-variant/80'} />
+            {!collapsed && <span>Agents View</span>}
           </button>
 
 

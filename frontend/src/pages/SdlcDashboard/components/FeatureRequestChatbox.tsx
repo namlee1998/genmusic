@@ -30,7 +30,7 @@ export default function FeatureRequestChatbox({ onClose }: { onClose?: () => voi
     const repoUrl = currentProjectId ? (localStorage.getItem(`repoUrl_${currentProjectId}`) || '') : '';
 
     // Start pipeline
-    await startPipeline(repoUrl, requestText.trim());
+    await startPipeline(currentProjectId || '', repoUrl, requestText.trim());
 
     // Clear focusRequest query parameter
     searchParams.delete('focusRequest');

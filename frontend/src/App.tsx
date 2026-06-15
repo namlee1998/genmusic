@@ -19,11 +19,11 @@ export default function App() {
     <Router>
       <Suspense fallback={<PageLoader />}>
         <Routes>
-          <Route path="/" element={<Navigate to="/sdlc/hitl" replace />} />
-          <Route path="/auth" element={<Navigate to="/sdlc/hitl" replace />} />
-          <Route path="/admin/*" element={<Navigate to="/sdlc/hitl" replace />} />
-          <Route path="/upgrade" element={<Navigate to="/sdlc/hitl" replace />} />
-          <Route path="/app/*" element={<Navigate to="/sdlc/hitl" replace />} />
+          <Route path="/" element={<Navigate to="/sdlc" replace />} />
+          <Route path="/auth" element={<Navigate to="/sdlc" replace />} />
+          <Route path="/admin/*" element={<Navigate to="/sdlc" replace />} />
+          <Route path="/upgrade" element={<Navigate to="/sdlc" replace />} />
+          <Route path="/app/*" element={<Navigate to="/sdlc" replace />} />
           
           {/* ── AIDLC Control Platform ── */}
           <Route

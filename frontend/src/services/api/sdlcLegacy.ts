@@ -9,7 +9,7 @@ const BASE = '/sdlc';
 
 // Backward-compatibility adapters for existing components if any
 export const startFromRepo = (projectId: string, repoUrl: string): Promise<any> => {
-  return startPipeline(repoUrl, 'add google login').then(res => ({
+  return startPipeline(projectId, repoUrl, 'add google login').then(res => ({
     projectId: workflowIdToProjectId(res.workflowId),
     status: res.status
   }));

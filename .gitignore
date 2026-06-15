@@ -71,6 +71,7 @@ yarn-error.log*
 # IDE / editor / OS
 # ---------------------------------------------------------------------------
 .claude
+.omo/
 .stitch/
 .vscode/
 .idea/

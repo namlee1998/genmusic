@@ -8,33 +8,32 @@ export function AppTopBar() {
   const { resolvedMode, toggleMode } = useTheme();
 
   return (
-    <header className="h-16 shrink-0 z-40 border-b border-outline-variant bg-surface-container-lowest/80 backdrop-blur-md flex items-center justify-between px-6">
-      <div className="flex items-center gap-3">
-        <span className="font-headline font-bold text-base text-on-surface tracking-tighter">AIDLC</span>
-        <span className="px-2 py-0.5 rounded bg-surface-variant text-[10px] font-label-mono text-secondary tracking-widest uppercase">Factory</span>
+    <header className="h-10 shrink-0 z-40 border-b border-outline-variant bg-surface-container-lowest/80 backdrop-blur-md flex items-center justify-between px-4">
+      <div className="flex items-center gap-2">
+        <span className="font-headline font-bold text-sm text-on-surface tracking-tight">AIFA</span>
       </div>
 
-      <div className="flex items-center flex-1 max-w-xs mx-8">
+      <div className="flex items-center flex-1 max-w-xs mx-4">
         <div className="relative w-full">
-          <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-base">
+          <span className="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm">
             search
           </span>
           <input
             type="text"
             placeholder={t('layout.searchPlaceholder')}
-            className="w-full pl-9 pr-4 py-1.5 bg-surface-container-lowest border border-outline-variant rounded text-xs focus:border-secondary focus:outline-none focus:ring-1 focus:ring-secondary/40 placeholder:text-on-surface-variant/40"
+            className="w-full pl-8 pr-3 py-1 bg-surface-container-lowest border border-outline-variant rounded text-[11px] focus:border-secondary focus:outline-none focus:ring-1 focus:ring-secondary/40 placeholder:text-on-surface-variant/40"
           />
         </div>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
         <LanguageSwitcher />
         <button
           onClick={toggleMode}
           title="Toggle theme"
-          className="w-8 h-8 rounded border border-outline-variant bg-surface-container-low flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors"
+          className="w-7 h-7 rounded border border-outline-variant bg-surface-container-low flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors"
         >
-          <span className="material-symbols-outlined text-[17px]">
+          <span className="material-symbols-outlined text-sm">
             {resolvedMode === 'dark' ? 'dark_mode' : 'light_mode'}
           </span>
         </button>

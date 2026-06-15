@@ -6,7 +6,6 @@
 // available for task-level clients and the legacy dashboard.
 
 import api, { getBaseURL } from './client';
-import * as mock from './sdlcMock';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -72,8 +71,16 @@ export interface PipelineResponse {
 
 const BASE = '/sdlc';
 
-const startPipelineReal = (repoUrl: string, request: string): Promise<{ workflowId: string; status: string }> =>
-  api.post(`${BASE}/run-po-agent`, { repo_path: repoUrl, request }).then((r) => r.data);
+const startPipelineReal = (projectId: string, repoUrl: string, request: string): Promise<{ workflowId: string; status: string }> =>
+  api.post(`${BASE}/run-po-agent`, {
+    project_id: projectId,
+    feature_request: {
+      title: request,
+      description: request
+    },
+    repo_path: repoUrl,
+    request
+  }).then((r) => r.data);
 
 export interface SdlcError {
   message: string;
@@ -171,27 +178,19 @@ const subscribeWorkflowSSEReal = (
   return abort;
 };
 
-// ── Environment Routing Wrapper ───────────────────────────────────────────
+// ── Real API wrappers (no mock) ───────────────────────────────────────────
 
-const isMockMode = () => {
-  return import.meta.env.VITE_USE_MOCK === 'true';
-};
+export const startPipeline = (projectId: string, repoUrl: string, request: string): Promise<{ workflowId: string; status: string }> =>
+  startPipelineReal(projectId, repoUrl, request);
 
-export const startPipeline = (repoUrl: string, request: string): Promise<{ workflowId: string; status: string }> => {
-  return isMockMode() ? mock.startPipelineMock(repoUrl, request) : startPipelineReal(repoUrl, request);
-};
+export const getPipelineStatus = (workflowId: string): Promise<PipelineResponse> =>
+  getPipelineStatusReal(workflowId);
 
-export const getPipelineStatus = (workflowId: string): Promise<PipelineResponse> => {
-  return isMockMode() ? mock.getPipelineStatusMock(workflowId) : getPipelineStatusReal(workflowId);
-};
+export const resolveGate = (gateId: string, action: 'approve' | 'reject', comment?: string): Promise<{ success: boolean }> =>
+  resolveGateReal(gateId, action, comment);
 
-export const resolveGate = (gateId: string, action: 'approve' | 'reject', comment?: string): Promise<{ success: boolean }> => {
-  return isMockMode() ? mock.resolveGateMock(gateId, action, comment) : resolveGateReal(gateId, action, comment);
-};
-
-export const releaseDecision = (projectId: string, action: 'approve' | 'reject'): Promise<{ success: boolean; branch?: string; finalMd?: string }> => {
-  return isMockMode() ? mock.releaseDecisionMock(projectId, action) : releaseDecisionReal(projectId, action);
-};
+export const releaseDecision = (projectId: string, action: 'approve' | 'reject'): Promise<{ success: boolean; branch?: string; finalMd?: string }> =>
+  releaseDecisionReal(projectId, action);
 
 export const subscribeWorkflowSSE = (
   workflowId: string,
@@ -199,9 +198,8 @@ export const subscribeWorkflowSSE = (
     onMessage?: (event: string, data: Record<string, unknown>) => void;
     onError?: (error: unknown) => void;
   }
-): AbortController => {
-  return isMockMode() ? mock.subscribeWorkflowSSEMock(workflowId, handlers) : subscribeWorkflowSSEReal(workflowId, handlers);
-};
+): AbortController =>
+  subscribeWorkflowSSEReal(workflowId, handlers);
 
 // Re-export legacy functions from sdlcLegacy
 export {
@@ -341,19 +339,6 @@ const resolveApproval = (
 const downloadReleaseFile = (projectId: string, fileName: 'final.md' | 'qa-report.md') =>
   api.get(`${BASE}/projects/${projectId}/release-files/${fileName}`, { responseType: 'blob' })
     .then((r) => r.data as Blob);
-
-// ── Dev-only demo scenario selector (MOCK_SCENARIO) ───────────────────────
-
-export interface MockScenarioState {
-  scenario: string;
-  mockEnabled: boolean;
-  executionPath: string;
-  mockClaudeCode: boolean;
-  available: string[];
-}
-
-const getMockScenario = (): Promise<MockScenarioState> =>
-  api.get(`${BASE}/dev/mock-scenario`).then((r) => r.data.data);
 
 // ── Primary /aifa board: real_single or staged three_flow mode ─────────────
 
@@ -495,9 +480,8 @@ export interface GlobalInterventionItem extends GateItem {
 const getAllInterventionsReal = (): Promise<GlobalInterventionItem[]> =>
   api.get(`${BASE}/interventions`).then((r) => r.data.data);
 
-export const getAllInterventions = (): Promise<GlobalInterventionItem[]> => {
-  return isMockMode() ? mock.getAllInterventionsMock() : getAllInterventionsReal();
-};
+export const getAllInterventions = (): Promise<GlobalInterventionItem[]> =>
+  getAllInterventionsReal();
 
 export interface SystemHealthData {
   db: {
@@ -514,15 +498,7 @@ export interface SystemHealthData {
   timestamp: string;
 }
 
-export const getProjectHealth = (): Promise<SystemHealthData> => {
-  if (isMockMode()) {
-    return Promise.resolve({
-      db: { status: 'ok', error: null, projectCount: 5 },
-      env: { OPENAI_API_KEY: true, ANTHROPIC_API_KEY: true, DEEPSEEK_API_KEY: true, DATABASE_URL: true },
-      timestamp: new Date().toISOString(),
-    });
-  }
-  return api.get(`${BASE}/dev/health`).then((r) => r.data.data);
-};
+export const getProjectHealth = (): Promise<SystemHealthData> =>
+  api.get(`${BASE}/dev/health`).then((r) => r.data.data);
 
 
