@@ -29,11 +29,26 @@ export function ImportProjectDialog({
   };
 
   const [skippedCount, setSkippedCount] = useState(0);
+  const [largeSkippedCount, setLargeSkippedCount] = useState(0);
 
   const handleFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
+    console.log('Folder selection triggered. Raw files count:', files ? files.length : 0);
+    
+    if (!files || files.length === 0) {
+      // If length is 0, the user selected an empty folder (or cancelled).
+      // We allow this so they can create an empty project.
+      setSelectedFiles([]);
+      setFolderName('Empty Folder (or Cancelled)');
+      return;
+    }
+
     if (files && files.length > 0) {
+      setError(null);
       const fileList = Array.from(files);
+      const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB safe limit
+      let largeCount = 0;
+      let ignoredCount = 0;
       
       const filteredList = fileList.filter(file => {
         const pathStr = (file.webkitRelativePath || file.name).replace(/\\/g, '/');
@@ -44,11 +59,26 @@ export function ImportProjectDialog({
           pathStr.includes('/build/') || 
           pathStr.includes('/.venv/') || 
           pathStr.includes('/env/');
-        return !isIgnored;
+        
+        if (isIgnored) {
+          ignoredCount++;
+          return false;
+        }
+
+        const isTooLarge = file.size > MAX_FILE_SIZE;
+        if (isTooLarge) {
+          largeCount++;
+          return false;
+        }
+        return true;
       });
 
+      console.log('Filtered files count (excluding node_modules, .git, etc.):', filteredList.length);
+      console.log('Skipped large files count:', largeCount);
+
       setSelectedFiles(filteredList);
-      setSkippedCount(fileList.length - filteredList.length);
+      setSkippedCount(ignoredCount);
+      setLargeSkippedCount(largeCount);
 
       // Extract the top-level directory name from webkitRelativePath
       const firstPath = fileList[0].webkitRelativePath || fileList[0].name;
@@ -60,6 +90,9 @@ export function ImportProjectDialog({
       if (!projectName) {
         setProjectName(dirName);
       }
+
+      // Reset the input value so selecting the same folder again triggers onChange
+      e.target.value = '';
     }
   };
 
@@ -68,10 +101,6 @@ export function ImportProjectDialog({
       const name = projectName.trim();
       if (!name) {
         setError('Project name is required');
-        return;
-      }
-      if (selectedFiles.length === 0) {
-        setError('Please select a local folder to import');
         return;
       }
       setSubmitting(true);
@@ -166,13 +195,11 @@ export function ImportProjectDialog({
                 ref={fileInputRef}
                 style={{ display: 'none' }}
                 onChange={handleFolderSelect}
+                multiple
                 {...({
                   webkitdirectory: '',
                   directory: '',
-                } as React.InputHTMLAttributes<HTMLInputElement> & {
-                  webkitdirectory?: string;
-                  directory?: string;
-                })}
+                } as any)}
               />
               <button
                 type="button"
@@ -195,7 +222,27 @@ export function ImportProjectDialog({
                     Filtered {skippedCount} files (node_modules, .git, .venv, etc.) to speed up upload
                   </span>
                 )}
+                {largeSkippedCount > 0 && (
+                  <span className="text-[9px] text-warning mt-1 text-center px-1 font-medium">
+                    Skipped {largeSkippedCount} file(s) &gt; 15MB (e.g. database, binaries, zip) to prevent upload limit errors
+                  </span>
+                )}
               </button>
+              {folderName && folderName !== 'Empty Folder (or Cancelled)' && selectedFiles.length === 0 && (
+                <p className="mt-2 text-[10px] text-error font-medium text-center">
+                  ⚠️ No usable files found (or all files were filtered out because they are too large (&gt;15MB) or match ignored folders like node_modules, .git).
+                </p>
+              )}
+              {folderName === 'Empty Folder (or Cancelled)' && (
+                <p className="mt-2 text-[10px] text-primary font-medium text-center">
+                  ℹ️ Bạn đã chọn một thư mục rỗng. Một dự án trống sẽ được khởi tạo.
+                </p>
+              )}
+              {folderName && !projectName.trim() && (
+                <p className="mt-2 text-[10px] text-error font-medium text-center">
+                  ⚠️ Vui lòng nhập Tên Dự Án để có thể tiếp tục tạo.
+                </p>
+              )}
               <p className="text-[9px] text-on-surface-variant/60 mt-1.5 leading-normal text-center">
                 Tip: Use <strong>Enter Path</strong> tab for immediate local workspace linking.
               </p>
@@ -235,8 +282,8 @@ export function ImportProjectDialog({
           </button>
           <button
             onClick={handleSubmit}
-            disabled={submitting || (mode === 'browse' ? (!projectName.trim() || selectedFiles.length === 0) : !value.trim())}
-            className="px-3 py-1.5 rounded text-xs font-semibold bg-primary text-on-primary hover:opacity-90 disabled:opacity-50 transition-all shadow-[0_0_10px_rgba(99,102,241,0.2)]"
+            disabled={submitting || (mode === 'browse' ? !projectName.trim() : !value.trim())}
+            className="flex-1 rounded bg-primary px-4 py-2 text-xs font-semibold text-on-primary hover:bg-primary/90 disabled:opacity-50 transition-colors shadow-[0_0_10px_rgba(99,102,241,0.2)]"
           >
             {submitting ? t('layout.creating') : t('layout.createProjectBtn')}
           </button>

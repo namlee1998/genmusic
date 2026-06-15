@@ -141,8 +141,11 @@ export default function AgentsPage() {
   }, [projectId, fetchMetrics]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (projectId) {
+      fetchMetrics(projectId).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
 
   // Map backend phase status into UI statuses dynamically
   const resolveStatus = useCallback((key: string, defaultStatus: AgentInfo['status']): AgentInfo['status'] => {
