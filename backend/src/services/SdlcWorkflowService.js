@@ -663,7 +663,7 @@ class SdlcWorkflowService {
   /**
    * Start a PO Agent run — reads intent assumptions, produces PRD artifacts.
    */
-  async runPOAgent({ projectId, sourceTaskId = null, featureRequest = null, feedbackPrompt = '', backlogId = null,
+  async runPOAgent({ projectId, sourceTaskId = null, featureRequest = null, feedbackPrompt = '', previousDraft = null, backlogId = null,
     repoUrl = null, repoPath = null, branch = 'main', request = '', newWorkflow = false, user }) {
     const sourceTask = sourceTaskId
       ? await this._requireApprovedTask(sourceTaskId, 'intent-agent', user)
@@ -739,6 +739,7 @@ class SdlcWorkflowService {
 
     const context = await this._buildContextFromArtifacts(sourceArtifacts, {
       feedbackPrompt,
+      ...(previousDraft ? { previousDraft } : {}),
       ...(featureRequest ? { featureRequest } : {}),
       ...(repoContext ? { repoContext } : {}),
     });
@@ -751,7 +752,7 @@ class SdlcWorkflowService {
   /**
    * Start a UX Agent run — reads approved PRD artifacts, produces UX spec.
    */
-  async runUXAgent({ projectId, sourceTaskId, feedbackPrompt = '', user }) {
+  async runUXAgent({ projectId, sourceTaskId, feedbackPrompt = '', previousDraft = null, user }) {
     const sourceTask = await this._requireApprovedTask(sourceTaskId, 'po-agent', user);
 
     const sourceArtifacts = await AgentArtifact.findByTaskId(sourceTask.id);
@@ -770,7 +771,7 @@ class SdlcWorkflowService {
       versionStatus: 'draft',
     });
 
-    const context = await this._buildContextFromArtifacts(sourceArtifacts, { feedbackPrompt });
+    const context = await this._buildContextFromArtifacts(sourceArtifacts, { feedbackPrompt, ...(previousDraft ? { previousDraft } : {}) });
     this._runAgent(task, context, user?.id).catch((err) => console.error('[SDLC] UX Agent failed:', err));
 
     return task;
@@ -779,7 +780,7 @@ class SdlcWorkflowService {
   /**
    * Start a DEV Agent run — reads approved UX artifacts, produces implementation plan.
    */
-  async runDEVAgent({ projectId, sourceTaskId, feedbackPrompt = '', user }) {
+  async runDEVAgent({ projectId, sourceTaskId, feedbackPrompt = '', previousDraft = null, user }) {
     // T4.2 — DEV source may be UX (default) or PO directly (route skipped UX).
     const sourceTask = await this._requireApprovedTask(sourceTaskId, ['ux-agent', 'po-agent'], user);
     const effectiveProjectId = projectId || sourceTask.projectId;
@@ -809,7 +810,7 @@ class SdlcWorkflowService {
       versionStatus: 'draft',
     });
 
-    const context = await this._buildContextFromArtifacts([...poArtifacts, ...uxArtifacts], { feedbackPrompt });
+    const context = await this._buildContextFromArtifacts([...poArtifacts, ...uxArtifacts], { feedbackPrompt, ...(previousDraft ? { previousDraft } : {}) });
     this._runAgent(task, context, user?.id).catch((err) => console.error('[SDLC] DEV Agent failed:', err));
 
     return task;
@@ -818,7 +819,7 @@ class SdlcWorkflowService {
   /**
    * Start a QA Agent run — reads DEV artifacts + all upstream, produces test cases.
    */
-  async runQAAgent({ projectId, sourceTaskId, feedbackPrompt = '', user }) {
+  async runQAAgent({ projectId, sourceTaskId, feedbackPrompt = '', previousDraft = null, user }) {
     const sourceTask = await this._requireApprovedTask(sourceTaskId, 'dev-agent', user);
     const effectiveProjectId = projectId || sourceTask.projectId;
     const projectTasks = await Task.findByProjectId(effectiveProjectId);
@@ -864,7 +865,7 @@ class SdlcWorkflowService {
       versionStatus: 'draft',
     });
 
-    const context = await this._buildContextFromArtifacts(allArtifacts, { feedbackPrompt });
+    const context = await this._buildContextFromArtifacts(allArtifacts, { feedbackPrompt, ...(previousDraft ? { previousDraft } : {}) });
     this._runAgent(task, context, user?.id).catch((err) => console.error('[SDLC] QA Agent failed:', err));
 
     return task;
@@ -1749,13 +1750,18 @@ class SdlcWorkflowService {
   }
 
   async _rerunOwningWorker({ rejectedTask, feedbackPrompt, user }) {
+    const previousArtifacts = await AgentArtifact.findByTaskId(rejectedTask.id);
+    const previousDraft = previousArtifacts.length > 0 
+      ? JSON.stringify(previousArtifacts.reduce((acc, a) => { acc[a.artifactType] = a.contentJson || a.contentText; return acc; }, {}))
+      : undefined;
+
     if (rejectedTask.type === 'intent-agent') {
       const featureRequest = await this._getFeatureRequestFromIntentTask(rejectedTask);
       return this.runIntentAgent({ projectId: rejectedTask.projectId, featureRequest, feedbackPrompt, user });
     }
     if (rejectedTask.type === 'po-agent') {
       const featureRequest = await this._getFeatureRequestFromTask(rejectedTask);
-      return this.runPOAgent({ projectId: rejectedTask.projectId, featureRequest, feedbackPrompt, user });
+      return this.runPOAgent({ projectId: rejectedTask.projectId, featureRequest, feedbackPrompt, previousDraft, user });
     }
 
     const ownerTarget = {
@@ -1779,6 +1785,7 @@ class SdlcWorkflowService {
       projectId: rejectedTask.projectId,
       sourceTaskId: upstream.id,
       feedbackPrompt,
+      previousDraft,
       user,
     });
   }
@@ -1819,6 +1826,34 @@ class SdlcWorkflowService {
       env: envKeys,
       timestamp: new Date().toISOString(),
     };
+  }
+
+  async updateEnvSettings(keys) {
+    const fs = require('fs');
+    const path = require('path');
+    const envPath = path.resolve(process.cwd(), '.env');
+    
+    let envContent = '';
+    if (fs.existsSync(envPath)) {
+      envContent = fs.readFileSync(envPath, 'utf-8');
+    }
+
+    const lines = envContent.split('\n');
+    for (const [key, val] of Object.entries(keys)) {
+      if (!val) continue; // skip empty
+      const prefix = `${key}=`;
+      const quotedVal = `"${val}"`;
+      const idx = lines.findIndex(l => l.startsWith(prefix));
+      if (idx >= 0) {
+        lines[idx] = `${key}=${quotedVal}`;
+      } else {
+        lines.push(`${key}=${quotedVal}`);
+      }
+      process.env[key] = val;
+    }
+
+    fs.writeFileSync(envPath, lines.join('\n').trim() + '\n');
+    return { status: 'success' };
   }
 
   async getProjectArtifacts(projectId, user) {

@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { useSdlcStore } from '@/store/useSdlcStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useAppStore } from '@/store/useAppStore';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -8,6 +9,7 @@ import {
 } from 'lucide-react';
 import EmptyProjectState from './components/EmptyProjectState';
 import FeatureRequestChatbox from './components/FeatureRequestChatbox';
+import { Badge } from '@/components/ui/Badge';
 
 interface TaskItem {
   id: string;
@@ -23,13 +25,14 @@ const AGENT_META = {
   QA: { title: 'Quality Assurance (QA)', desc: 'Validation & Compliance', icon: <ShieldCheck size={18} className="text-amber-400" /> },
 };
 
-const STATUS_BADGE: Record<string, string> = {
-  pending: 'bg-surface-container-high/60 text-on-surface-variant border-outline-variant/40',
-  running: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
-  gate_pending: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
-  completed: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-  skipped: 'bg-surface/40 text-on-surface-variant/60 border-outline-variant/20',
-  failed: 'bg-red-500/15 text-red-400 border-red-500/30',
+const getBadgeVariant = (status: string): "default" | "success" | "warning" | "danger" | "info" | "outline" => {
+  switch (status) {
+    case 'running': return 'info';
+    case 'gate_pending': return 'warning';
+    case 'completed': return 'success';
+    case 'failed': return 'danger';
+    default: return 'default';
+  }
 };
 
 const TASK_ICON: Record<string, React.ReactNode> = {
@@ -44,7 +47,16 @@ export default function SdlcDashboard() {
   const {
     status, error, pollStatus, workflowId, cleanupConnections,
     pipelinePhases,
-  } = useSdlcStore();
+  } = useSdlcStore(
+    useShallow((state) => ({
+      status: state.status,
+      error: state.error,
+      pollStatus: state.pollStatus,
+      workflowId: state.workflowId,
+      cleanupConnections: state.cleanupConnections,
+      pipelinePhases: state.pipelinePhases,
+    }))
+  );
   const currentProjectId = useAppStore((s) => s.currentProjectId);
   const [searchParams, setSearchParams] = useSearchParams();
   const focusRequest = searchParams.get('focusRequest') === 'true';
@@ -132,7 +144,7 @@ export default function SdlcDashboard() {
     return lists[agent];
   };
 
-  const statusBadgeClass = STATUS_BADGE[status] || STATUS_BADGE.pending;
+
   const taskStatuses = ['pending', 'running', 'gate_pending', 'completed', 'skipped', 'failed'] as const;
   const statusCounts = useMemo(() => {
     const counts = { pending: 0, running: 0, gate_pending: 0, completed: 0, skipped: 0, failed: 0 };
@@ -159,9 +171,9 @@ export default function SdlcDashboard() {
             <p className="text-[11.5px] text-on-surface-variant mt-0.5">Real-time agent task status and pipeline progress</p>
           </div>
           <div className="flex items-center gap-2">
-            <span className={`inline-flex items-center px-2.5 py-1 rounded text-[10px] font-bold font-mono tracking-wider border ${statusBadgeClass}`}>
+            <Badge variant={getBadgeVariant(status || 'idle')} className="px-2.5 py-1 text-[10px]">
               {(status || 'idle').replace('_', ' ').toUpperCase()}
-            </span>
+            </Badge>
           </div>
         </div>
 
@@ -208,9 +220,9 @@ export default function SdlcDashboard() {
                     <h3 className="text-xs font-bold text-on-surface truncate">{meta.title}</h3>
                     <p className="text-[9px] text-on-surface-variant">{meta.desc}</p>
                   </div>
-                  <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-bold font-mono uppercase tracking-wider border shrink-0 ${STATUS_BADGE[ps] || STATUS_BADGE.pending}`}>
+                  <Badge variant={getBadgeVariant(ps)} className="text-[8px] px-1.5 py-0.5 shrink-0">
                     {ps.replace('_', ' ')}
-                  </span>
+                  </Badge>
                 </div>
 
                 {/* Duration */}

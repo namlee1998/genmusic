@@ -68,6 +68,13 @@ router.get('/projects/:project_id/release-files/:file_name', SdlcController.down
 // ── Dev-only: demo scenario selector (MOCK_SCENARIO) ───────────────────────
 router.get('/dev/mock-scenario', SdlcController.getMockScenario.bind(SdlcController));
 router.get('/dev/health', SdlcController.getProjectHealth.bind(SdlcController));
+router.post('/dev/settings/env', SdlcController.updateEnvSettings.bind(SdlcController));
+
+// ── Demo Board ───────────────────────────────────────────────────────────
+router.post('/demo/seed-board', SdlcController.seedDemoBoard.bind(SdlcController));
+router.get('/demo/board', SdlcController.getDemoBoard.bind(SdlcController));
+router.get('/demo/flow/:project_id/ux-doc', SdlcController.getDemoUxDoc.bind(SdlcController));
+router.post('/demo/flow/:project_id/retry', SdlcController.retryDemoFlow.bind(SdlcController));
 
 // ── Backlog / Kanban ──────────────────────────────────────────────────────
 router.get('/projects/:project_id/backlog', SdlcController.getBacklogs.bind(SdlcController));

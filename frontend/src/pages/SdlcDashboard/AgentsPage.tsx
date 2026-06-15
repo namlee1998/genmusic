@@ -1,7 +1,12 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useSdlcStore } from '@/store/useSdlcStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useAppStore } from '@/store/useAppStore';
 import * as sdlcApi from '@/services/api/sdlcApi';
+import { useApi } from '@/hooks/useApi';
+import { Button } from '@/components/ui/Button';
+import { Badge } from '@/components/ui/Badge';
+import { Card, CardContent } from '@/components/ui/Card';
 import type { WorkflowMetrics } from '@/store/useSdlcStore';
 import {
   Bot,
@@ -35,7 +40,7 @@ interface AgentInfo {
   color: string;
   glowColor: string;
   agentId: string;
-  status: 'running' | 'waiting' | 'blocked' | 'idle';
+  status: 'running' | 'waiting' | 'blocked' | 'idle' | 'completed';
   currentTask?: string;
   lastTask?: string;
   progress?: number;
@@ -75,17 +80,27 @@ const idleTimeAgo = (ts: string): string => {
 
 export default function AgentsPage() {
   const { currentProjectId } = useAppStore();
-  const { projectId, pipelinePhases, auditLog, pendingGates, setProjectId } = useSdlcStore();
+  const { projectId, pipelinePhases, auditLog, pendingGates, setProjectId } = useSdlcStore(
+    useShallow((state) => ({
+      projectId: state.projectId,
+      pipelinePhases: state.pipelinePhases,
+      auditLog: state.auditLog,
+      pendingGates: state.pendingGates,
+      setProjectId: state.setProjectId,
+    }))
+  );
 
-  const [loading, setLoading] = useState(false);
-  const [metrics, setMetrics] = useState<WorkflowMetrics | null>(null);
+  const { data: metrics, loading, execute: fetchMetrics } = useApi(sdlcApi.getWorkflowMetrics, {
+    onError: (err) => console.error('Failed to fetch metrics:', err)
+  });
+  
   const [selectedAgent, setSelectedAgent] = useState<AgentInfo | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'tasks' | 'artifacts' | 'logs' | 'handoffs'>('overview');
   const [customLogs, setCustomLogs] = useState<string[]>([]);
   
   // Filters state
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'running' | 'waiting' | 'blocked' | 'idle'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'running' | 'waiting' | 'blocked' | 'idle' | 'completed'>('ALL');
   const [workflowFilter, setWorkflowFilter] = useState('All Workflows');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
@@ -96,21 +111,14 @@ export default function AgentsPage() {
     }
   }, [currentProjectId, projectId, setProjectId]);
 
-  const loadData = useCallback(async () => {
-    if (!projectId) return;
-    setLoading(true);
-    try {
-      const data = await sdlcApi.getWorkflowMetrics(projectId);
-      setMetrics(data);
-    } catch (err) {
-      console.error('Failed to fetch metrics:', err);
-    } finally {
-      setLoading(false);
+  const loadData = useCallback(() => {
+    if (projectId) {
+      fetchMetrics(projectId).catch(() => {});
     }
-  }, [projectId]);
+  }, [projectId, fetchMetrics]);
 
   useEffect(() => {
-    void loadData();
+    loadData();
   }, [loadData]);
 
   // Map backend phase status into UI statuses dynamically
@@ -122,7 +130,7 @@ export default function AgentsPage() {
       case 'running': return 'running';
       case 'gate_pending': return 'waiting';
       case 'failed': return 'blocked';
-      case 'completed': return 'idle';
+      case 'completed': return 'completed';
       default: return defaultStatus;
     }
   }, [pipelinePhases]);
@@ -161,6 +169,7 @@ export default function AgentsPage() {
       if (status === 'waiting') return 'Awaiting upstream artifacts';
       if (status === 'blocked') return 'Blocked';
       if (status === 'idle') return undefined;
+      if (status === 'completed') return 'Completed phase';
       return undefined;
     };
 
@@ -202,7 +211,7 @@ export default function AgentsPage() {
     const agentIdle = (key: string, status: AgentInfo['status']): string | undefined => {
       const last = lastAuditFor(key);
       if (!last) return undefined;
-      if (status === 'idle' || status === 'waiting') return idleTimeAgo(last.timestamp);
+      if (status === 'idle' || status === 'waiting' || status === 'completed') return idleTimeAgo(last.timestamp);
       return undefined;
     };
 
@@ -293,7 +302,7 @@ export default function AgentsPage() {
 
   // Compute status counts
   const statusCounts = useMemo(() => {
-    const counts = { running: 0, waiting: 0, blocked: 0, idle: 0 };
+    const counts = { running: 0, waiting: 0, blocked: 0, idle: 0, completed: 0 };
     agentsList.forEach((a) => {
       counts[a.status]++;
     });
@@ -313,7 +322,7 @@ export default function AgentsPage() {
 
   if (!projectId) {
     return (
-      <main className="flex flex-col gap-0 p-0 h-full min-h-0 overflow-y-auto bg-[#090a0f] text-[#e3e1e9] font-sans antialiased" style={{ padding: '24px 32px' }}>
+      <main className="flex flex-col gap-0 p-0 h-full min-h-0 overflow-y-auto bg-background text-on-surface font-sans antialiased" style={{ padding: '24px 32px' }}>
         <EmptyProjectState />
       </main>
     );
@@ -324,6 +333,7 @@ export default function AgentsPage() {
       case 'running': return 'bg-emerald-500 shadow-[0_0_8px_#10b981]';
       case 'waiting': return 'bg-amber-500 shadow-[0_0_8px_#fbbf24]';
       case 'blocked': return 'bg-red-500 shadow-[0_0_8px_#ef4444] animate-pulse';
+      case 'completed': return 'bg-blue-500 shadow-[0_0_8px_#3b82f6]';
       default: return 'bg-slate-500';
     }
   };
@@ -333,6 +343,7 @@ export default function AgentsPage() {
       case 'running': return 'Running';
       case 'waiting': return 'Waiting';
       case 'blocked': return 'Blocked';
+      case 'completed': return 'Completed';
       default: return 'Idle';
     }
   };
@@ -359,7 +370,7 @@ export default function AgentsPage() {
 
   return (
     <main
-      className="flex-1 flex flex-col gap-0 p-0 h-full min-h-0 overflow-y-auto bg-[#090a0f] text-[#e3e1e9] font-sans antialiased relative"
+      className="flex-1 flex flex-col gap-0 p-0 h-full min-h-0 overflow-y-auto bg-background text-on-surface font-sans antialiased relative"
       style={{
         maxWidth: '100%',
         padding: '24px 32px',
@@ -373,7 +384,7 @@ export default function AgentsPage() {
       </div>
 
       {/* 2. Top Filter and Layout Bar */}
-      <div className="flex items-center justify-between mx-[18px] mb-6 flex-wrap gap-3 pb-4 border-b border-[#1e293b]/40">
+      <div className="flex items-center justify-between mx-[18px] mb-6 flex-wrap gap-3 pb-4 border-b border-outline-variant/40">
         <div className="flex items-center gap-3 flex-wrap">
           {/* Search */}
           <div className="relative shrink-0 w-64">
@@ -383,7 +394,7 @@ export default function AgentsPage() {
               placeholder="Search agents, tasks, artifacts..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-8.5 pr-8 py-2 bg-[#11131a]/60 border border-white/5 rounded-lg text-[11px] focus:outline-none focus:border-indigo-500/50 text-white placeholder:text-slate-500"
+              className="w-full pl-8.5 pr-8 py-2 bg-surface-container border border-white/5 rounded-lg text-[11px] focus:outline-none focus:border-indigo-500/50 text-white placeholder:text-slate-500"
             />
             <span className="absolute right-2.5 top-1/2 -translate-y-1/2 px-1 py-0.5 rounded bg-slate-900 border border-white/10 text-[8px] font-bold text-slate-500 select-none">
               ⌘K
@@ -391,20 +402,20 @@ export default function AgentsPage() {
           </div>
 
           {/* All Workflows dropdown */}
-          <button className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-white/5 bg-[#11131a]/60 hover:bg-[#181b24] text-[11px] text-slate-300 transition-all cursor-pointer">
+          <button className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-white/5 bg-surface-container hover:bg-surface-container-high text-[11px] text-slate-300 transition-all cursor-pointer">
             <span>{workflowFilter}</span>
             <ChevronDown size={12} className="text-slate-500" />
           </button>
 
           {/* Status filter dropdown */}
-          <button className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-white/5 bg-[#11131a]/60 hover:bg-[#181b24] text-[11px] text-slate-300 transition-all cursor-pointer">
+          <button className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-white/5 bg-surface-container hover:bg-surface-container-high text-[11px] text-slate-300 transition-all cursor-pointer">
             <span className="capitalize">Status: {statusFilter.toLowerCase()}</span>
             <ChevronDown size={12} className="text-slate-500" />
           </button>
         </div>
 
         {/* Layout controls */}
-        <div className="flex items-center gap-1.5 bg-[#11131a]/60 border border-white/5 p-1 rounded-lg">
+        <div className="flex items-center gap-1.5 bg-surface-container border border-white/5 p-1 rounded-lg">
           <button
             onClick={() => setViewMode('grid')}
             className={`p-1.5 rounded transition-all cursor-pointer ${viewMode === 'grid' ? 'bg-indigo-500/15 text-indigo-400' : 'text-slate-500 hover:text-white'}`}
@@ -424,7 +435,7 @@ export default function AgentsPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mx-[18px] mb-6">
         <div 
           onClick={() => setStatusFilter(statusFilter === 'running' ? 'ALL' : 'running')}
-          className={`p-4 rounded-xl border border-white/5 bg-[#11131a]/60 flex items-center justify-between cursor-pointer transition-all hover:border-emerald-500/10 ${statusFilter === 'running' ? 'border-emerald-500/20 bg-emerald-500/2 shadow-inner' : ''}`}
+          className={`p-4 rounded-xl border border-white/5 bg-surface-container flex items-center justify-between cursor-pointer transition-all hover:border-emerald-500/10 ${statusFilter === 'running' ? 'border-emerald-500/20 bg-emerald-500/2 shadow-inner' : ''}`}
         >
           <div className="flex items-center gap-2.5">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]" />
@@ -435,7 +446,7 @@ export default function AgentsPage() {
 
         <div 
           onClick={() => setStatusFilter(statusFilter === 'waiting' ? 'ALL' : 'waiting')}
-          className={`p-4 rounded-xl border border-white/5 bg-[#11131a]/60 flex items-center justify-between cursor-pointer transition-all hover:border-amber-500/10 ${statusFilter === 'waiting' ? 'border-amber-500/20 bg-amber-500/2 shadow-inner' : ''}`}
+          className={`p-4 rounded-xl border border-white/5 bg-surface-container flex items-center justify-between cursor-pointer transition-all hover:border-amber-500/10 ${statusFilter === 'waiting' ? 'border-amber-500/20 bg-amber-500/2 shadow-inner' : ''}`}
         >
           <div className="flex items-center gap-2.5">
             <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-[0_0_8px_#fbbf24]" />
@@ -446,7 +457,7 @@ export default function AgentsPage() {
 
         <div 
           onClick={() => setStatusFilter(statusFilter === 'blocked' ? 'ALL' : 'blocked')}
-          className={`p-4 rounded-xl border border-white/5 bg-[#11131a]/60 flex items-center justify-between cursor-pointer transition-all hover:border-red-500/10 ${statusFilter === 'blocked' ? 'border-red-500/20 bg-red-500/2 shadow-inner' : ''}`}
+          className={`p-4 rounded-xl border border-white/5 bg-surface-container flex items-center justify-between cursor-pointer transition-all hover:border-red-500/10 ${statusFilter === 'blocked' ? 'border-red-500/20 bg-red-500/2 shadow-inner' : ''}`}
         >
           <div className="flex items-center gap-2.5">
             <span className="w-2.5 h-2.5 rounded-full bg-red-500 shadow-[0_0_8px_#ef4444]" />
@@ -457,7 +468,7 @@ export default function AgentsPage() {
 
         <div 
           onClick={() => setStatusFilter(statusFilter === 'idle' ? 'ALL' : 'idle')}
-          className={`p-4 rounded-xl border border-white/5 bg-[#11131a]/60 flex items-center justify-between cursor-pointer transition-all hover:border-slate-500/10 ${statusFilter === 'idle' ? 'border-slate-500/20 bg-slate-500/2 shadow-inner' : ''}`}
+          className={`p-4 rounded-xl border border-white/5 bg-surface-container flex items-center justify-between cursor-pointer transition-all hover:border-slate-500/10 ${statusFilter === 'idle' ? 'border-slate-500/20 bg-slate-500/2 shadow-inner' : ''}`}
         >
           <div className="flex items-center gap-2.5">
             <span className="w-2.5 h-2.5 rounded-full bg-slate-500" />
@@ -470,7 +481,7 @@ export default function AgentsPage() {
       {/* 4. Agents grid list */}
       <div className="mx-[18px] mb-6 flex-1">
         {filteredAgents.length === 0 ? (
-          <div className="flex flex-col items-center justify-center p-8 bg-[#11131a]/60 border border-[#1e293b] rounded-xl text-center min-h-[250px]">
+          <div className="flex flex-col items-center justify-center p-8 bg-surface-container border border-[#1e293b] rounded-xl text-center min-h-[250px]">
             <Bot size={36} className="text-slate-600 mb-2" />
             <h3 className="text-sm font-bold text-white m-0">No Agents Match</h3>
             <p className="text-[11.5px] text-slate-400 max-w-xs leading-relaxed mt-1">
@@ -487,7 +498,7 @@ export default function AgentsPage() {
               return (
                 <div
                   key={agent.key}
-                  className={`group p-5 rounded-xl border border-white/5 bg-[#11131a]/60 backdrop-blur-md transition-all duration-300 hover:-translate-y-0.5 hover:border-indigo-500/20 ${viewMode === 'list' ? 'flex items-center justify-between gap-5' : ''}`}
+                  className={`group p-5 rounded-xl border border-white/5 bg-surface-container backdrop-blur-md transition-all duration-300 hover:-translate-y-0.5 hover:border-indigo-500/20 ${viewMode === 'list' ? 'flex items-center justify-between gap-5' : ''}`}
                   style={viewMode === 'grid' ? bgGlow : undefined}
                 >
                   <div className={viewMode === 'list' ? 'flex items-center gap-6 flex-1 min-w-0' : 'space-y-4'}>
@@ -655,20 +666,20 @@ export default function AgentsPage() {
 
         {/* Pagination Bar */}
         {filteredAgents.length > 0 && (
-          <div className="flex items-center justify-between mt-6 pt-4 border-t border-[#1e293b]/40 text-slate-400 text-xs">
+          <div className="flex items-center justify-between mt-6 pt-4 border-t border-outline-variant/40 text-slate-400 text-xs">
             <div>
               Showing <span className="text-white font-medium">1</span> to <span className="text-white font-medium">{filteredAgents.length}</span> of <span className="text-white font-medium">{filteredAgents.length}</span> agents
             </div>
             <div className="flex items-center gap-1">
-              <button className="p-1.5 rounded border border-white/5 bg-[#11131a]/60 text-slate-500 transition-all cursor-not-allowed opacity-30" disabled>
+              <Button variant="outline" size="icon" className="h-8 w-8 text-slate-500 opacity-30 cursor-not-allowed" disabled>
                 &lt;
-              </button>
-              <button className="px-3 py-1 rounded bg-indigo-600 text-white font-bold text-xs transition-all cursor-pointer">
+              </Button>
+              <Button variant="primary" size="sm" className="h-8 min-w-8">
                 1
-              </button>
-              <button className="p-1.5 rounded border border-white/5 bg-[#11131a]/60 text-slate-500 transition-all cursor-not-allowed opacity-30" disabled>
+              </Button>
+              <Button variant="outline" size="icon" className="h-8 w-8 text-slate-500 opacity-30 cursor-not-allowed" disabled>
                 &gt;
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -684,9 +695,9 @@ export default function AgentsPage() {
           />
 
           {/* Slide-over panel */}
-          <div className="fixed top-0 right-0 bottom-0 w-full max-w-md z-[101] bg-[#0c0d12] border-l border-white/5 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
+          <div className="fixed top-0 right-0 bottom-0 w-full max-w-md z-[101] bg-surface-container-lowest border-l border-white/5 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
             {/* Header info */}
-            <div className="p-4 border-b border-[#1e293b]/50 flex items-center justify-between bg-[#11131a]/60">
+            <div className="p-4 border-b border-outline-variant/50 flex items-center justify-between bg-surface-container">
               <div className="flex items-center gap-3">
                 <div className={`flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br ${selectedAgent.color} text-white shadow-md`}>
                   {selectedAgent.icon}
@@ -705,7 +716,7 @@ export default function AgentsPage() {
               </div>
 
               <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1 bg-[#1e293b]/40 rounded border border-white/5 px-2 py-0.5">
+                <div className="flex items-center gap-1 bg-surface-container-high/40 rounded border border-white/5 px-2 py-0.5">
                   <span className={`w-1.5 h-1.5 rounded-full ${getStatusDotColor(selectedAgent.status)}`} />
                   <span className="text-[9px] font-mono text-slate-300 uppercase">{getStatusText(selectedAgent.status)}</span>
                 </div>
@@ -719,7 +730,7 @@ export default function AgentsPage() {
             </div>
 
             {/* Sidebar Tabs control */}
-            <div className="flex border-b border-[#1e293b]/40 bg-[#11131a]/30 px-2.5">
+            <div className="flex border-b border-outline-variant/40 bg-surface-container/30 px-2.5">
               {(['overview', 'tasks', 'artifacts', 'logs', 'handoffs'] as const).map((tab) => (
                 <button
                   key={tab}
@@ -740,7 +751,7 @@ export default function AgentsPage() {
               {activeTab === 'overview' && (
                 <div className="space-y-4">
                   {/* Current execution stats card */}
-                  <div className="p-4 rounded-lg bg-[#11131a]/40 border border-white/5 space-y-3 shadow-inner">
+                  <div className="p-4 rounded-lg bg-surface-container-low/40 border border-white/5 space-y-3 shadow-inner">
                     <span className="text-[8px] uppercase font-bold text-slate-500 tracking-wider block">Current Execution</span>
                     
                     {selectedAgent.status === 'running' && selectedAgent.currentTask ? (
@@ -778,6 +789,22 @@ export default function AgentsPage() {
                           Pipeline execution is blocked. Waiting for upstream dependencies to be resolved.
                         </div>
                       </div>
+                    ) : selectedAgent.status === 'completed' ? (
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <span className="text-blue-400 font-bold uppercase tracking-wider text-[8px] block mb-1">Execution Status</span>
+                            <div className="flex items-center gap-1.5 text-xs text-white font-medium truncate">
+                              <CheckCircle2 size={12} className="text-blue-500 shrink-0" />
+                              <span>Successfully Completed</span>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-slate-500 font-bold uppercase tracking-wider text-[8px] block mb-1">Finished</span>
+                            <span className="text-xs text-slate-300 font-mono font-bold">{selectedAgent.idleTime || 'N/A'}</span>
+                          </div>
+                        </div>
+                      </div>
                     ) : (
                       <div className="space-y-3">
                         <div className="grid grid-cols-2 gap-4">
@@ -799,7 +826,7 @@ export default function AgentsPage() {
 
                   {/* Inputs card details */}
                   {selectedAgent.input && (
-                    <div className="p-4 rounded-lg bg-[#11131a]/40 border border-white/5 space-y-3">
+                    <div className="p-4 rounded-lg bg-surface-container-low/40 border border-white/5 space-y-3">
                       <span className="text-[8px] uppercase font-bold text-slate-500 tracking-wider block">Expected Input</span>
                       <div className="space-y-2">
                         <div className="flex items-center justify-between p-2 rounded bg-black/40 border border-white/5 text-xs">
@@ -817,7 +844,7 @@ export default function AgentsPage() {
 
                   {/* Outputs card details */}
                   {selectedAgent.output && (
-                    <div className="p-4 rounded-lg bg-[#11131a]/40 border border-white/5 space-y-3">
+                    <div className="p-4 rounded-lg bg-surface-container-low/40 border border-white/5 space-y-3">
                       <span className="text-[8px] uppercase font-bold text-slate-500 tracking-wider block">Expected Output</span>
                       <div className="space-y-2">
                         <div className="flex items-center justify-between p-2 rounded bg-black/40 border border-white/5 text-xs">
@@ -828,6 +855,10 @@ export default function AgentsPage() {
                           {selectedAgent.status === 'running' ? (
                             <span className="text-[9.5px] text-indigo-400 font-bold font-mono flex items-center gap-1.5">
                               Generating... <span className="w-2.5 h-2.5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                            </span>
+                          ) : selectedAgent.status === 'completed' ? (
+                            <span className="text-[9.5px] text-blue-400 font-bold font-mono flex items-center gap-1">
+                              Completed <CheckCircle2 size={12} className="text-blue-400" />
                             </span>
                           ) : selectedAgent.status === 'idle' || selectedAgent.status === 'waiting' ? (
                             <span className="text-[9.5px] text-emerald-400 font-bold font-mono flex items-center gap-1">
@@ -849,9 +880,9 @@ export default function AgentsPage() {
                     const lastHandoff = handoffEvents.length > 0 ? handoffEvents[handoffEvents.length - 1] : null;
                     const handoffTime = lastHandoff ? timeAgo(lastHandoff.timestamp) : undefined;
                     return lastHandoff ? (
-                      <div className="p-4 rounded-lg bg-[#11131a]/40 border border-white/5 space-y-3">
+                      <div className="p-4 rounded-lg bg-surface-container-low/40 border border-white/5 space-y-3">
                         <span className="text-[8px] uppercase font-bold text-slate-500 tracking-wider block">Last Handoff</span>
-                        <div className="flex items-center justify-between p-3 rounded bg-black/40 border border-[#1e293b]/40 text-xs">
+                        <div className="flex items-center justify-between p-3 rounded bg-black/40 border border-outline-variant/40 text-xs">
                           <div className="flex flex-col">
                             <span className="text-[8px] uppercase font-bold text-slate-500 tracking-wider">Event</span>
                             <span className="text-white font-bold leading-none mt-1.5 flex items-center gap-1 truncate max-w-[180px]">
@@ -870,7 +901,7 @@ export default function AgentsPage() {
                         </div>
                       </div>
                     ) : (
-                      <div className="p-4 rounded-lg bg-[#11131a]/40 border border-white/5 space-y-3">
+                      <div className="p-4 rounded-lg bg-surface-container-low/40 border border-white/5 space-y-3">
                         <span className="text-[8px] uppercase font-bold text-slate-500 tracking-wider block">Handoff</span>
                         <p className="text-xs text-slate-500">No handoff events recorded yet.</p>
                       </div>
@@ -886,7 +917,7 @@ export default function AgentsPage() {
               )}
 
               {activeTab === 'tasks' && (
-                <div className="p-4 rounded-lg bg-[#11131a]/40 border border-white/5 space-y-3">
+                <div className="p-4 rounded-lg bg-surface-container-low/40 border border-white/5 space-y-3">
                   <span className="text-[9.5px] uppercase font-bold text-slate-500 tracking-wider block">Activity Log</span>
                   <div className="space-y-3 text-xs max-h-[400px] overflow-y-auto">
                     {auditLog
@@ -924,7 +955,7 @@ export default function AgentsPage() {
               )}
 
               {activeTab === 'artifacts' && (
-                <div className="p-4 rounded-lg bg-[#11131a]/40 border border-white/5 space-y-3">
+                <div className="p-4 rounded-lg bg-surface-container-low/40 border border-white/5 space-y-3">
                   <span className="text-[9.5px] uppercase font-bold text-slate-500 tracking-wider block">Generated Artifact Files</span>
                   <div className="flex items-center justify-between p-2.5 rounded bg-black/40 border border-white/5 text-xs">
                     <div className="flex items-center gap-2">
@@ -943,7 +974,7 @@ export default function AgentsPage() {
               {activeTab === 'logs' && (
                 <div className="space-y-3 flex flex-col">
                   <span className="text-[9.5px] uppercase font-bold text-slate-500 tracking-wider block">Logs Output Console</span>
-                  <div className="w-full bg-[#050508] border border-white/5 rounded-lg p-3.5 font-mono text-[10px] text-slate-300 overflow-y-auto space-y-2 min-h-[300px]">
+                  <div className="w-full bg-surface-container-lowest border border-white/5 rounded-lg p-3.5 font-mono text-[10px] text-slate-300 overflow-y-auto space-y-2 min-h-[300px]">
                     {customLogs.length > 0 ? customLogs.map((log, idx) => (
                       <div key={idx} className="whitespace-pre-wrap leading-normal border-l-2 border-indigo-500/20 pl-2">
                         {log}
@@ -963,7 +994,7 @@ export default function AgentsPage() {
               )}
 
               {activeTab === 'handoffs' && (
-                <div className="p-4 rounded-lg bg-[#11131a]/40 border border-white/5 space-y-3">
+                <div className="p-4 rounded-lg bg-surface-container-low/40 border border-white/5 space-y-3">
                   <span className="text-[9.5px] uppercase font-bold text-slate-500 tracking-wider block">Audit Trail</span>
                   <div className="space-y-4 relative pl-3.5 border-l border-white/5 max-h-[400px] overflow-y-auto">
                     {auditLog

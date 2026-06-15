@@ -126,6 +126,9 @@ def _build_qa_content(input_data: QAAgentInput) -> str:
     if input_data.feedback_prompt:
         content = f"<human_feedback>\n{input_data.feedback_prompt}\n</human_feedback>\n\n" + content
 
+    if input_data.previous_draft:
+        content += f"\n\n<previous_draft>\n{input_data.previous_draft}\n</previous_draft>\n<instruction>\nYou MUST use the previous_draft as your baseline. Only apply changes requested in the human_feedback. Do not rewrite perfectly good sections unnecessarily.\n</instruction>"
+
     return content
 
 

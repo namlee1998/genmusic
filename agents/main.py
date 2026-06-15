@@ -160,6 +160,7 @@ def _parse_agent_input(node_target: str, context: dict):
             feature_request=_feature_request_from_context(context),
             project_context=_project_context_from_context(context),
             feedback_prompt=_feedback_context(context),
+            previous_draft=_text_context(context, "previousDraft", None),
         )
     if node_target == "ux_agent":
         return UXAgentInput(
@@ -167,6 +168,7 @@ def _parse_agent_input(node_target: str, context: dict):
             user_stories=_user_stories_from_context(context),
             acceptance_criteria=_list_context(context, "acceptance_criteria"),
             feedback_prompt=_feedback_context(context),
+            previous_draft=_text_context(context, "previousDraft", None),
         )
     if node_target == "dev_agent":
         return DEVAgentInput(
@@ -177,6 +179,7 @@ def _parse_agent_input(node_target: str, context: dict):
             project_context=_project_context_from_context(context),
             architecture_ledger=_text_context(context, "architecture_ledger"),
             feedback_prompt=_feedback_context(context),
+            previous_draft=_text_context(context, "previousDraft", None),
         )
     if node_target == "qa_agent":
         sandbox_result = _first_context_value(context, "sandbox_result")
@@ -193,6 +196,7 @@ def _parse_agent_input(node_target: str, context: dict):
             risk_assessment=_text_context(context, "risk_assessment"),
             risk_level=_text_context(context, "risk_level", "LOW"),
             feedback_prompt=_feedback_context(context),
+            previous_draft=_text_context(context, "previousDraft", None),
         )
     raise ValueError(f"Unknown node_target: {node_target}")
 

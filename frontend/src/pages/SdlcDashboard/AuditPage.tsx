@@ -1,44 +1,61 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useMemo } from 'react';
 import { RefreshCw, ShieldAlert, Info } from 'lucide-react';
 import { useSdlcStore, type AuditEvent } from '@/store/useSdlcStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useAppStore } from '@/store/useAppStore';
 import * as sdlcApi from '@/services/api/sdlcApi';
+import { useApi } from '@/hooks/useApi';
 import DeliveryErrorBanner from './components/DeliveryErrorBanner';
 import EmptyProjectState from './components/EmptyProjectState';
+import { Button } from '@/components/ui/Button';
+import { Badge } from '@/components/ui/Badge';
 
 export default function AuditPage() {
   const { currentProjectId } = useAppStore();
   const {
     projectId, auditEvents, error,
     setProjectId, setAuditEvents, setError,
-  } = useSdlcStore();
+  } = useSdlcStore(
+    useShallow((state) => ({
+      projectId: state.projectId,
+      auditEvents: state.auditEvents,
+      error: state.error,
+      setProjectId: state.setProjectId,
+      setAuditEvents: state.setAuditEvents,
+      setError: state.setError,
+    }))
+  );
 
-  const [loading, setLoading] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<AuditEvent | null>(null);
+
+  const { loading, execute: fetchAuditTrail } = useApi(sdlcApi.getAuditTrail, {
+    onSuccess: (trail) => {
+      setAuditEvents(trail.events);
+      if (trail.events && trail.events.length > 0) {
+        setSelectedEvent(trail.events[trail.events.length - 1]);
+      }
+    },
+    onError: (errMessage) => setError(errMessage)
+  });
+
+  const reversedAuditEvents = useMemo(() => {
+    return [...auditEvents].reverse();
+  }, [auditEvents]);
+
+  const refreshAudit = useCallback(() => {
+    if (projectId) {
+      // Using catch just to swallow unhandled promise rejection since error is handled via callback
+      fetchAuditTrail(projectId).catch(() => {});
+    }
+  }, [projectId, fetchAuditTrail]);
 
   // Sync project
   useEffect(() => {
     if (currentProjectId && currentProjectId !== projectId) setProjectId(currentProjectId);
   }, [currentProjectId, projectId, setProjectId]);
 
-  const refreshAudit = useCallback(async () => {
-    if (!projectId) return;
-    setLoading(true);
-    try {
-      const trail = await sdlcApi.getAuditTrail(projectId);
-      setAuditEvents(trail.events);
-      if (trail.events && trail.events.length > 0) {
-        setSelectedEvent(trail.events[trail.events.length - 1]);
-      }
-    } catch (requestError) {
-      setError(sdlcApi.parseApiError(requestError, 'Could not load the audit trail.').message);
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, setAuditEvents, setError]);
-
   useEffect(() => {
-    void refreshAudit();
+    refreshAudit();
   }, [refreshAudit]);
 
   if (!projectId) return <EmptyProjectState />;
@@ -72,7 +89,7 @@ export default function AuditPage() {
 
   return (
     <main
-      className="flex flex-col gap-0 p-0 w-full min-h-full bg-[#090a0f] text-[#e3e1e9] font-sans antialiased"
+      className="flex flex-col gap-0 p-0 w-full min-h-full bg-background text-on-surface font-sans antialiased"
       style={{
         maxWidth: '100%',
         padding: '24px 32px',
@@ -85,13 +102,15 @@ export default function AuditPage() {
       <div className="flex items-center justify-between mx-[18px] mb-6 flex-wrap gap-3">
         <h1 className="text-xl font-bold text-white tracking-tight">Audit Trail</h1>
 
-        <button
-          className="inline-flex items-center gap-1.5 flex-shrink-0 px-3.5 py-2.5 border border-indigo-400/45 rounded-lg bg-indigo-500 text-white font-bold text-[12px] cursor-pointer hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+        <Button
+          variant="primary"
+          size="sm"
+          className="gap-1.5"
           onClick={() => void refreshAudit()}
           disabled={loading}
         >
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
-        </button>
+        </Button>
       </div>
 
       {/* Error banner */}
@@ -105,7 +124,7 @@ export default function AuditPage() {
       {/* Main two-panel layout */}
       <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6 mx-[18px] mb-6 items-start">
         {/* Left: Audit event list */}
-        <aside className="bg-[#11131a]/60 border border-[#1e293b] rounded-lg p-4 flex flex-col gap-3 max-h-[600px] overflow-y-auto custom-scrollbar">
+        <aside className="bg-surface-container border border-outline-variant/40 rounded-lg p-4 flex flex-col gap-3 max-h-[600px] overflow-y-auto custom-scrollbar">
           <h2 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 pb-2 border-b border-[#1e293b]/60">
             Request Runs
           </h2>
@@ -120,7 +139,7 @@ export default function AuditPage() {
             <p className="text-xs text-slate-500 py-6 text-center">No audit events found.</p>
           ) : (
             <div className="flex flex-col gap-2.5">
-              {[...auditEvents].reverse().map((ev, idx) => {
+              {reversedAuditEvents.map((ev, idx) => {
                 const isSelected = selectedEvent?.timestamp === ev.timestamp && selectedEvent?.action === ev.action;
                 return (
                   <div
@@ -155,7 +174,7 @@ export default function AuditPage() {
         </aside>
 
         {/* Right: Event detail */}
-        <section className="bg-[#11131a]/60 border border-[#1e293b] rounded-lg p-5 flex flex-col min-h-[400px]">
+        <section className="bg-surface-container border border-outline-variant/40 rounded-lg p-5 flex flex-col min-h-[400px]">
           {selectedEvent ? (
             <div className="space-y-5">
               {/* Title and timestamp */}
@@ -173,9 +192,9 @@ export default function AuditPage() {
                 </div>
 
                 {selectedEvent.severity && (
-                  <span className={`font-mono text-[9px] font-bold px-2 py-0.5 rounded border uppercase tracking-wider ${getSeverityBadgeColor(selectedEvent.severity)}`}>
+                  <Badge variant={selectedEvent.severity.toLowerCase() === 'high' ? 'danger' : selectedEvent.severity.toLowerCase() === 'medium' ? 'warning' : 'info'}>
                     {selectedEvent.severity}
-                  </span>
+                  </Badge>
                 )}
               </div>
 

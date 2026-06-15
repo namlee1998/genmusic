@@ -12,6 +12,8 @@ const ERROR_CODES = {
   CLAUDE_OUTPUT_PARSE_ERROR: 'CLAUDE_OUTPUT_PARSE_ERROR',
 };
 
+const Sentry = require('@sentry/node');
+
 // Fallback code derived from the HTTP status when an error has none.
 const codeFromStatus = (statusCode) => {
   if (statusCode === 400) return 'BAD_REQUEST';
@@ -40,6 +42,20 @@ const errorHandler = (err, req, res, _next) => {
         ? 'Folder contains more than the 8,000 file upload limit'
         : `Folder upload rejected: ${err.message}`)
     : (err.message || 'Internal Server Error');
+
+  if (statusCode >= 500) {
+    Sentry.captureException(err, {
+      tags: { phase: err.phase || 'unknown' },
+      contexts: {
+        request: {
+          id: req.id,
+          method: req.method,
+          url: req.originalUrl,
+          headers: req.headers
+        }
+      }
+    });
+  }
 
   // Don't leak error details in production
   const response = {

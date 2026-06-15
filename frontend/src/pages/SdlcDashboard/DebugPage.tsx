@@ -15,7 +15,7 @@ import {
   FileCode,
   Sparkles
 } from 'lucide-react';
-import { getProjectHealth, SystemHealthData } from '@/services/api/sdlcApi';
+import { getProjectHealth, SystemHealthData, updateSystemSettings } from '@/services/api/sdlcApi';
 
 interface DiagnosisResult {
   title: string;
@@ -41,6 +41,16 @@ export default function DebugPage() {
   const [componentType, setComponentType] = useState('auto');
   const [diagnosis, setDiagnosis] = useState<DiagnosisResult | null>(null);
 
+  // Settings
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [apiKeys, setApiKeys] = useState({
+    OPENAI_API_KEY: '',
+    ANTHROPIC_API_KEY: '',
+    DEEPSEEK_API_KEY: '',
+    E2B_API_KEY: ''
+  });
+
   useEffect(() => {
     fetchHealth();
   }, []);
@@ -56,6 +66,27 @@ export default function DebugPage() {
       setHealthError(err.message || 'Failed to connect to backend server health API');
     } finally {
       setHealthLoading(false);
+    }
+  };
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSettingsSaving(true);
+    try {
+      await updateSystemSettings(apiKeys);
+      setIsSettingsOpen(false);
+      setApiKeys({
+        OPENAI_API_KEY: '',
+        ANTHROPIC_API_KEY: '',
+        DEEPSEEK_API_KEY: '',
+        E2B_API_KEY: ''
+      });
+      await fetchHealth();
+    } catch (err: any) {
+      console.error('Failed to save settings:', err);
+      alert('Failed to save settings: ' + err.message);
+    } finally {
+      setSettingsSaving(false);
     }
   };
 
@@ -220,14 +251,23 @@ export default function DebugPage() {
           </p>
         </div>
 
-        <button
-          onClick={fetchHealth}
-          disabled={healthLoading}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-container hover:bg-surface-container-high border border-outline-variant/40 rounded-lg text-xs font-semibold text-on-surface transition-all cursor-pointer disabled:opacity-50"
-        >
-          <RefreshCw size={13} className={healthLoading ? 'animate-spin' : ''} />
-          <span>{healthLoading ? 'Checking...' : 'Refresh Health'}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsSettingsOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 rounded-lg text-xs font-semibold text-indigo-400 transition-all cursor-pointer"
+          >
+            <Key size={13} />
+            <span>Configure AI Settings</span>
+          </button>
+          <button
+            onClick={fetchHealth}
+            disabled={healthLoading}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-container hover:bg-surface-container-high border border-outline-variant/40 rounded-lg text-xs font-semibold text-on-surface transition-all cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw size={13} className={healthLoading ? 'animate-spin' : ''} />
+            <span>{healthLoading ? 'Checking...' : 'Refresh Health'}</span>
+          </button>
+        </div>
       </div>
 
       {/* 2. Health Check Dashboard */}
@@ -451,7 +491,71 @@ export default function DebugPage() {
         </div>
 
       </div>
-      
+
+      {/* 4. AI Settings Modal */}
+      {isSettingsOpen && (
+        <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center px-4">
+          <div className="w-full max-w-md rounded-xl bg-surface-container-lowest border border-outline-variant/50 shadow-2xl p-6">
+            <div className="flex items-center justify-between border-b border-outline-variant/30 pb-3 mb-4">
+              <h3 className="text-base font-bold flex items-center gap-2 text-on-surface">
+                <Key className="text-amber-500" size={18} />
+                <span>Configure AI Providers</span>
+              </h3>
+              <button
+                onClick={() => setIsSettingsOpen(false)}
+                className="text-on-surface-variant hover:text-on-surface p-1"
+              >
+                <XCircle size={18} />
+              </button>
+            </div>
+            
+            <form onSubmit={handleSaveSettings} className="space-y-4">
+              <p className="text-xs text-on-surface-variant mb-4">
+                Enter your API keys below to save them to the backend environment file. Leave fields blank to keep existing keys.
+              </p>
+
+              {[
+                { label: 'OpenAI API Key', key: 'OPENAI_API_KEY', ph: 'sk-...' },
+                { label: 'Anthropic API Key', key: 'ANTHROPIC_API_KEY', ph: 'sk-ant-...' },
+                { label: 'DeepSeek API Key', key: 'DEEPSEEK_API_KEY', ph: 'sk-...' },
+                { label: 'E2B Sandbox API Key', key: 'E2B_API_KEY', ph: 'e2b_...' }
+              ].map((field) => (
+                <div key={field.key} className="space-y-1.5">
+                  <label className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider block">
+                    {field.label}
+                  </label>
+                  <input
+                    type="password"
+                    placeholder={field.ph}
+                    value={apiKeys[field.key as keyof typeof apiKeys]}
+                    onChange={(e) => setApiKeys({...apiKeys, [field.key]: e.target.value})}
+                    className="w-full bg-surface-container border border-outline-variant/50 rounded-lg px-3 py-2 text-xs text-on-surface focus:outline-none focus:border-primary"
+                  />
+                </div>
+              ))}
+
+              <div className="flex justify-end pt-4 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsSettingsOpen(false)}
+                  className="px-4 py-2 rounded-lg text-xs font-bold text-on-surface-variant hover:bg-surface-variant border border-transparent hover:border-outline-variant/50 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={settingsSaving}
+                  className="px-4 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg text-xs font-bold flex items-center gap-2 shadow-[0_0_10px_rgba(99,102,241,0.2)] disabled:opacity-50"
+                >
+                  {settingsSaving ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                  <span>Save Keys</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

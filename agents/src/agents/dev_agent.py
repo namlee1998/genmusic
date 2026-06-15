@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import sys
+import asyncio
 from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -120,6 +121,8 @@ async def run_dev_agent(input_data: DEVAgentInput, model_config=None, trace_cont
         content += f"Architecture Ledger:\n{input_data.architecture_ledger}\n\n"
     if input_data.feedback_prompt:
         content = f"<human_feedback>\n{input_data.feedback_prompt}\n</human_feedback>\n\n{content}"
+    if input_data.previous_draft:
+        content += f"\n\n<previous_draft>\n{input_data.previous_draft}\n</previous_draft>\n<instruction>\nYou MUST use the previous_draft as your baseline. Only apply changes requested in the human_feedback. Do not rewrite perfectly good sections unnecessarily.\n</instruction>"
     cfg = trace_context.langchain_config("dev_agent") if trace_context else None
     resp = await llm.ainvoke([SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=content)],
                               **({"config": cfg} if cfg else {}))
@@ -145,9 +148,12 @@ async def stream_dev_agent(input_data: DEVAgentInput, model_config=None, trace_c
         base_content += f"\nArchitecture Ledger:\n{input_data.architecture_ledger}\n"
     if input_data.feedback_prompt:
         base_content = f"<human_feedback>\n{input_data.feedback_prompt}\n</human_feedback>\n\n{base_content}"
+    if input_data.previous_draft:
+        base_content += f"\n\n<previous_draft>\n{input_data.previous_draft}\n</previous_draft>\n<instruction>\nYou MUST use the previous_draft as your baseline. Only apply changes requested in the human_feedback. Do not rewrite perfectly good sections unnecessarily.\n</instruction>"
         
     retries = 0
     max_retries = 2
+    tin, tout = 0, 0
     
     while retries <= max_retries:
         content = base_content
@@ -155,7 +161,7 @@ async def stream_dev_agent(input_data: DEVAgentInput, model_config=None, trace_c
             yield {"event": "progress", "data": {"step": "sandbox_gate", "token": f"\n\n🔄 Sandbox execution failed. Retrying (Attempt {retries}/{max_retries})...\n\n"}}
             
         msgs = [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=content)]
-        full, tin, tout = "", 0, 0
+        full = ""
         
         if hasattr(llm, "astream_events"):
             async for ev in llm.astream_events(msgs, version="v2", **({"config": cfg} if cfg else {})):
@@ -171,10 +177,11 @@ async def stream_dev_agent(input_data: DEVAgentInput, model_config=None, trace_c
         
         parsed = _parse(full)
         
-        report = run_sandbox_test(
+        report = await asyncio.to_thread(
+            run_sandbox_test,
             parsed.get("implementation_plan", ""),
             parsed.get("mock_code_diff", ""),
-            session_id=getattr(trace_context, "session_id", None),
+            session_id=getattr(trace_context, "session_id", None)
         )
         parsed["sandbox_report"] = report.get("report", "")
         if report.get("patch_branch"):

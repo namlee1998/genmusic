@@ -18,6 +18,18 @@ const gateBridge = require('./services/gateBridge');
 const taskWorker = require('./services/taskWorkerService');
 const SdlcWorkflowService = require('./services/SdlcWorkflowService');
 
+const Sentry = require('@sentry/node');
+const { nodeProfilingIntegration } = require('@sentry/profiling-node');
+
+Sentry.init({
+  dsn: process.env.SENTRY_DSN || '',
+  integrations: [
+    nodeProfilingIntegration(),
+  ],
+  tracesSampleRate: 1.0,
+  profilesSampleRate: 1.0,
+});
+
 const app = express();
 const PRISMA_CONNECT_TIMEOUT_MS = 5_000;
 
@@ -134,12 +146,18 @@ const startServer = async () => {
 const isProduction = () => NODE_ENV === 'production';
 
 process.on('unhandledRejection', (reason) => {
+  Sentry.captureException(reason);
   console.error('[Process] Unhandled promise rejection:', reason);
-  if (isProduction()) process.exit(1);
+  if (isProduction()) {
+    Sentry.flush(2000).then(() => process.exit(1));
+  }
 });
 process.on('uncaughtException', (err) => {
+  Sentry.captureException(err);
   console.error('[Process] Uncaught exception:', err);
-  if (isProduction()) process.exit(1);
+  if (isProduction()) {
+    Sentry.flush(2000).then(() => process.exit(1));
+  }
 });
 
 startServer();

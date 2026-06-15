@@ -259,9 +259,6 @@ export const submitReleaseDecision = (
   body: { decision_id: string; decision: 'APPROVE' | 'REJECT'; comment?: string },
 ) => api.post(`${BASE}/projects/${projectId}/release-decision`, body).then((r) => r.data);
 
-export const getAuditTrail = (projectId: string) =>
-  api.get(`${BASE}/audit-trail/${projectId}`).then((r) => r.data.data);
-
 // ── Repo-aware workflow start and live onGate approvals ────────────────────
 
 /**
@@ -501,4 +498,5 @@ export interface SystemHealthData {
 export const getProjectHealth = (): Promise<SystemHealthData> =>
   api.get(`${BASE}/dev/health`).then((r) => r.data.data);
 
-
+export const updateSystemSettings = (keys: Record<string, string>): Promise<{ status: string }> =>
+  api.post(`${BASE}/dev/settings/env`, { keys }).then((r) => r.data);
