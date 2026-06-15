@@ -10,6 +10,8 @@ import FinalApproval from './components/FinalApproval';
 import DetailModal from './components/DetailModal';
 import EmptyProjectState from './components/EmptyProjectState';
 import FeatureRequestChatbox from './components/FeatureRequestChatbox';
+import BottleneckAlert from './components/BottleneckAlert';
+import PipelineStepper from './components/PipelineStepper';
 
 export default function SdlcDashboard() {
   const {
@@ -95,6 +97,8 @@ export default function SdlcDashboard() {
 
       <div className="flex flex-col gap-5">
         {showChatbox && <FeatureRequestChatbox />}
+        <BottleneckAlert />
+        <PipelineStepper />
         <AgentTaskBoard setActiveDetailType={setActiveDetailType} />
         <GatePanel />
         <FinalApproval />

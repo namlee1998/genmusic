@@ -43,7 +43,7 @@ const addAudit = (actor: AuditEntry['actor'], action: string, status: AuditEntry
   const timestamp = new Date().toLocaleTimeString();
   const entry: AuditEntry = { timestamp, actor, action, status };
   mockState.auditLog = [entry, ...mockState.auditLog];
-  
+
   // Emit progress update via mock SSE
   if (activeSSEListener) {
     activeSSEListener.onMessage?.('progress', {
@@ -133,7 +133,7 @@ const startMockSimulation = (repoUrl: string, request: string) => {
       action: () => {
         mockState.status = 'awaiting_approval';
         mockState.pipelinePhases[0].status = 'gate_pending';
-        
+
         const poGate: GateItem = {
           id: 'gate-po-clarify',
           type: 'PO_CLARIFY',
@@ -147,7 +147,7 @@ const startMockSimulation = (repoUrl: string, request: string) => {
           },
           createdAt: new Date().toISOString()
         };
-        
+
         mockState.pendingGates = [poGate];
         addAudit('PO', '🔔 Human Gate Required: PO Clarification on requirements. Waiting for user input.', 'warning');
         emitGatePending(poGate);
@@ -162,7 +162,7 @@ const startMockSimulation = (repoUrl: string, request: string) => {
 const resumeSimulationAfterPO = () => {
   addAudit('SYSTEM', 'Handoff integrity verified. Initializing A2A contract between PO and developmental stages.');
   addAudit('A2A', '🔗 Handoff PO → UX contract verified. Hashes match, upstream commit hash: a8b9c10.');
-  
+
   if (mockState.routeType === 'FULLSTACK') {
     mockState.status = 'ux_running';
     mockState.pipelinePhases[1].status = 'running';
@@ -233,7 +233,7 @@ const resumeSimulationAfterDev = () => {
   setTimeout(() => {
     addAudit('SYSTEM', 'Docker Sandbox testing completed successfully. 12 / 12 tests passed.');
     addAudit('A2A', '🔗 Handoff DEV → QA contract verified. Hashes match, upstream commit hash: d9e8f7a.');
-    
+
     mockState.status = 'qa_running';
     mockState.pipelinePhases[3].status = 'running';
     addAudit('QA', 'QA Agent active. Running regression testing suite and auditing code coverage metrics...');
@@ -244,7 +244,7 @@ const resumeSimulationAfterDev = () => {
       mockState.pipelinePhases[2].duration = '2m 15s';
       mockState.pipelinePhases[3].status = 'completed';
       mockState.pipelinePhases[3].duration = '1m 05s';
-      
+
       mockState.qaResult = {
         status: 'passed',
         coverage: 94.2,
@@ -289,7 +289,7 @@ export const resolveGateMock = (gateId: string, action: 'approve' | 'reject', co
   if (gateIdx !== -1) {
     const gate = mockState.pendingGates[gateIdx];
     gate.status = action === 'approve' ? 'APPROVED' : 'REJECTED';
-    
+
     // Move to history
     mockState.gateHistory.push(gate);
     mockState.pendingGates.splice(gateIdx, 1);
@@ -322,7 +322,7 @@ export const resolveGateMock = (gateId: string, action: 'approve' | 'reject', co
 
 export const releaseDecisionMock = (projectId: string, action: 'approve' | 'reject'): Promise<{ success: boolean; branch?: string; finalMd?: string }> => {
   mockState.releaseStatus = action === 'approve' ? 'approved' : 'rejected';
-  
+
   if (action === 'approve') {
     mockState.status = 'idle'; // Finished
     addAudit('USER', 'Owner approved release deployment.');
@@ -348,7 +348,7 @@ export const subscribeWorkflowSSEMock = (
 ): AbortController => {
   const abort = new AbortController();
   activeSSEListener = handlers;
-  
+
   abort.signal.addEventListener('abort', () => {
     activeSSEListener = null;
   });

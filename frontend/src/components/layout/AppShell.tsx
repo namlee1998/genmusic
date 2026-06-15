@@ -9,6 +9,7 @@ import SdlcDashboard from '@/pages/SdlcDashboard';
 import AuditPage from '@/pages/SdlcDashboard/AuditPage';
 import HitlDashboard from '@/pages/SdlcDashboard/HitlDashboard';
 import DebugPage from '@/pages/SdlcDashboard/DebugPage';
+import AgentsPage from '@/pages/SdlcDashboard/AgentsPage';
 import { AppTopBar } from './AppTopBar';
 import { useSdlcStore } from '@/store/useSdlcStore';
 import * as sdlcApi from '@/services/api/sdlcApi';
@@ -37,9 +38,10 @@ export const AppShell: React.FC = () => {
   const isAuditRoute = location.pathname === '/sdlc/audit' || location.pathname === '/sdlc/audit/';
   const isHitlRoute = location.pathname === '/sdlc/hitl' || location.pathname === '/sdlc/hitl/';
   const isDebugRoute = location.pathname === '/sdlc/debug' || location.pathname === '/sdlc/debug/';
+  const isAgentsRoute = location.pathname === '/sdlc/agents' || location.pathname === '/sdlc/agents/';
   const isUnknownAppRoute = location.pathname.startsWith('/sdlc/')
     && location.pathname !== '/sdlc/' && location.pathname !== '/sdlc'
-    && !isAuditRoute && !isHitlRoute && !isDebugRoute;
+    && !isAuditRoute && !isHitlRoute && !isDebugRoute && !isAgentsRoute;
 
   const [panelCollapsed, setPanelCollapsed] = useState(() => {
     return localStorage.getItem('project-panel-collapsed') === 'true';
@@ -144,6 +146,10 @@ export const AppShell: React.FC = () => {
             ) : isDebugRoute ? (
               <div className="flex flex-col h-full bg-background">
                 <DebugPage />
+              </div>
+            ) : isAgentsRoute ? (
+              <div className="flex flex-col h-full bg-background">
+                <AgentsPage />
               </div>
             ) : (
               <div className="flex flex-col h-full bg-background">

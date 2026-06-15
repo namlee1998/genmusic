@@ -15,6 +15,7 @@ import {
   Search,
   Rocket,
   Bug,
+  Bot,
 } from 'lucide-react';
 
 export interface Project {
@@ -76,6 +77,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
   const isAuditActive = location.pathname.startsWith('/sdlc/audit');
   const isHitlActive = location.pathname.startsWith('/sdlc/hitl');
   const isDebugActive = location.pathname.startsWith('/sdlc/debug');
+  const isAgentsActive = location.pathname.startsWith('/sdlc/agents');
 
   return (
     <aside
@@ -372,6 +374,27 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
           >
             <History size={16} className={isAuditActive ? 'text-primary' : 'text-on-surface-variant/80'} />
             {!collapsed && <span>{t('dashboard.audit', 'Audit Trail')}</span>}
+          </button>
+
+          {/* Agents View */}
+          <button
+            onClick={() => activeProjectId && navigate('/sdlc/agents')}
+            disabled={!activeProjectId}
+            title={collapsed ? 'Agents View' : undefined}
+            className={`
+              w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs transition-all relative group
+              ${
+                !activeProjectId
+                  ? 'opacity-40 cursor-not-allowed text-on-surface-variant/50'
+                  : isAgentsActive
+                  ? 'bg-primary/10 border-l-[3px] border-primary text-primary font-bold shadow-[inset_0_0_10px_rgba(99,102,241,0.06)]'
+                  : 'text-on-surface-variant hover:bg-surface-variant hover:text-on-surface border-l-[3px] border-transparent'
+              }
+              ${collapsed ? 'justify-center border-l-0' : ''}
+            `}
+          >
+            <Bot size={16} className={isAgentsActive ? 'text-primary' : 'text-on-surface-variant/80'} />
+            {!collapsed && <span>Agents View</span>}
           </button>
 
 
