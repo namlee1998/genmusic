@@ -490,6 +490,7 @@ export interface SystemHealthData {
     OPENAI_API_KEY: boolean;
     ANTHROPIC_API_KEY: boolean;
     DEEPSEEK_API_KEY: boolean;
+    GOOGLE_API_KEY: boolean;
     DATABASE_URL: boolean;
   };
   timestamp: string;

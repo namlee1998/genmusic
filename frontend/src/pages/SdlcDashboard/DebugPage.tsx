@@ -48,6 +48,7 @@ export default function DebugPage() {
     OPENAI_API_KEY: '',
     ANTHROPIC_API_KEY: '',
     DEEPSEEK_API_KEY: '',
+    GOOGLE_API_KEY: '',
     E2B_API_KEY: ''
   });
 
@@ -79,6 +80,7 @@ export default function DebugPage() {
         OPENAI_API_KEY: '',
         ANTHROPIC_API_KEY: '',
         DEEPSEEK_API_KEY: '',
+        GOOGLE_API_KEY: '',
         E2B_API_KEY: ''
       });
       await fetchHealth();
@@ -327,6 +329,7 @@ export default function DebugPage() {
               { label: 'OpenAI API', key: 'OPENAI_API_KEY' },
               { label: 'Anthropic Key', key: 'ANTHROPIC_API_KEY' },
               { label: 'DeepSeek Key', key: 'DEEPSEEK_API_KEY' },
+              { label: 'Google Gemini', key: 'GOOGLE_API_KEY' },
               { label: 'Database URL', key: 'DATABASE_URL' }
             ].map((item) => {
               const loaded = healthData?.env[item.key as keyof typeof healthData.env] ?? false;
@@ -518,6 +521,7 @@ export default function DebugPage() {
                 { label: 'OpenAI API Key', key: 'OPENAI_API_KEY', ph: 'sk-...' },
                 { label: 'Anthropic API Key', key: 'ANTHROPIC_API_KEY', ph: 'sk-ant-...' },
                 { label: 'DeepSeek API Key', key: 'DEEPSEEK_API_KEY', ph: 'sk-...' },
+                { label: 'Google Gemini Key', key: 'GOOGLE_API_KEY', ph: 'AIza...' },
                 { label: 'E2B Sandbox API Key', key: 'E2B_API_KEY', ph: 'e2b_...' }
               ].map((field) => (
                 <div key={field.key} className="space-y-1.5">
