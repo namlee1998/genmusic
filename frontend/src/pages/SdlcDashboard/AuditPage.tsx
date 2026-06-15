@@ -62,8 +62,11 @@ export default function AuditPage() {
   }, [currentProjectId, projectId, setProjectId]);
 
   useEffect(() => {
-    refreshAudit();
-  }, [refreshAudit]);
+    if (projectId) {
+      fetchAuditTrail(projectId).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
 
   if (!projectId) return <EmptyProjectState />;
 

@@ -88,7 +88,6 @@ class SdlcController {
       const { project_id, request } = req.body;
       if (!project_id) return res.status(400).json({ status: 'error', message: 'project_id is required' });
       const files = req.files || [];
-      if (!files.length) return res.status(400).json({ status: 'error', message: 'No folder files were uploaded' });
 
       // `paths` carries each file's relative path (webkitRelativePath), aligned
       // by index with req.files (multer preserves field order).

@@ -185,8 +185,8 @@ function normalizeUploadPath(relativePath) {
  */
 async function prepareUploadedRepo({ projectId, files = [], request = '' }) {
   if (!projectId) throw new ApiError(400, 'projectId is required', 'REPO_OPEN_FAILED', 'REPO_OPEN');
-  if (!Array.isArray(files) || !files.length) {
-    throw new ApiError(400, 'No files were uploaded', 'REPO_OPEN_FAILED', 'REPO_OPEN');
+  if (!Array.isArray(files)) {
+    throw new ApiError(400, 'Files must be an array', 'REPO_OPEN_FAILED', 'REPO_OPEN');
   }
 
   const repoPath = repoPathFor(projectId);
@@ -202,17 +202,19 @@ async function prepareUploadedRepo({ projectId, files = [], request = '' }) {
     await fs.writeFile(dest, file.buffer);
     written += 1;
   }
-  if (!written) {
-    throw new ApiError(422, 'Uploaded folder had no usable files', 'REPO_OPEN_FAILED', 'REPO_OPEN');
-  }
+  // Even if no files were written (empty folder), we still initialize the repo.
 
   // Fresh repo: own identity, base branch `main`, one import commit.
   await git(['init'], repoPath);
   await git(['config', 'user.email', 'aifa-bot@local'], repoPath);
   await git(['config', 'user.name', 'AIFA Bot'], repoPath);
   await git(['checkout', '-B', 'main'], repoPath).catch(() => {});
-  await git(['add', '-A'], repoPath);
-  await git(['commit', '-m', 'aifa: imported uploaded folder'], repoPath).catch(() => {});
+  if (written > 0) {
+    await git(['add', '-A'], repoPath);
+    await git(['commit', '-m', 'aifa: imported uploaded folder'], repoPath).catch(() => {});
+  } else {
+    await git(['commit', '--allow-empty', '-m', 'aifa: initialized empty project'], repoPath).catch(() => {});
+  }
 
   logger.info('uploaded repo prepared', { projectId, repoPath, fileCount: written });
   return { repoPath, baseBranch: 'main', fileCount: written };

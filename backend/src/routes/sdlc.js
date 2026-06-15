@@ -14,7 +14,7 @@ const router = express.Router();
 // Folder upload ("Open folder" flow): in-memory, generous limits for a repo.
 const repoUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024, files: 8000 },
+  limits: { fileSize: 100 * 1024 * 1024, files: 8000 },
 });
 
 // ── IntentGate ─────────────────────────────────────────────────────────────

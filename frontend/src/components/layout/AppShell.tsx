@@ -68,7 +68,7 @@ export const AppShell: React.FC = () => {
     
     let finalRepoUrl = url;
     
-    if (files && files.length > 0 && import.meta.env.VITE_USE_MOCK !== 'true') {
+    if (files && import.meta.env.VITE_USE_MOCK !== 'true') {
       try {
         const uploadRes = await sdlcApi.uploadRepoFolder(res.data.project_id, files);
         if (uploadRes && uploadRes.repo_path) {
