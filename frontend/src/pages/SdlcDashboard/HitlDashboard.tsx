@@ -1,5 +1,4 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import {
   Gavel, ShieldAlert, HelpCircle, Activity,
@@ -81,7 +80,6 @@ function timeAgo(iso: string): string {
 /* ───── component ───── */
 
 export default function HitlDashboard() {
-  const { t } = useTranslation();
   const navigate = useNavigate();
   const store = useHitlStore();
 
@@ -130,8 +128,9 @@ export default function HitlDashboard() {
         setResults(prev => ({ ...prev, [id]: { ok: res.success, msg: action === 'approve' ? 'Gate approved — pipeline continues' : 'Gate rejected — pipeline halted' } }));
       }
       await fetchInterventions();
-    } catch (err: any) {
-      setResults(prev => ({ ...prev, [id]: { ok: false, msg: err?.message || 'Action failed' } }));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Action failed';
+      setResults(prev => ({ ...prev, [id]: { ok: false, msg: message } }));
     } finally {
       setActing(prev => ({ ...prev, [id]: false }));
     }

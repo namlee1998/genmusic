@@ -1,10 +1,8 @@
 import React from 'react';
-import { useTranslation } from 'react-i18next';
 import { useTheme } from '@/theme';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 
 export function AppTopBar() {
-  const { t } = useTranslation();
   const { resolvedMode, toggleMode } = useTheme();
 
   return (
@@ -13,18 +11,7 @@ export function AppTopBar() {
         <span className="font-headline font-bold text-sm text-on-surface tracking-tight">AIFA</span>
       </div>
 
-      <div className="flex items-center flex-1 max-w-xs mx-4">
-        <div className="relative w-full">
-          <span className="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm">
-            search
-          </span>
-          <input
-            type="text"
-            placeholder={t('layout.searchPlaceholder')}
-            className="w-full pl-8 pr-3 py-1 bg-surface-container-lowest border border-outline-variant rounded text-[11px] focus:border-secondary focus:outline-none focus:ring-1 focus:ring-secondary/40 placeholder:text-on-surface-variant/40"
-          />
-        </div>
-      </div>
+
 
       <div className="flex items-center gap-2">
         <LanguageSwitcher />
@@ -41,4 +28,3 @@ export function AppTopBar() {
     </header>
   );
 }
-

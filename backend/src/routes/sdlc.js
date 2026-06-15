@@ -7,6 +7,7 @@
 const express = require('express');
 const multer = require('multer');
 const SdlcController = require('../controllers/SdlcController');
+const authenticateDev = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
@@ -65,9 +66,30 @@ router.get('/projects/:project_id/metrics', SdlcController.getWorkflowMetrics.bi
 router.get('/projects/:project_id/artifacts', SdlcController.getProjectArtifacts.bind(SdlcController));
 router.get('/projects/:project_id/release-files/:file_name', SdlcController.downloadReleaseFile.bind(SdlcController));
 
+router.get('/dev/projects/:project_id/artifacts', authenticateDev, SdlcController.getProjectArtifacts.bind(SdlcController));
+
+// T9 - Get Project Health
+router.get('/dev/projects/:projectId/health', authenticateDev, SdlcController.getProjectHealth.bind(SdlcController));
+
+// Pending Tool Approvals
+router.get('/dev/projects/:projectId/pending-approvals', authenticateDev, SdlcController.getPendingToolApprovals.bind(SdlcController));
+
+// Tool Approval
+router.post('/dev/tasks/:taskId/approve-tool', authenticateDev, SdlcController.approveToolCall.bind(SdlcController));
+
+// T5 - Hitl Routes
+router.post('/dev/tasks/:task_id/hitl', authenticateDev, SdlcController.submitHitlDecision.bind(SdlcController));
+
 // ── Dev-only: demo scenario selector (MOCK_SCENARIO) ───────────────────────
 router.get('/dev/mock-scenario', SdlcController.getMockScenario.bind(SdlcController));
 router.get('/dev/health', SdlcController.getProjectHealth.bind(SdlcController));
+router.post('/dev/settings/env', SdlcController.updateEnvSettings.bind(SdlcController));
+
+// ── Demo Board ───────────────────────────────────────────────────────────
+router.post('/demo/seed-board', SdlcController.seedDemoBoard.bind(SdlcController));
+router.get('/demo/board', SdlcController.getDemoBoard.bind(SdlcController));
+router.get('/demo/flow/:project_id/ux-doc', SdlcController.getDemoUxDoc.bind(SdlcController));
+router.post('/demo/flow/:project_id/retry', SdlcController.retryDemoFlow.bind(SdlcController));
 
 // ── Backlog / Kanban ──────────────────────────────────────────────────────
 router.get('/projects/:project_id/backlog', SdlcController.getBacklogs.bind(SdlcController));

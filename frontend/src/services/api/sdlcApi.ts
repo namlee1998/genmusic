@@ -224,10 +224,44 @@ export interface GateDecisionPayload {
   comment?: string;
 }
 
-const submitGateDecision = (taskId: string, payload: GateDecisionPayload) =>
+export const submitGateDecision = (taskId: string, payload: GateDecisionPayload) =>
   api.post(`${BASE}/tasks/${taskId}/gate-decision`, payload).then((r) => r.data);
 
 // Structured stage-review decision: idempotent and optimistic-locked.
+export const submitHitlDecision = async (
+  taskId: string,
+  payload: {
+    decision_id: string;
+    base_output_version: number;
+    action: string;
+    payload?: string;
+    comment?: string;
+  }
+) => {
+  const { data } = await api.post(`/dev/tasks/${taskId}/hitl`, payload);
+  return data;
+};
+
+/**
+ * Approve or reject a DEV Agent tool execution
+ */
+export const approveToolCall = async (
+  taskId: string,
+  approved: boolean,
+  feedback: string
+) => {
+  const { data } = await api.post(`/dev/tasks/${taskId}/approve-tool`, {
+    approved,
+    feedback,
+  });
+  return data;
+};
+
+export const getPendingToolApprovals = async (projectId: string) => {
+  const { data } = await api.get(`/dev/projects/${projectId}/pending-approvals`);
+  return data;
+};
+
 export interface StructuredDecisionBody {
   decision_id: string;
   base_output_version: number;
@@ -243,21 +277,21 @@ export interface StructuredDecisionBody {
   };
 }
 
-const submitStructuredDecision = (taskId: string, body: StructuredDecisionBody) =>
+export const submitStructuredDecision = (taskId: string, body: StructuredDecisionBody) =>
   api.post(`${BASE}/tasks/${taskId}/decision`, body).then((r) => r.data);
 
 // ── Status ────────────────────────────────────────────────────────────────
 
-const getSdlcTaskStatus = (taskId: string) =>
+export const getSdlcTaskStatus = (taskId: string) =>
   api.get(`${BASE}/tasks/${taskId}`).then((r) => r.data.data);
 
-const getFinalReviewPacket = (projectId: string) =>
+export const getFinalReviewPacket = (projectId: string) =>
   api.get(`${BASE}/final-review-packet/${projectId}`).then((r) => r.data.data);
-const submitReleaseDecision = (
+
+export const submitReleaseDecision = (
   projectId: string,
   body: { decision_id: string; decision: 'APPROVE' | 'REJECT'; comment?: string },
 ) => api.post(`${BASE}/projects/${projectId}/release-decision`, body).then((r) => r.data);
-
 
 // ── Repo-aware workflow start and live onGate approvals ────────────────────
 
@@ -266,7 +300,7 @@ const submitReleaseDecision = (
  * Pass `repoUrl` to clone a remote repo, or `repoPath` to use an already-cloned
  * local folder ("Open folder" flow). Both are optional — omit for a repo-less run.
  */
-const runWorkflow = (
+export const runWorkflow = (
   projectId: string,
   request: string,
   repoUrl?: string,
@@ -280,6 +314,13 @@ const runWorkflow = (
   repo_path: repoPath || undefined,
   branch,
 }).then((r) => r.data);
+
+/**
+ * Upload a whole local folder (chosen anywhere on the user's machine) as the
+ * workflow repo. Browsers can't expose an absolute path, so we stream the files
+ * with their relative paths; the backend writes them into the project workspace
+ * and git-inits a repo, returning the server-side `repo_path`.
+ */
 export const uploadRepoFolder = (
   projectId: string,
   files: Array<File & { relativePath?: string }>,
@@ -321,12 +362,12 @@ export interface PendingGate {
   createdAt?: string;
 }
 
-const resolveApproval = (
+export const resolveApproval = (
   approvalId: string,
   body: { action?: 'approve' | 'reject'; comment?: string; answers?: string[] | Record<string, string> },
 ) => api.post(`${BASE}/approvals/${approvalId}`, body).then((r) => r.data.data);
 
-const downloadReleaseFile = (projectId: string, fileName: 'final.md' | 'qa-report.md') =>
+export const downloadReleaseFile = (projectId: string, fileName: 'final.md' | 'qa-report.md') =>
   api.get(`${BASE}/projects/${projectId}/release-files/${fileName}`, { responseType: 'blob' })
     .then((r) => r.data as Blob);
 
@@ -435,25 +476,25 @@ export interface WorkflowTimeline {
 // misleading "timeout exceeded" banner while a real run is provisioning.
 const BOARD_TIMEOUT_MS = 120_000;
 
-const seedDemoBoard = (
+export const seedDemoBoard = (
   reset = false,
   sourceRepoPath?: string,
   mode: 'three_flow' | 'real_single' = 'three_flow',
 ): Promise<DemoBoard> =>
   api.post(`${BASE}/demo/seed-board`, { reset, sourceRepoPath, mode }, { timeout: BOARD_TIMEOUT_MS }).then((r) => r.data.data);
 
-const getDemoBoard = (): Promise<DemoBoard> =>
+export const getDemoBoard = (): Promise<DemoBoard> =>
   api.get(`${BASE}/demo/board`, { timeout: BOARD_TIMEOUT_MS }).then((r) => r.data.data);
 
 export interface UxDoc { taskId: string; fileName: string; markdown: string; }
 
-const getDemoUxDoc = (projectId: string): Promise<UxDoc | null> =>
+export const getDemoUxDoc = (projectId: string): Promise<UxDoc | null> =>
   api.get(`${BASE}/demo/flow/${projectId}/ux-doc`).then((r) => r.data.data);
 
-const retryDemoFlow = (projectId: string): Promise<{ retried: boolean; stage?: string; reason?: string }> =>
+export const retryDemoFlow = (projectId: string): Promise<{ retried: boolean; stage?: string; reason?: string }> =>
   api.post(`${BASE}/demo/flow/${projectId}/retry`, {}, { timeout: BOARD_TIMEOUT_MS }).then((r) => r.data.data);
 
-const getWorkflowTimeline = (projectId: string): Promise<WorkflowTimeline> =>
+export const getWorkflowTimeline = (projectId: string): Promise<WorkflowTimeline> =>
   api.get(`${BASE}/workflow/${projectId}/timeline`).then((r) => r.data.data);
 
 // ── Global HITL Interventions ──
@@ -483,12 +524,19 @@ export interface SystemHealthData {
     OPENAI_API_KEY: boolean;
     ANTHROPIC_API_KEY: boolean;
     DEEPSEEK_API_KEY: boolean;
+    GOOGLE_API_KEY: boolean;
     DATABASE_URL: boolean;
+    AUTO_APPROVE_TOOLS?: boolean;
   };
   timestamp: string;
 }
 
-export const getProjectHealth = (): Promise<SystemHealthData> =>
-  api.get(`${BASE}/dev/health`).then((r) => r.data.data);
+export const getProjectHealth = (projectId?: string): Promise<SystemHealthData> => {
+  void projectId;
+  return api.get(`${BASE}/dev/health`).then((r) => r.data.data);
+};
 
+export const updateSystemSettings = (keys: Record<string, string>): Promise<{ status: string }> =>
+  api.post(`${BASE}/dev/settings/env`, { keys }).then((r) => r.data);
 
+export const updateEnvSettings = updateSystemSettings;

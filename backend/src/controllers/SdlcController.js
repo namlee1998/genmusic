@@ -39,7 +39,13 @@ class SdlcController {
 
   async runPOAgent(req, res, next) {
     try {
-      const { project_id, source_task_id, feature_request, feedback_prompt, backlog_id, repo_url, repo_path, branch, request } = req.body;
+      let { project_id, source_task_id, feature_request, feedback_prompt, backlog_id, repo_url, repo_path, branch, request } = req.body;
+      
+      // Auto-map `request` to `feature_request` to conform with API Contract if missing
+      if (request && !feature_request) {
+        feature_request = { title: request, description: request };
+      }
+
       if (!source_task_id && (!project_id || !feature_request?.title)) {
         return res.status(400).json({
           status: 'error',
@@ -152,10 +158,18 @@ class SdlcController {
 
   // ─── HITL Gate ───────────────────────────────────────────────────────────
 
+  async submitHitlDecision(req, res, next) {
+    return this.submitGateDecision(req, res, next);
+  }
+
   async submitGateDecision(req, res, next) {
     try {
       const { task_id } = req.params;
       const { decision, comment } = req.body;
+
+      if (!['approve', 'reject', 'request_changes'].includes(decision?.toLowerCase())) {
+        return res.status(400).json({ status: 'error', message: "Invalid decision. Must be 'approve', 'reject', or 'request_changes'." });
+      }
 
       const result = await SdlcWorkflowService.submitGateDecision({
         taskId: task_id,
@@ -183,6 +197,10 @@ class SdlcController {
     try {
       const { task_id } = req.params;
       const { decision_id, base_output_version, action, payload, comment } = req.body;
+
+      if (!['approve', 'reject', 'edit_approve'].includes(action?.toLowerCase())) {
+        return res.status(400).json({ status: 'error', message: "Invalid action. Must be 'approve', 'reject', or 'edit_approve'." });
+      }
 
       const result = await SdlcWorkflowService.submitStructuredDecision({
         taskId: task_id,
@@ -218,6 +236,10 @@ class SdlcController {
     try {
       const { approval_id } = req.params;
       const { action, comment, answers } = req.body || {};
+      
+      if (action && !['approve', 'reject'].includes(action?.toLowerCase())) {
+        return res.status(400).json({ status: 'error', message: "Invalid action. Must be 'approve' or 'reject'." });
+      }
       const result = await SdlcWorkflowService.resolveApproval({
         approvalId: approval_id,
         action,
@@ -585,12 +607,45 @@ class SdlcController {
     } catch (err) { next(err); }
   }
 
+  async getProjectHealth(req, res, next) {
+    try {
+      const { projectId } = req.params;
+      const data = await SdlcWorkflowService.getProjectHealth(projectId);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getPendingToolApprovals(req, res, next) {
+    try {
+      const { projectId } = req.params;
+      const data = await SdlcWorkflowService.getPendingToolApprovals(projectId);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
   async getProjectArtifacts(req, res, next) {
     try {
       const { project_id } = req.params;
-      const result = await SdlcWorkflowService.getProjectArtifacts(project_id, req.user);
-      return res.json({ status: 'success', data: result });
-    } catch (err) { next(err); }
+      const data = await SdlcWorkflowService.getProjectArtifacts(project_id, req.user);
+      res.json(data);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async approveToolCall(req, res, next) {
+    try {
+      const { taskId } = req.params;
+      const { approved, feedback } = req.body;
+      const result = await SdlcWorkflowService.resumeTask(taskId, approved, feedback);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
   }
 
   async getTaskEvents(req, res, next) {
@@ -630,6 +685,43 @@ class SdlcController {
     });
   }
 
+  // ─── Demo Board API ──────────────────────────────────────────────────────
+
+  async seedDemoBoard(req, res, next) {
+    try {
+      const { reset, sourceRepoPath, mode } = req.body;
+      const demoBoardService = require('../services/demoBoardService');
+      const board = await demoBoardService.seedDemoBoard(reset, sourceRepoPath, mode);
+      return res.json({ status: 'success', data: board });
+    } catch (err) { next(err); }
+  }
+
+  async getDemoBoard(req, res, next) {
+    try {
+      const demoBoardService = require('../services/demoBoardService');
+      const board = await demoBoardService.getDemoBoard(req.user);
+      return res.json({ status: 'success', data: board });
+    } catch (err) { next(err); }
+  }
+
+  async getDemoUxDoc(req, res, next) {
+    try {
+      const { project_id } = req.params;
+      const demoBoardService = require('../services/demoBoardService');
+      const doc = await demoBoardService.getDemoUxDoc(project_id, req.user);
+      return res.json({ status: 'success', data: doc });
+    } catch (err) { next(err); }
+  }
+
+  async retryDemoFlow(req, res, next) {
+    try {
+      const { project_id } = req.params;
+      const demoBoardService = require('../services/demoBoardService');
+      const result = await demoBoardService.retryDemoFlow(project_id, req.user);
+      return res.json({ status: 'success', data: result });
+    } catch (err) { next(err); }
+  }
+
   // ─── Cancel a running/awaiting task ──────────────────────────────────────
 
   async cancelTask(req, res, next) {
@@ -648,6 +740,17 @@ class SdlcController {
     try {
       const result = await SdlcWorkflowService.getProjectHealth();
       return res.json({ status: 'success', data: result });
+    } catch (err) { next(err); }
+  }
+
+  async updateEnvSettings(req, res, next) {
+    try {
+      const { keys } = req.body;
+      if (!keys || typeof keys !== 'object') {
+        return res.status(400).json({ status: 'error', message: 'Invalid keys object' });
+      }
+      const result = await SdlcWorkflowService.updateEnvSettings(keys);
+      return res.json(result);
     } catch (err) { next(err); }
   }
 

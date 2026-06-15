@@ -12,7 +12,7 @@ export default function FeatureRequestChatbox({ onClose }: { onClose?: () => voi
   const projects = useAppStore((s) => s.projects) || [];
   const currentProject = projects.find((p) => p && p.project_id === currentProjectId);
 
-  const { startPipeline, status = 'idle', isLoading = false } = useSdlcStore() || {};
+  const { startPipeline, isLoading = false } = useSdlcStore() || {};
 
   const [requestText, setRequestText] = useState('');
 

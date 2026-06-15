@@ -1,15 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, lazy, Suspense } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { AppSidebar } from './AppSidebar';
 import { useApiActions } from '@/hooks/useApiActions';
 import { useAppStore } from '@/store';
 import { NotFoundPage } from '@/pages/NotFound';
-import SdlcDashboard from '@/pages/SdlcDashboard';
-import AuditPage from '@/pages/SdlcDashboard/AuditPage';
-import HitlDashboard from '@/pages/SdlcDashboard/HitlDashboard';
-import DebugPage from '@/pages/SdlcDashboard/DebugPage';
-import AgentsPage from '@/pages/SdlcDashboard/AgentsPage';
+const SdlcDashboard = lazy(() => import('@/pages/SdlcDashboard'));
+const AuditPage = lazy(() => import('@/pages/SdlcDashboard/AuditPage'));
+const HitlDashboard = lazy(() => import('@/pages/SdlcDashboard/HitlDashboard'));
+const DebugPage = lazy(() => import('@/pages/SdlcDashboard/DebugPage'));
+const AgentsPage = lazy(() => import('@/pages/SdlcDashboard/AgentsPage'));
 import { AppTopBar } from './AppTopBar';
 import { useSdlcStore } from '@/store/useSdlcStore';
 import * as sdlcApi from '@/services/api/sdlcApi';
@@ -134,33 +134,35 @@ export const AppShell: React.FC = () => {
 
         <main className="flex-1 flex flex-col min-w-0 min-h-0">
           <div className="flex-1 overflow-y-auto">
-            {isUnknownAppRoute ? (
-              <NotFoundPage mode="panel" />
-            ) : isAuditRoute ? (
-              <div className="flex flex-col h-full bg-background">
-                <AuditPage />
-              </div>
-            ) : isDefaultRoute ? (
-              <div className="flex flex-col h-full bg-background">
-                <HitlDashboard />
-              </div>
-            ) : isBuildRoute ? (
-              <div className="flex flex-col h-full bg-background">
-                <SdlcDashboard />
-              </div>
-            ) : isDebugRoute ? (
-              <div className="flex flex-col h-full bg-background">
-                <DebugPage />
-              </div>
-            ) : isAgentsRoute ? (
-              <div className="flex flex-col h-full bg-background">
-                <AgentsPage />
-              </div>
-            ) : (
-              <div className="flex flex-col h-full bg-background">
-                <SdlcDashboard />
-              </div>
-            )}
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-slate-500 text-sm animate-pulse">Loading module...</div>}>
+              {isUnknownAppRoute ? (
+                <NotFoundPage mode="panel" />
+              ) : isAuditRoute ? (
+                <div className="flex flex-col h-full bg-background">
+                  <AuditPage />
+                </div>
+              ) : isDefaultRoute ? (
+                <div className="flex flex-col h-full bg-background">
+                  <HitlDashboard />
+                </div>
+              ) : isBuildRoute ? (
+                <div className="flex flex-col h-full bg-background">
+                  <SdlcDashboard />
+                </div>
+              ) : isDebugRoute ? (
+                <div className="flex flex-col h-full bg-background">
+                  <DebugPage />
+                </div>
+              ) : isAgentsRoute ? (
+                <div className="flex flex-col h-full bg-background">
+                  <AgentsPage />
+                </div>
+              ) : (
+                <div className="flex flex-col h-full bg-background">
+                  <SdlcDashboard />
+                </div>
+              )}
+            </Suspense>
           </div>
         </main>
       </div>

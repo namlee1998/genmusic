@@ -64,6 +64,8 @@ async def run_ux_agent(
         user_content += f"Acceptance Criteria:\n" + "\n".join([f"- {ac}" for ac in input_data.acceptance_criteria])
     if input_data.feedback_prompt:
         user_content = f"<human_feedback>\n{input_data.feedback_prompt}\n</human_feedback>\n\n{user_content}"
+    if input_data.previous_draft:
+        user_content += f"\n\n<previous_draft>\n{input_data.previous_draft}\n</previous_draft>\n<instruction>\nYou MUST use the previous_draft as your baseline. Only apply changes requested in the human_feedback. Do not rewrite perfectly good sections unnecessarily.\n</instruction>"
 
     messages = [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=user_content)]
     config = trace_context.langchain_config("ux_agent") if trace_context else None
@@ -93,6 +95,8 @@ async def stream_ux_agent(
         user_content += f"User Stories:\n{stories_text}\n"
     if input_data.feedback_prompt:
         user_content = f"<human_feedback>\n{input_data.feedback_prompt}\n</human_feedback>\n\n{user_content}"
+    if input_data.previous_draft:
+        user_content += f"\n\n<previous_draft>\n{input_data.previous_draft}\n</previous_draft>\n<instruction>\nYou MUST use the previous_draft as your baseline. Only apply changes requested in the human_feedback. Do not rewrite perfectly good sections unnecessarily.\n</instruction>"
 
     messages = [SystemMessage(content=SYSTEM_PROMPT), HumanMessage(content=user_content)]
     config = trace_context.langchain_config("ux_agent") if trace_context else None

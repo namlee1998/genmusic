@@ -17,9 +17,35 @@ const { requestContextMiddleware } = require('./middleware/requestContext');
 const gateBridge = require('./services/gateBridge');
 const taskWorker = require('./services/taskWorkerService');
 const SdlcWorkflowService = require('./services/SdlcWorkflowService');
+const socketService = require('./services/socketService');
+
+const Sentry = require('@sentry/node');
+const { nodeProfilingIntegration } = require('@sentry/profiling-node');
+
+Sentry.init({
+  dsn: process.env.SENTRY_DSN || '',
+  integrations: [
+    nodeProfilingIntegration(),
+  ],
+  tracesSampleRate: 1.0,
+  profilesSampleRate: 1.0,
+});
 
 const app = express();
 const PRISMA_CONNECT_TIMEOUT_MS = 5_000;
+const originalAppListen = app.listen.bind(app);
+
+if (NODE_ENV === 'test') {
+  app.listen = (...args) => {
+    const nextArgs = [...args];
+    if (typeof nextArgs[0] === 'number' && nextArgs.length === 1) {
+      nextArgs.splice(1, 0, '127.0.0.1');
+    } else if (typeof nextArgs[0] === 'number' && typeof nextArgs[1] === 'function') {
+      nextArgs.splice(1, 0, '127.0.0.1');
+    }
+    return originalAppListen(...nextArgs);
+  };
+}
 
 const connectPrismaWithTimeout = () => Promise.race([
   prisma.$connect(),
@@ -44,7 +70,7 @@ if (NODE_ENV !== 'production') {
   allowedOrigins.add('http://localhost:3000');
 }
 
-app.use(cors({
+const corsConfig = {
   origin(origin, callback) {
     const isLocalDevOrigin = NODE_ENV !== 'production'
       && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin || '');
@@ -54,7 +80,9 @@ app.use(cors({
     return callback(new Error(`Origin ${origin} is not allowed by CORS`));
   },
   credentials: true,
-}));
+};
+
+app.use(cors(corsConfig));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -113,12 +141,14 @@ const startServer = async () => {
     }
 
     // Start listening
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       console.log(`[Server] Backend running on http://localhost:${PORT}`);
       console.log(`[Server] Environment: ${NODE_ENV}`);
       console.log(`[Server] Agents URL: ${process.env.AGENTS_BASE_URL || 'http://127.0.0.1:8001'}`);
       startBatchJobs();
     });
+    
+    socketService.init(server, corsConfig);
   } catch (error) {
     console.error('[Server] Failed to start:', error);
     process.exit(1);
@@ -134,14 +164,22 @@ const startServer = async () => {
 const isProduction = () => NODE_ENV === 'production';
 
 process.on('unhandledRejection', (reason) => {
+  Sentry.captureException(reason);
   console.error('[Process] Unhandled promise rejection:', reason);
-  if (isProduction()) process.exit(1);
+  if (isProduction()) {
+    Sentry.flush(2000).then(() => process.exit(1));
+  }
 });
 process.on('uncaughtException', (err) => {
+  Sentry.captureException(err);
   console.error('[Process] Uncaught exception:', err);
-  if (isProduction()) process.exit(1);
+  if (isProduction()) {
+    Sentry.flush(2000).then(() => process.exit(1));
+  }
 });
 
-startServer();
+if (require.main === module) {
+  startServer();
+}
 
 module.exports = app;
