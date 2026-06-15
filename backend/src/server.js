@@ -57,7 +57,7 @@ if (NODE_ENV !== 'production') {
   allowedOrigins.add('http://localhost:3000');
 }
 
-app.use(cors({
+const corsConfig = {
   origin(origin, callback) {
     const isLocalDevOrigin = NODE_ENV !== 'production'
       && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin || '');
@@ -67,7 +67,9 @@ app.use(cors({
     return callback(new Error(`Origin ${origin} is not allowed by CORS`));
   },
   credentials: true,
-}));
+};
+
+app.use(cors(corsConfig));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true }));
 

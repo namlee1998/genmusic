@@ -26,7 +26,6 @@ import {
   RefreshCw,
   Terminal,
   AlertCircle,
-  AlertCircle,
   FileCode,
   ToggleLeft,
   ToggleRight
@@ -107,7 +106,7 @@ export default function AgentsPage() {
   useEffect(() => {
     if (projectId) {
       sdlcApi.getProjectHealth(projectId).then(res => {
-        if (res.data?.AUTO_APPROVE_TOOLS) {
+        if (res.env?.AUTO_APPROVE_TOOLS) {
           setAutoApproveTools(true);
         }
       }).catch(() => {});
@@ -118,9 +117,7 @@ export default function AgentsPage() {
     const newValue = !autoApproveTools;
     setAutoApproveTools(newValue);
     try {
-      await sdlcApi.updateEnvSettings({
-        envs: { AUTO_APPROVE_TOOLS: newValue ? 'true' : 'false' }
-      });
+      await sdlcApi.updateEnvSettings({ AUTO_APPROVE_TOOLS: newValue ? 'true' : 'false' });
     } catch (err) {
       console.error('Failed to update AUTO_APPROVE_TOOLS', err);
       setAutoApproveTools(!newValue); // Revert on failure

@@ -7,6 +7,7 @@
 const express = require('express');
 const multer = require('multer');
 const SdlcController = require('../controllers/SdlcController');
+const authenticateDev = require('../middleware/authMiddleware');
 
 const router = express.Router();
 

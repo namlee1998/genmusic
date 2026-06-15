@@ -530,8 +530,10 @@ export interface SystemHealthData {
   timestamp: string;
 }
 
-export const getProjectHealth = (): Promise<SystemHealthData> =>
+export const getProjectHealth = (_projectId?: string): Promise<SystemHealthData> =>
   api.get(`${BASE}/dev/health`).then((r) => r.data.data);
 
 export const updateSystemSettings = (keys: Record<string, string>): Promise<{ status: string }> =>
   api.post(`${BASE}/dev/settings/env`, { keys }).then((r) => r.data);
+
+export const updateEnvSettings = updateSystemSettings;

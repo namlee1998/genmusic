@@ -158,6 +158,10 @@ class SdlcController {
 
   // ─── HITL Gate ───────────────────────────────────────────────────────────
 
+  async submitHitlDecision(req, res, next) {
+    return this.submitGateDecision(req, res, next);
+  }
+
   async submitGateDecision(req, res, next) {
     try {
       const { task_id } = req.params;
@@ -618,6 +622,16 @@ class SdlcController {
       const { projectId } = req.params;
       const data = await SdlcWorkflowService.getPendingToolApprovals(projectId);
       res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getProjectArtifacts(req, res, next) {
+    try {
+      const { project_id } = req.params;
+      const data = await SdlcWorkflowService.getProjectArtifacts(project_id, req.user);
+      res.json(data);
     } catch (error) {
       next(error);
     }
