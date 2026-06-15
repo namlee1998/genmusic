@@ -33,6 +33,19 @@ Sentry.init({
 
 const app = express();
 const PRISMA_CONNECT_TIMEOUT_MS = 5_000;
+const originalAppListen = app.listen.bind(app);
+
+if (NODE_ENV === 'test') {
+  app.listen = (...args) => {
+    const nextArgs = [...args];
+    if (typeof nextArgs[0] === 'number' && nextArgs.length === 1) {
+      nextArgs.splice(1, 0, '127.0.0.1');
+    } else if (typeof nextArgs[0] === 'number' && typeof nextArgs[1] === 'function') {
+      nextArgs.splice(1, 0, '127.0.0.1');
+    }
+    return originalAppListen(...nextArgs);
+  };
+}
 
 const connectPrismaWithTimeout = () => Promise.race([
   prisma.$connect(),
@@ -165,6 +178,8 @@ process.on('uncaughtException', (err) => {
   }
 });
 
-startServer();
+if (require.main === module) {
+  startServer();
+}
 
 module.exports = app;

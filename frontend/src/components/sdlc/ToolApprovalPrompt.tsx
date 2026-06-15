@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { approveToolCall, getPendingToolApprovals } from '@/services/api/sdlcApi';
 import { useSdlcStore } from '@/store/useSdlcStore';
@@ -9,13 +9,19 @@ interface ToolApprovalPromptProps {
 
 interface PendingApproval {
   taskId: string;
-  data: any;
+  data: {
+    tool_calls?: Array<{
+      name: string;
+      args: Record<string, unknown>;
+    }>;
+    [key: string]: unknown;
+  };
 }
 
 export const ToolApprovalPrompt: React.FC<ToolApprovalPromptProps> = ({ onApprovalComplete }) => {
-  const [socket, setSocket] = useState<Socket | null>(null);
   const [pendingQueue, setPendingQueue] = useState<PendingApproval[]>([]);
   const [feedback, setFeedback] = useState('');
+  const socketRef = useRef<Socket | null>(null);
   const projectId = useSdlcStore(state => state.projectId);
 
   useEffect(() => {
@@ -42,9 +48,10 @@ export const ToolApprovalPrompt: React.FC<ToolApprovalPromptProps> = ({ onApprov
       });
     });
 
-    setSocket(newSocket);
+    socketRef.current = newSocket;
 
     return () => {
+      socketRef.current = null;
       newSocket.disconnect();
     };
   }, []);
@@ -94,7 +101,7 @@ export const ToolApprovalPrompt: React.FC<ToolApprovalPromptProps> = ({ onApprov
           </p>
 
           <div className="bg-black rounded-lg p-4 font-mono text-sm text-green-400 overflow-x-auto border border-gray-700">
-            {currentPending.data?.tool_calls?.map((tc: any, i: number) => (
+            {currentPending.data?.tool_calls?.map((tc, i) => (
               <div key={i} className="mb-4 last:mb-0">
                 <div className="text-purple-400 mb-1">▶ Tool: {tc.name}</div>
                 <div className="pl-4 text-gray-300 whitespace-pre-wrap">

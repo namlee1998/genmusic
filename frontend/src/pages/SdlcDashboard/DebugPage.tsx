@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { useTranslation } from 'react-i18next';
 import { 
   Bug, 
   Activity, 
@@ -29,8 +28,6 @@ interface DiagnosisResult {
 }
 
 export default function DebugPage() {
-  const { t } = useTranslation();
-  
   // Health states
   const [healthData, setHealthData] = useState<SystemHealthData | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
@@ -52,23 +49,26 @@ export default function DebugPage() {
     E2B_API_KEY: ''
   });
 
-  useEffect(() => {
-    fetchHealth();
-  }, []);
-
-  const fetchHealth = async () => {
+  async function fetchHealth() {
     setHealthLoading(true);
     setHealthError(null);
     try {
       const data = await getProjectHealth();
       setHealthData(data);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to load project health:', err);
-      setHealthError(err.message || 'Failed to connect to backend server health API');
+      setHealthError(err instanceof Error ? err.message : 'Failed to connect to backend server health API');
     } finally {
       setHealthLoading(false);
     }
-  };
+  }
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void fetchHealth();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,9 +84,9 @@ export default function DebugPage() {
         E2B_API_KEY: ''
       });
       await fetchHealth();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to save settings:', err);
-      alert('Failed to save settings: ' + err.message);
+      alert(`Failed to save settings: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setSettingsSaving(false);
     }
@@ -487,7 +487,7 @@ export default function DebugPage() {
               <Bug size={32} className="stroke-[1.25] mb-2" />
               <h3 className="text-xs font-bold text-on-surface-variant/70">Awaiting Log Submission</h3>
               <p className="text-[10px] max-w-xs mt-1 leading-relaxed">
-                Paste compiler errors or logs, click "Run Diagnostic", and the system will locate source files and recommend immediate fixes.
+                Paste compiler errors or logs, click &quot;Run Diagnostic&quot;, and the system will locate source files and recommend immediate fixes.
               </p>
             </div>
           )}

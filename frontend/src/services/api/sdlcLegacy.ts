@@ -8,14 +8,14 @@ import {
 const BASE = '/sdlc';
 
 // Backward-compatibility adapters for existing components if any
-export const startFromRepo = (projectId: string, repoUrl: string): Promise<any> => {
+export const startFromRepo = (projectId: string, repoUrl: string): Promise<unknown> => {
   return startPipeline(projectId, repoUrl, 'add google login').then(res => ({
     projectId: workflowIdToProjectId(res.workflowId),
     status: res.status
   }));
 };
 
-export const getPipelineStatusLegacy = (projectId: string): Promise<any> => {
+export const getPipelineStatusLegacy = (projectId: string): Promise<unknown> => {
   const workflowId = projectIdToWorkflowId(projectId);
   return getPipelineStatus(workflowId).then(res => ({
     projectId,
@@ -35,7 +35,7 @@ export const getPipelineStatusLegacy = (projectId: string): Promise<any> => {
   }));
 };
 
-export const approveItemLegacy = (projectId: string, approvalId: string, action: 'approve' | 'reject', comment?: string): Promise<any> => {
+export const approveItemLegacy = (projectId: string, approvalId: string, action: 'approve' | 'reject', comment?: string): Promise<unknown> => {
   return resolveGate(approvalId, action, comment);
 };
 
@@ -78,17 +78,17 @@ export interface FeatureRequest {
   constraints?: string[];
 }
 
-export const getWorkflowStatus = (projectId: string): Promise<any> =>
+export const getWorkflowStatus = (projectId: string): Promise<unknown> =>
   api.get(`${BASE}/workflow-status`, { params: { project_id: projectId } }).then((r) => r.data.data);
 
-export const getAuditTrail = (projectId: string): Promise<any> =>
+export const getAuditTrail = (projectId: string): Promise<unknown> =>
   api.get(`${BASE}/audit-trail/${projectId}`).then((r) => r.data.data);
 
-export const getWorkflowMetrics = (projectId: string): Promise<any> =>
+export const getWorkflowMetrics = (projectId: string): Promise<unknown> =>
   api.get(`${BASE}/projects/${projectId}/metrics`).then((r) => r.data.data);
 
-export const getProjectArtifacts = (projectId: string): Promise<any> =>
+export const getProjectArtifacts = (projectId: string): Promise<unknown> =>
   api.get(`${BASE}/projects/${projectId}/artifacts`).then((r) => r.data.data);
 
-export const getBacklogs = (projectId: string): Promise<any> =>
+export const getBacklogs = (projectId: string): Promise<unknown> =>
   api.get(`${BASE}/projects/${projectId}/backlog`).then((r) => r.data.data);

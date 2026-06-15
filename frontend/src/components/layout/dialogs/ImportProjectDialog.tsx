@@ -167,9 +167,12 @@ export function ImportProjectDialog({
                 style={{ display: 'none' }}
                 onChange={handleFolderSelect}
                 {...({
-                  webkitdirectory: "",
-                  directory: "",
-                } as any)}
+                  webkitdirectory: '',
+                  directory: '',
+                } as React.InputHTMLAttributes<HTMLInputElement> & {
+                  webkitdirectory?: string;
+                  directory?: string;
+                })}
               />
               <button
                 type="button"

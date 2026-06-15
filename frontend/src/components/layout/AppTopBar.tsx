@@ -1,10 +1,8 @@
 import React from 'react';
-import { useTranslation } from 'react-i18next';
 import { useTheme } from '@/theme';
 import { LanguageSwitcher } from '@/components/ui/LanguageSwitcher';
 
 export function AppTopBar() {
-  const { t } = useTranslation();
   const { resolvedMode, toggleMode } = useTheme();
 
   return (
@@ -30,4 +28,3 @@ export function AppTopBar() {
     </header>
   );
 }
-

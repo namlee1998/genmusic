@@ -5,9 +5,6 @@ import { useAppStore } from '@/store/useAppStore';
 import * as sdlcApi from '@/services/api/sdlcApi';
 import { useApi } from '@/hooks/useApi';
 import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
-import { Card, CardContent } from '@/components/ui/Card';
-import type { WorkflowMetrics } from '@/store/useSdlcStore';
 import {
   Bot,
   FileText,
@@ -93,7 +90,7 @@ export default function AgentsPage() {
     }))
   );
 
-  const { data: metrics, loading, execute: fetchMetrics } = useApi(sdlcApi.getWorkflowMetrics, {
+  const { execute: fetchMetrics } = useApi(sdlcApi.getWorkflowMetrics, {
     onError: (err) => console.error('Failed to fetch metrics:', err)
   });
   
@@ -127,7 +124,7 @@ export default function AgentsPage() {
   // Filters state
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'running' | 'waiting' | 'blocked' | 'idle' | 'completed'>('ALL');
-  const [workflowFilter, setWorkflowFilter] = useState('All Workflows');
+  const [workflowFilter] = useState('All Workflows');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
   // Keep project ID in sync
@@ -176,8 +173,6 @@ export default function AgentsPage() {
       );
       return entries.length > 0 ? entries[0] : null;
     };
-
-    const phaseFor = (key: string) => pipelinePhases.find(p => p.agent === key);
 
     const relatedGate = (key: string) => {
       if (key === 'PO') return pendingGates.find(g => g.type === 'PO_CLARIFY');
@@ -324,7 +319,7 @@ export default function AgentsPage() {
         startedTime: agentTimeAgo(key),
       };
     });
-  }, [pipelinePhases, auditLog, pendingGates, resolveStatus]);
+  }, [auditLog, pendingGates, resolveStatus]);
 
   // Compute status counts
   const statusCounts = useMemo(() => {

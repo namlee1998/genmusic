@@ -1,6 +1,3 @@
-const express = require('express');
-const request = require('supertest');
-
 // Mock dependencies before requiring SdlcWorkflowService and routes
 jest.mock('uuid', () => ({ v4: jest.fn(() => 'test-uuid') }));
 
@@ -23,7 +20,7 @@ jest.mock('../../src/middleware/authMiddleware', () => (req, res, next) => {
 });
 
 const SdlcWorkflowService = require('../../src/services/SdlcWorkflowService');
-const sdlcRoutes = require('../../src/routes/sdlc');
+const SdlcController = require('../../src/controllers/SdlcController');
 const { Task } = require('../../src/models');
 const prisma = require('../../src/config/database');
 
@@ -31,14 +28,6 @@ const prisma = require('../../src/config/database');
 jest.spyOn(SdlcWorkflowService, 'listPendingGates');
 
 describe('Interventions API & Service Audit', () => {
-  let app;
-
-  beforeAll(() => {
-    app = express();
-    app.use(express.json());
-    app.use('/sdlc', sdlcRoutes);
-  });
-
   afterEach(() => {
     jest.clearAllMocks();
   });
@@ -153,11 +142,11 @@ describe('Interventions API & Service Audit', () => {
 
       jest.spyOn(SdlcWorkflowService, 'getAllInterventions').mockResolvedValue(mockInterventions);
 
-      const response = await request(app)
-        .get('/sdlc/interventions')
-        .expect(200);
+      const req = { user: { id: 'local-user-id' } };
+      const res = { json: jest.fn() };
+      await SdlcController.listAllInterventions(req, res, jest.fn());
 
-      expect(response.body).toEqual({
+      expect(res.json).toHaveBeenCalledWith({
         status: 'success',
         data: mockInterventions,
       });

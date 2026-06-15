@@ -56,7 +56,7 @@ export interface WorkflowStatus {
     decision: HitlDecision | null;
     status: 'pending' | 'released' | 'rejected';
     approvalBlocked?: boolean;
-    evidence?: any;
+    evidence?: unknown;
   };
   currentPhase: string;
 }
@@ -186,7 +186,7 @@ const DEFAULT_PHASES: sdlcApi.PhaseStatus[] = [
 ];
 
 export const useSdlcStore = create<SdlcState>((set, get) => {
-  let pollInterval: any = null;
+  let pollInterval: ReturnType<typeof setInterval> | null = null;
 
   // Closes existing connections
   const cleanupConnections = () => {
@@ -335,8 +335,8 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
         set({ sseAbortController: abort });
         startPolling();
 
-      } catch (err: any) {
-        set({ error: err.message || 'Failed to start SDLC pipeline workflow', status: 'failed' });
+      } catch (err: unknown) {
+        set({ error: err instanceof Error ? err.message : 'Failed to start SDLC pipeline workflow', status: 'failed' });
       } finally {
         set({ isLoading: false });
       }
@@ -354,8 +354,8 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
       try {
         await sdlcApi.resolveGate(gateId, action, comment);
         await get().pollStatus();
-      } catch (err: any) {
-        set({ error: err.message || 'Failed to resolve risk control gate' });
+      } catch (err: unknown) {
+        set({ error: err instanceof Error ? err.message : 'Failed to resolve risk control gate' });
       } finally {
         set({ isLoading: false });
       }
@@ -374,8 +374,8 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
           set({ releaseStatus: 'rejected' });
         }
         await get().pollStatus();
-      } catch (err: any) {
-        set({ error: err.message || 'Failed to submit final release decision' });
+      } catch (err: unknown) {
+        set({ error: err instanceof Error ? err.message : 'Failed to submit final release decision' });
       } finally {
         set({ isLoading: false });
       }
@@ -396,11 +396,10 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
           releaseStatus: res.releaseStatus || 'pending',
           repoInfo: res.repoInfo || null
         });
-      } catch (err: any) {
-        set({ error: err.message || 'Failed to check status updates' });
+      } catch (err: unknown) {
+        set({ error: err instanceof Error ? err.message : 'Failed to check status updates' });
       }
     }
   };
 });
-
 

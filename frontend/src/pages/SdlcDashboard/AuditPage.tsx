@@ -10,6 +10,10 @@ import EmptyProjectState from './components/EmptyProjectState';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 
+interface AuditTrailResponse {
+  events: AuditEvent[];
+}
+
 export default function AuditPage() {
   const { currentProjectId } = useAppStore();
   const {
@@ -28,7 +32,9 @@ export default function AuditPage() {
 
   const [selectedEvent, setSelectedEvent] = useState<AuditEvent | null>(null);
 
-  const { loading, execute: fetchAuditTrail } = useApi(sdlcApi.getAuditTrail, {
+  const { loading, execute: fetchAuditTrail } = useApi<AuditTrailResponse, [string]>(
+    sdlcApi.getAuditTrail as (projectId: string) => Promise<AuditTrailResponse>,
+    {
     onSuccess: (trail) => {
       setAuditEvents(trail.events);
       if (trail.events && trail.events.length > 0) {
@@ -36,7 +42,8 @@ export default function AuditPage() {
       }
     },
     onError: (errMessage) => setError(errMessage)
-  });
+    }
+  );
 
   const reversedAuditEvents = useMemo(() => {
     return [...auditEvents].reverse();
@@ -71,20 +78,6 @@ export default function AuditPage() {
       return 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)] animate-pulse';
     }
     return 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]';
-  };
-
-  const getSeverityBadgeColor = (sev?: string | null) => {
-    if (!sev) return 'bg-slate-800 text-slate-400 border-slate-700';
-    switch (sev.toLowerCase()) {
-      case 'high':
-      case 'danger':
-        return 'bg-red-500/10 border-red-500/20 text-red-400';
-      case 'medium':
-      case 'warning':
-        return 'bg-amber-500/10 border-amber-500/20 text-amber-400';
-      default:
-        return 'bg-blue-500/10 border-blue-500/20 text-blue-400';
-    }
   };
 
   return (

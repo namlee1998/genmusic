@@ -1,7 +1,6 @@
 import os
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
-from langchain_google_genai import ChatGoogleGenerativeAI
 
 def get_llm(model_config=None):
     """
@@ -35,6 +34,7 @@ def get_llm(model_config=None):
         gemini_key = os.getenv("GOOGLE_API_KEY", "")
         if not gemini_key:
             raise ValueError(f"GOOGLE_API_KEY is not set (required for {model_name}).")
+        from langchain_google_genai import ChatGoogleGenerativeAI
         return ChatGoogleGenerativeAI(
             model=model_name,
             temperature=temp,

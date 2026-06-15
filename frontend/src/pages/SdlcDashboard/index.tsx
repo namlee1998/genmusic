@@ -91,14 +91,12 @@ export default function SdlcDashboard() {
     return () => clearTimeout(timer);
   }, [highlightGate, searchParams, setSearchParams]);
 
-  if (!currentProjectId) {
-    return (
-      <main className="flex flex-col gap-0 p-0 h-full min-h-0 overflow-y-auto bg-background text-on-surface font-sans antialiased"
-        style={{ padding: '24px 32px' }}>
-        <EmptyProjectState />
-      </main>
-    );
-  }
+  const taskStatuses = ['pending', 'running', 'gate_pending', 'completed', 'skipped', 'failed'] as const;
+  const statusCounts = useMemo(() => {
+    const counts = { pending: 0, running: 0, gate_pending: 0, completed: 0, skipped: 0, failed: 0 };
+    pipelinePhases?.forEach(p => { if (p.status in counts) counts[p.status as keyof typeof counts]++; });
+    return counts;
+  }, [pipelinePhases]);
 
   // Derive phase status from pipelinePhases
   const phaseStatus = (agent: 'PO' | 'UX' | 'DEV' | 'QA') =>
@@ -144,13 +142,14 @@ export default function SdlcDashboard() {
     return lists[agent];
   };
 
-
-  const taskStatuses = ['pending', 'running', 'gate_pending', 'completed', 'skipped', 'failed'] as const;
-  const statusCounts = useMemo(() => {
-    const counts = { pending: 0, running: 0, gate_pending: 0, completed: 0, skipped: 0, failed: 0 };
-    pipelinePhases?.forEach(p => { if (p.status in counts) counts[p.status as keyof typeof counts]++; });
-    return counts;
-  }, [pipelinePhases]);
+  if (!currentProjectId) {
+    return (
+      <main className="flex flex-col gap-0 p-0 h-full min-h-0 overflow-y-auto bg-background text-on-surface font-sans antialiased"
+        style={{ padding: '24px 32px' }}>
+        <EmptyProjectState />
+      </main>
+    );
+  }
 
   return (
     <main className="flex flex-col gap-0 p-0 h-full min-h-0 overflow-y-auto bg-background text-on-surface font-sans antialiased"

@@ -6,7 +6,7 @@ import { parseApiError } from '@/services/api/sdlcApi';
  * Tự động quản lý trạng thái loading, data, và error.
  * Cung cấp hàm `execute` để kích hoạt API call.
  */
-export function useApi<T, Args extends any[]>(
+export function useApi<T, Args extends unknown[]>(
   apiFunc: (...args: Args) => Promise<T>,
   options?: {
     onSuccess?: (data: T) => void;
@@ -29,7 +29,7 @@ export function useApi<T, Args extends any[]>(
           options.onSuccess(result);
         }
         return result;
-      } catch (err) {
+      } catch (err: unknown) {
         const errorMessage = parseApiError(err, 'Lỗi gọi API không xác định').message;
         setError(errorMessage);
         if (options?.onError) {

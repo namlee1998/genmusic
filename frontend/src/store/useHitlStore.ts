@@ -30,9 +30,9 @@ export const useHitlStore = create<HitlState>((set) => ({
         isLoading: false,
         error: null,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       set({
-        error: err.message || 'Failed to load human-in-the-loop interventions',
+        error: err instanceof Error ? err.message : 'Failed to load human-in-the-loop interventions',
         isLoading: false,
       });
     }
