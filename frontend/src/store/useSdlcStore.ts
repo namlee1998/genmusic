@@ -165,7 +165,7 @@ export interface SdlcState {
   phaseTransitions: PhaseTransition[];
 
   // ── Actions ────────────────────────────────────────────────────────────
-  startPipeline: (repoUrl: string, request: string) => Promise<void>;
+  startPipeline: (projectId: string, repoUrl: string, request: string) => Promise<void>;
   resolveGate: (gateId: string, action: 'approve' | 'reject', comment?: string) => Promise<void>;
   releaseDecision: (action: 'approve' | 'reject') => Promise<void>;
   pollStatus: () => Promise<void>;
@@ -262,7 +262,7 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
       });
     },
 
-    startPipeline: async (repoUrl, request) => {
+    startPipeline: async (projectId, repoUrl, request) => {
       cleanupConnections();
       set({
         isLoading: true,
@@ -285,7 +285,7 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
       });
 
       try {
-        const { workflowId, status } = await sdlcApi.startPipeline(repoUrl, request);
+        const { workflowId, status } = await sdlcApi.startPipeline(projectId, repoUrl, request);
         set({ workflowId, status, projectId: workflowId });
 
         // Connect SSE stream

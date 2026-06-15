@@ -72,8 +72,16 @@ export interface PipelineResponse {
 
 const BASE = '/sdlc';
 
-const startPipelineReal = (repoUrl: string, request: string): Promise<{ workflowId: string; status: string }> =>
-  api.post(`${BASE}/run-po-agent`, { repo_path: repoUrl, request }).then((r) => r.data);
+const startPipelineReal = (projectId: string, repoUrl: string, request: string): Promise<{ workflowId: string; status: string }> =>
+  api.post(`${BASE}/run-po-agent`, {
+    project_id: projectId,
+    feature_request: {
+      title: request,
+      description: request
+    },
+    repo_path: repoUrl,
+    request
+  }).then((r) => r.data);
 
 export interface SdlcError {
   message: string;
@@ -177,8 +185,8 @@ const isMockMode = () => {
   return import.meta.env.VITE_USE_MOCK === 'true';
 };
 
-export const startPipeline = (repoUrl: string, request: string): Promise<{ workflowId: string; status: string }> => {
-  return isMockMode() ? mock.startPipelineMock(repoUrl, request) : startPipelineReal(repoUrl, request);
+export const startPipeline = (projectId: string, repoUrl: string, request: string): Promise<{ workflowId: string; status: string }> => {
+  return isMockMode() ? mock.startPipelineMock(repoUrl, request) : startPipelineReal(projectId, repoUrl, request);
 };
 
 export const getPipelineStatus = (workflowId: string): Promise<PipelineResponse> => {
