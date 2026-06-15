@@ -10,95 +10,6 @@ import {
 import { useHitlStore } from '@/store/useHitlStore';
 import { resolveGate, releaseDecision, type GlobalInterventionItem } from '@/services/api/sdlcApi';
 
-/* ───── TEMP: mock data to preview UI ───── */
-const USE_MOCK_DATA = true;
-
-const MOCK_INTERVENTIONS: GlobalInterventionItem[] = [
-  {
-    id: 'mock-sec-1',
-    type: 'DEV_FILE_GATE',
-    status: 'PENDING',
-    payload: {
-      action: 'MODIFY',
-      path: 'src/auth/jwt.py',
-      reason: 'auth/security file modification (High Risk Level)',
-      diff: `diff --git a/src/auth/jwt.py b/src/auth/jwt.py
-index a2d8c3b..f4e9d1a 100644
---- a/src/auth/jwt.py
-+++ b/src/auth/jwt.py
--    token = jwt.decode(token, key)
-+    token = jwt.decode(token, key, algorithms=[\"RS256\"])
-`,
-    },
-    createdAt: new Date(Date.now() - 600000).toISOString(),
-    updatedAt: new Date(Date.now() - 600000).toISOString(),
-    projectId: 'proj-pay-001',
-    projectName: 'Payment Service API',
-    repoUrl: 'https://github.com/aifa-workspace/payment-service-api',
-    pipelineStatus: 'awaiting_approval',
-    currentPhase: 'DEV',
-  },
-  {
-    id: 'mock-sec-2',
-    type: 'DEV_FILE_GATE',
-    status: 'PENDING',
-    payload: {
-      action: 'MODIFY',
-      path: 'src/middleware/auth.ts',
-      reason: 'authentication middleware change (Medium Risk)',
-      diff: `diff --git a/src/middleware/auth.ts b/src/middleware/auth.ts
-index b3e9f1a..c7d812b 100644
---- a/src/middleware/auth.ts
-+++ b/src/middleware/auth.ts
-+    const apiKey = req.headers['x-api-key'];
-+    if (!apiKey) return res.status(401).send();
-`,
-    },
-    createdAt: new Date(Date.now() - 1800000).toISOString(),
-    updatedAt: new Date(Date.now() - 1800000).toISOString(),
-    projectId: 'proj-user-002',
-    projectName: 'User Auth Module',
-    repoUrl: 'https://github.com/aifa-workspace/user-auth-module',
-    pipelineStatus: 'awaiting_approval',
-    currentPhase: 'DEV',
-  },
-  {
-    id: 'mock-po-1',
-    type: 'PO_CLARIFY',
-    status: 'PENDING',
-    payload: {
-      questions: [
-        'Should we support recurring subscription models in the payment service, or just one-off charges for now?',
-        'Is payment status webhook verification mandatory for the initial sandbox release?',
-        'What is the threshold limit for transaction alerts (e.g. flag transactions > $500)?',
-      ],
-    },
-    createdAt: new Date(Date.now() - 3600000).toISOString(),
-    updatedAt: new Date(Date.now() - 3600000).toISOString(),
-    projectId: 'proj-pay-001',
-    projectName: 'Payment Service API',
-    repoUrl: 'https://github.com/aifa-workspace/payment-service-api',
-    pipelineStatus: 'awaiting_approval',
-    currentPhase: 'PO',
-  },
-  {
-    id: 'mock-rel-1',
-    type: 'FINAL_RELEASE',
-    status: 'PENDING',
-    payload: {
-      reason: 'All sandbox tests passed. QA validation green. Ready for production deployment.',
-    },
-    createdAt: new Date(Date.now() - 7200000).toISOString(),
-    updatedAt: new Date(Date.now() - 7200000).toISOString(),
-    projectId: 'proj-ecom-003',
-    projectName: 'E-Commerce Frontend',
-    repoUrl: 'https://github.com/aifa-workspace/ecommerce-frontend',
-    pipelineStatus: 'qa_complete',
-    currentPhase: 'QA',
-  },
-];
-/* ───── END TEMP ───── */
-
 /* ───── types & helpers ───── */
 
 type GroupKey = 'DEV_FILE_GATE' | 'PO_CLARIFY' | 'FINAL_RELEASE';
@@ -174,10 +85,9 @@ export default function HitlDashboard() {
   const navigate = useNavigate();
   const store = useHitlStore();
 
-  // TEMP: mock override
-  const interventions = USE_MOCK_DATA ? MOCK_INTERVENTIONS : store.interventions;
-  const isLoading = USE_MOCK_DATA ? false : store.isLoading;
-  const error = USE_MOCK_DATA ? null : store.error;
+  const interventions = store.interventions;
+  const isLoading = store.isLoading;
+  const error = store.error;
   const fetchInterventions = store.fetchInterventions;
 
   const [acting, setActing] = useState<Record<string, boolean>>({});
@@ -243,9 +153,6 @@ export default function HitlDashboard() {
         <div className="flex items-center gap-2.5">
           <Gavel size={20} className="text-amber-500" />
           <h1 className="text-xl font-bold text-on-surface tracking-tight">Intervention Center</h1>
-          {USE_MOCK_DATA && (
-            <span className="ml-2 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-warning/30 bg-warning/10 text-warning animate-pulse">Preview</span>
-          )}
         </div>
         <button
           className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-primary/45 rounded-lg bg-primary text-white font-bold text-[12px] cursor-pointer hover:bg-primary-container disabled:opacity-50 disabled:cursor-not-allowed transition-all"

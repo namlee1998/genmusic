@@ -107,8 +107,10 @@ describe('HitlDashboard Component', () => {
       </MemoryRouter>
     );
     expect(screen.getByText('Total Pending')).toBeInTheDocument();
-    expect(screen.getAllByText('Security Risks').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('PO Questions').length).toBeGreaterThan(0);
+    // 'Security Gates' appears in both the stat card label and the kanban column header
+    expect(screen.getAllByText('Security Gates').length).toBeGreaterThanOrEqual(1);
+    // 'PO Clarifications' also appears in both
+    expect(screen.getAllByText('PO Clarifications').length).toBeGreaterThanOrEqual(1);
     
     // Total Pending is 2
     const pendingValues = screen.getAllByText('2');
@@ -123,28 +125,32 @@ describe('HitlDashboard Component', () => {
     );
     expect(screen.getByText('Payment Service API')).toBeInTheDocument();
     expect(screen.getByText('Auth Middleware Server')).toBeInTheDocument();
-    expect(screen.getByText('https://github.com/aifa-workspace/payment-service-api')).toBeInTheDocument();
-    expect(screen.getByText('https://github.com/aifa-workspace/auth-middleware-server')).toBeInTheDocument();
+    // repoUrl is only rendered inside expanded FINAL_RELEASE cards, not in collapsed DEV/PO cards
   });
 
-  it('navigates to resolve when clicking the card action button', () => {
+  it('navigates to the build dashboard when clicking the Review button', () => {
     render(
       <MemoryRouter>
         <HitlDashboard />
       </MemoryRouter>
     );
-    
-    const resolveButtons = screen.getAllByText('Navigate to Resolve');
-    expect(resolveButtons.length).toBe(2);
 
-    fireEvent.click(resolveButtons[0]);
+    // The card shows collapsed quick-actions: Approve, Reject, and an icon-only Review button.
+    // Click the first card header to expand it, then click the Review button in the expanded area.
+    const cardHeaders = screen.getAllByText('Payment Service API');
+    expect(cardHeaders.length).toBeGreaterThan(0);
+    fireEvent.click(cardHeaders[0]);
 
-    // Check cleanup store triggers
-    expect(mockResetState).toHaveBeenCalledTimes(1);
-    // Check project selection triggers
-    expect(mockSetCurrentProject).toHaveBeenCalledWith('proj-pay-001');
-    // Check routing path matching
-    expect(mockNavigate).toHaveBeenCalledWith('/sdlc?highlightGate=gate-po-clarify-mock');
+    // Now the Review button should be visible in the expanded detail
+    const reviewBtn = screen.getAllByText('Review');
+    expect(reviewBtn.length).toBeGreaterThan(0);
+    fireEvent.click(reviewBtn[0]);
+
+    // Check routing — links to build dashboard with highlightGate param
+    expect(mockNavigate).toHaveBeenCalledWith('/sdlc/build?highlightGate=gate-po-clarify-mock');
+    // Reset/selection are NOT called by the Review action
+    expect(mockResetState).not.toHaveBeenCalled();
+    expect(mockSetCurrentProject).not.toHaveBeenCalled();
   });
 
   it('renders the empty state when there are no pending interventions', () => {
@@ -162,7 +168,7 @@ describe('HitlDashboard Component', () => {
     );
 
     expect(screen.getByText('All clear! No pending interventions.')).toBeInTheDocument();
-    expect(screen.getByText(/Your AI Agents are executing pipelines seamlessly/i)).toBeInTheDocument();
+    expect(screen.getByText(/Your AI Agents are executing pipelines/i)).toBeInTheDocument();
   });
 
   it('renders skeleton loaders when in loading state', () => {
@@ -179,7 +185,8 @@ describe('HitlDashboard Component', () => {
       </MemoryRouter>
     );
 
-    const skeletons = container.querySelectorAll('.hitl-card--skeleton');
+    // Component renders 3 animate-pulse skeleton divs while loading
+    const skeletons = container.querySelectorAll('.animate-pulse');
     expect(skeletons.length).toBe(3);
   });
 });

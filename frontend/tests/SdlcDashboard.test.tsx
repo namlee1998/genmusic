@@ -107,9 +107,9 @@ describe('SdlcDashboard Component', () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText('AIFA Execution Route')).toBeInTheDocument();
-    expect(screen.getByText('ROUTE TYPE: BACKEND')).toBeInTheDocument();
+    expect(screen.getByText('Build Dashboard')).toBeInTheDocument();
     expect(screen.getByText('DEV RUNNING')).toBeInTheDocument();
+    expect(screen.getByText('Developer (DEV)')).toBeInTheDocument();
   });
 
   it('calls pollStatus on mount when a workflow is active', async () => {
