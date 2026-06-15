@@ -14,6 +14,7 @@ import {
   Trash2,
   Search,
   Rocket,
+  Bug,
 } from 'lucide-react';
 
 export interface Project {
@@ -74,6 +75,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
     location.pathname === '/sdlc' || location.pathname === '/sdlc/';
   const isAuditActive = location.pathname.startsWith('/sdlc/audit');
   const isHitlActive = location.pathname.startsWith('/sdlc/hitl');
+  const isDebugActive = location.pathname.startsWith('/sdlc/debug');
 
   return (
     <aside
@@ -291,6 +293,24 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
               {interventions.length}
             </span>
           )}
+        </button>
+
+        {/* Platform Debugger Link */}
+        <button
+          onClick={() => navigate('/sdlc/debug')}
+          title={collapsed ? 'Platform Debugger' : undefined}
+          className={`
+            w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs transition-all border-l-[3px]
+            ${
+              isDebugActive
+                ? 'bg-primary/10 border-primary text-primary font-bold shadow-[inset_0_0_10px_rgba(99,102,241,0.06)]'
+                : 'text-on-surface-variant border-transparent hover:bg-surface-variant hover:text-on-surface'
+            }
+            ${collapsed ? 'justify-center border-l-0 relative' : ''}
+          `}
+        >
+          <Bug size={16} className={isDebugActive ? 'text-primary' : 'text-rose-500'} />
+          {!collapsed && <span className="flex-1 text-left">Platform Debugger</span>}
         </button>
 
         {/* Project Section Divider */}

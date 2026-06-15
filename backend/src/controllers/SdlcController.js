@@ -62,11 +62,11 @@ class SdlcController {
         user: req.user,
       });
 
-      return res.status(202).json({ 
-        workflowId: task.projectId, 
-        task_id: task.id, 
-        status: task.status, 
-        type: task.type 
+      return res.status(202).json({
+        workflowId: task.projectId,
+        task_id: task.id,
+        status: task.status,
+        type: task.type
       });
     } catch (err) { next(err); }
   }
@@ -284,7 +284,7 @@ class SdlcController {
 
       // We'll poll the overall PipelineResponse every few seconds
       let pollInterval;
-      
+
       const stopAll = () => {
         clearInterval(pollInterval);
         clearInterval(heartbeatInterval);
@@ -296,7 +296,7 @@ class SdlcController {
       pollInterval = setInterval(async () => {
         try {
           const pipeline = await SdlcWorkflowService.getPipelineResponse(workflowId, req.user);
-          
+
           if (!pipeline) {
             sendEvent('error', { message: 'Pipeline not found' });
             stopAll(); res.end(); return;
@@ -329,12 +329,12 @@ class SdlcController {
 
           // Avoid spamming progress if unchanged, but for simplicity here we emit
           if (lastStatus !== pipeline.status) {
-             sendEvent('progress', {
-               status: pipeline.status,
-               pipelinePhases: pipeline.pipelinePhases,
-               auditLog: pipeline.auditLog
-             });
-             lastStatus = pipeline.status;
+            sendEvent('progress', {
+              status: pipeline.status,
+              pipelinePhases: pipeline.pipelinePhases,
+              auditLog: pipeline.auditLog
+            });
+            lastStatus = pipeline.status;
           }
 
         } catch (error) {
@@ -644,7 +644,12 @@ class SdlcController {
     } catch (err) { next(err); }
   }
 
-
+  async getProjectHealth(req, res, next) {
+    try {
+      const result = await SdlcWorkflowService.getProjectHealth();
+      return res.json({ status: 'success', data: result });
+    } catch (err) { next(err); }
+  }
 
   // ─── Kanban Backlog ──────────────────────────────────────────────────────
 

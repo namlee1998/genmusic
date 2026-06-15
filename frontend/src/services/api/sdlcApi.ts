@@ -489,4 +489,30 @@ export const getAllInterventions = (): Promise<GlobalInterventionItem[]> => {
   return isMockMode() ? mock.getAllInterventionsMock() : getAllInterventionsReal();
 };
 
+export interface SystemHealthData {
+  db: {
+    status: 'ok' | 'error';
+    error: string | null;
+    projectCount: number;
+  };
+  env: {
+    OPENAI_API_KEY: boolean;
+    ANTHROPIC_API_KEY: boolean;
+    DEEPSEEK_API_KEY: boolean;
+    DATABASE_URL: boolean;
+  };
+  timestamp: string;
+}
+
+export const getProjectHealth = (): Promise<SystemHealthData> => {
+  if (isMockMode()) {
+    return Promise.resolve({
+      db: { status: 'ok', error: null, projectCount: 5 },
+      env: { OPENAI_API_KEY: true, ANTHROPIC_API_KEY: true, DEEPSEEK_API_KEY: true, DATABASE_URL: true },
+      timestamp: new Date().toISOString(),
+    });
+  }
+  return api.get(`${BASE}/dev/health`).then((r) => r.data.data);
+};
+
 

@@ -28,11 +28,27 @@ export function ImportProjectDialog({
     return '';
   };
 
+  const [skippedCount, setSkippedCount] = useState(0);
+
   const handleFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
       const fileList = Array.from(files);
-      setSelectedFiles(fileList);
+      
+      const filteredList = fileList.filter(file => {
+        const pathStr = (file.webkitRelativePath || file.name).replace(/\\/g, '/');
+        const isIgnored = 
+          pathStr.includes('/node_modules/') || 
+          pathStr.includes('/.git/') || 
+          pathStr.includes('/dist/') || 
+          pathStr.includes('/build/') || 
+          pathStr.includes('/.venv/') || 
+          pathStr.includes('/env/');
+        return !isIgnored;
+      });
+
+      setSelectedFiles(filteredList);
+      setSkippedCount(fileList.length - filteredList.length);
 
       // Extract the top-level directory name from webkitRelativePath
       const firstPath = fileList[0].webkitRelativePath || fileList[0].name;
@@ -171,7 +187,15 @@ export function ImportProjectDialog({
                     {selectedFiles.length} files selected
                   </span>
                 )}
+                {skippedCount > 0 && (
+                  <span className="text-[9px] text-primary/80 mt-1 text-center px-1">
+                    Filtered {skippedCount} files (node_modules, .git, .venv, etc.) to speed up upload
+                  </span>
+                )}
               </button>
+              <p className="text-[9px] text-on-surface-variant/60 mt-1.5 leading-normal text-center">
+                Tip: Use <strong>Enter Path</strong> tab for immediate local workspace linking.
+              </p>
             </div>
           </div>
         ) : (

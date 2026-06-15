@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useSdlcStore } from '@/store/useSdlcStore';
+import { useAppStore } from '@/store/useAppStore';
 import { useSearchParams } from 'react-router-dom';
 import AgentTaskBoard from './components/AgentTaskBoard';
 import GatePanel from './components/GatePanel';
 import AuditLog from './components/AuditLog';
 import FinalApproval from './components/FinalApproval';
 import DetailModal from './components/DetailModal';
+import EmptyProjectState from './components/EmptyProjectState';
+import FeatureRequestChatbox from './components/FeatureRequestChatbox';
 
 export default function SdlcDashboard() {
   const {
@@ -17,9 +20,12 @@ export default function SdlcDashboard() {
     cleanupConnections
   } = useSdlcStore();
 
+  const currentProjectId = useAppStore((s) => s.currentProjectId);
+
   const [activeDetailType, setActiveDetailType] = useState<'prd' | 'ux_spec' | 'code_diff' | 'qa_report' | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const highlightGate = searchParams.get('highlightGate');
+  const focusRequest = searchParams.get('focusRequest') === 'true';
 
   // Ensure polling and SSE are cleaned up when the dashboard unmounts
   useEffect(() => {
@@ -54,6 +60,23 @@ export default function SdlcDashboard() {
     return () => clearTimeout(timer);
   }, [highlightGate, searchParams, setSearchParams]);
 
+  if (!currentProjectId) {
+    return (
+      <main 
+        className="flex flex-col gap-0 p-0 h-full min-h-0 overflow-y-auto bg-[#090a0f] text-[#e3e1e9] font-sans antialiased" 
+        style={{ 
+          maxWidth: '100%', 
+          padding: '24px 32px',
+          backgroundImage: 'radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.05) 0px, transparent 50%), radial-gradient(at 100% 0%, rgba(14, 165, 233, 0.05) 0px, transparent 50%)'
+        }}
+      >
+        <EmptyProjectState />
+      </main>
+    );
+  }
+
+  const showChatbox = focusRequest;
+
   return (
     <main 
       className="flex flex-col gap-0 p-0 h-full min-h-0 overflow-y-auto bg-[#090a0f] text-[#e3e1e9] font-sans antialiased" 
@@ -71,6 +94,7 @@ export default function SdlcDashboard() {
       )}
 
       <div className="flex flex-col gap-5">
+        {showChatbox && <FeatureRequestChatbox />}
         <AgentTaskBoard setActiveDetailType={setActiveDetailType} />
         <GatePanel />
         <FinalApproval />
@@ -89,3 +113,4 @@ export default function SdlcDashboard() {
     </main>
   );
 }
+
