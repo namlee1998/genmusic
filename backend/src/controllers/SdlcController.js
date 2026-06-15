@@ -603,12 +603,25 @@ class SdlcController {
     } catch (err) { next(err); }
   }
 
-  async getProjectArtifacts(req, res, next) {
+  async getProjectHealth(req, res, next) {
     try {
-      const { project_id } = req.params;
-      const result = await SdlcWorkflowService.getProjectArtifacts(project_id, req.user);
-      return res.json({ status: 'success', data: result });
-    } catch (err) { next(err); }
+      const { projectId } = req.params;
+      const data = await SdlcWorkflowService.getProjectHealth(projectId);
+      res.json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async approveToolCall(req, res, next) {
+    try {
+      const { taskId } = req.params;
+      const { approved, feedback } = req.body;
+      const result = await SdlcWorkflowService.resumeTask(taskId, approved, feedback);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
   }
 
   async getTaskEvents(req, res, next) {

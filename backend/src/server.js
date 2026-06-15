@@ -17,6 +17,7 @@ const { requestContextMiddleware } = require('./middleware/requestContext');
 const gateBridge = require('./services/gateBridge');
 const taskWorker = require('./services/taskWorkerService');
 const SdlcWorkflowService = require('./services/SdlcWorkflowService');
+const socketService = require('./services/socketService');
 
 const Sentry = require('@sentry/node');
 const { nodeProfilingIntegration } = require('@sentry/profiling-node');
@@ -125,12 +126,14 @@ const startServer = async () => {
     }
 
     // Start listening
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       console.log(`[Server] Backend running on http://localhost:${PORT}`);
       console.log(`[Server] Environment: ${NODE_ENV}`);
       console.log(`[Server] Agents URL: ${process.env.AGENTS_BASE_URL || 'http://127.0.0.1:8001'}`);
       startBatchJobs();
     });
+    
+    socketService.init(server, corsConfig);
   } catch (error) {
     console.error('[Server] Failed to start:', error);
     process.exit(1);

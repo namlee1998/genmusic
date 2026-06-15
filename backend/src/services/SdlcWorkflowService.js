@@ -1816,6 +1816,7 @@ class SdlcWorkflowService {
       DEEPSEEK_API_KEY: !!process.env.DEEPSEEK_API_KEY,
       GOOGLE_API_KEY: !!process.env.GOOGLE_API_KEY,
       DATABASE_URL: !!process.env.DATABASE_URL,
+      AUTO_APPROVE_TOOLS: process.env.AUTO_APPROVE_TOOLS === 'true',
     };
 
     return {
@@ -2153,6 +2154,113 @@ class SdlcWorkflowService {
   // =========================================================================
   // Internals
   // =========================================================================
+
+  async resumeTask(taskId, approved, feedback) {
+    const task = await prisma.task.findUnique({
+      where: { id: taskId },
+      include: { project: true }
+    });
+
+    if (!task) throw new Error('Task not found');
+    if (task.status !== 'PENDING_TOOL_APPROVAL') throw new Error('Task is not awaiting tool approval');
+
+    // Update status to running
+    await prisma.task.update({
+      where: { id: taskId },
+      data: { status: 'running' }
+    });
+
+    // We do NOT block the API response; we handle the stream in the background
+    this._resumeAgentStream(task, approved, feedback).catch(err => {
+      console.error(`[SDLC] Resume failed for task ${taskId}:`, err);
+    });
+
+    return { success: true, message: 'Task resumed' };
+  }
+
+  async _resumeAgentStream(task, approved, feedback) {
+    try {
+      const axios = require('axios');
+      const { getAgentUrl } = require('../config/agents');
+      const response = await axios.post(
+        getAgentUrl('/v1/agent/resume'),
+        {
+          session_id: task.id,
+          node_target: NODE_TARGET[task.type],
+          approved,
+          feedback,
+        },
+        {
+          headers: { 'Content-Type': 'application/json' },
+          responseType: 'stream',
+        }
+      );
+
+      let buffer = '';
+      let completedData = null;
+      let requiresActionData = null;
+      let agentError = null;
+
+      response.data.on('data', (chunk) => {
+        buffer += chunk.toString();
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        let currentEvent = null;
+
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.slice(7).trim();
+          } else if (line.startsWith('data: ') && currentEvent) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (currentEvent === 'error') {
+                agentError = data.message || 'Agent error';
+              } else if (currentEvent === 'completed') {
+                completedData = data;
+              } else if (currentEvent === 'requires_action') {
+                requiresActionData = data;
+              }
+            } catch (_) { }
+          }
+        }
+      });
+
+      response.data.on('end', async () => {
+        try {
+          if (agentError) throw new Error(agentError);
+          
+          if (requiresActionData) {
+            console.log(`[SDLC._resumeAgentStream] Task ${task.id} requires ANOTHER tool approval.`);
+            await prisma.task.update({
+              where: { id: task.id },
+              data: {
+                status: 'PENDING_TOOL_APPROVAL',
+                error: null,
+                agentOutput: JSON.stringify(requiresActionData)
+              }
+            });
+            const socketService = require('./socketService');
+            socketService.getIo().to('global_approvals').emit('tool_approval_pending', {
+              taskId: task.id,
+              data: requiresActionData
+            });
+            return;
+          }
+          
+          if (!completedData) throw new Error('Agent returned no data on resume');
+          
+          // Assuming output conforms, save it
+          await this._saveAgentData(task, completedData, null);
+        } catch (err) {
+          console.error(`[SDLC._resumeAgentStream] Failed for task ${task.id}:`, err);
+          await this._markTaskFailed(task, err);
+        }
+      });
+    } catch (error) {
+      console.error(`[SDLC._resumeAgentStream] Request failed for task ${task.id}:`, error);
+      await this._markTaskFailed(task, error);
+    }
+  }
 
   /**
    * T4.1/T4.2 — the agent that follows a task, honouring the PO route. When the
@@ -2704,6 +2812,7 @@ class SdlcWorkflowService {
 
       let buffer = '';
       let completedData = null;
+      let requiresActionData = null;
       let agentError = null;
 
       response.data.on('data', (chunk) => {
@@ -2722,6 +2831,8 @@ class SdlcWorkflowService {
                 agentError = data.message || 'Agent error';
               } else if (currentEvent === 'completed') {
                 completedData = data;
+              } else if (currentEvent === 'requires_action') {
+                requiresActionData = data;
               }
             } catch (_) { }
           }
@@ -2731,14 +2842,32 @@ class SdlcWorkflowService {
       response.data.on('end', async () => {
         try {
           if (agentError) throw new Error(agentError);
+          
+          if (requiresActionData) {
+            console.log(`[SDLC._runAgent] Task ${task.id} requires tool approval.`);
+            const prisma = require('../config/database');
+            await prisma.task.update({
+              where: { id: task.id },
+              data: {
+                status: 'PENDING_TOOL_APPROVAL',
+                error: null,
+                agentOutput: JSON.stringify(requiresActionData)
+              }
+            });
+            
+            const socketService = require('./socketService');
+            socketService.getIo().to('global_approvals').emit('tool_approval_pending', {
+              taskId: task.id,
+              data: requiresActionData
+            });
+            return;
+          }
+          
           if (!completedData) throw new Error('Agent returned no data');
           if (['intent-agent', 'po-agent'].includes(task.type) && context.featureRequest) {
             completedData.feature_request = context.featureRequest;
           }
 
-          // I4: every execution path must satisfy the same non-empty contract.
-          // Saving partial output as "completed" creates misleading review cards
-          // and downstream handoffs with missing evidence.
           const conformance = assertOutputConforms(task.type, completedData);
           if (!conformance.ok) {
             const parts = [

@@ -65,6 +65,17 @@ router.get('/projects/:project_id/metrics', SdlcController.getWorkflowMetrics.bi
 router.get('/projects/:project_id/artifacts', SdlcController.getProjectArtifacts.bind(SdlcController));
 router.get('/projects/:project_id/release-files/:file_name', SdlcController.downloadReleaseFile.bind(SdlcController));
 
+router.get('/dev/projects/:project_id/artifacts', authenticateDev, SdlcController.getProjectArtifacts.bind(SdlcController));
+
+// T9 - Get Project Health
+router.get('/dev/projects/:projectId/health', authenticateDev, SdlcController.getProjectHealth.bind(SdlcController));
+
+// Tool Approval
+router.post('/dev/tasks/:taskId/approve-tool', authenticateDev, SdlcController.approveToolCall.bind(SdlcController));
+
+// T5 - Hitl Routes
+router.post('/dev/tasks/:task_id/hitl', authenticateDev, SdlcController.submitHitlDecision.bind(SdlcController));
+
 // ── Dev-only: demo scenario selector (MOCK_SCENARIO) ───────────────────────
 router.get('/dev/mock-scenario', SdlcController.getMockScenario.bind(SdlcController));
 router.get('/dev/health', SdlcController.getProjectHealth.bind(SdlcController));

@@ -228,6 +228,35 @@ const submitGateDecision = (taskId: string, payload: GateDecisionPayload) =>
   api.post(`${BASE}/tasks/${taskId}/gate-decision`, payload).then((r) => r.data);
 
 // Structured stage-review decision: idempotent and optimistic-locked.
+export const submitHitlDecision = async (
+  taskId: string,
+  payload: {
+    decision_id: string;
+    base_output_version: number;
+    action: string;
+    payload?: string;
+    comment?: string;
+  }
+) => {
+  const { data } = await api.post(`/dev/tasks/${taskId}/hitl`, payload);
+  return data;
+};
+
+/**
+ * Approve or reject a DEV Agent tool execution
+ */
+export const approveToolCall = async (
+  taskId: string,
+  approved: boolean,
+  feedback: string
+) => {
+  const { data } = await api.post(`/dev/tasks/${taskId}/approve-tool`, {
+    approved,
+    feedback,
+  });
+  return data;
+};
+
 export interface StructuredDecisionBody {
   decision_id: string;
   base_output_version: number;

@@ -26,9 +26,13 @@ import {
   RefreshCw,
   Terminal,
   AlertCircle,
+  AlertCircle,
   FileCode,
+  ToggleLeft,
+  ToggleRight
 } from 'lucide-react';
 import EmptyProjectState from './components/EmptyProjectState';
+import { ToolApprovalPrompt } from '@/components/sdlc/ToolApprovalPrompt';
 
 interface AgentInfo {
   key: 'PO' | 'UX' | 'DEV' | 'QA' | 'SEC' | 'RELEASE';
@@ -97,6 +101,31 @@ export default function AgentsPage() {
   const [selectedAgent, setSelectedAgent] = useState<AgentInfo | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'tasks' | 'artifacts' | 'logs' | 'handoffs'>('overview');
   const [customLogs, setCustomLogs] = useState<string[]>([]);
+  const [autoApproveTools, setAutoApproveTools] = useState(false);
+
+  // Fetch initial auto approve setting
+  useEffect(() => {
+    if (projectId) {
+      sdlcApi.getProjectHealth(projectId).then(res => {
+        if (res.data?.AUTO_APPROVE_TOOLS) {
+          setAutoApproveTools(true);
+        }
+      }).catch(() => {});
+    }
+  }, [projectId]);
+
+  const toggleAutoApprove = async () => {
+    const newValue = !autoApproveTools;
+    setAutoApproveTools(newValue);
+    try {
+      await sdlcApi.updateEnvSettings({
+        envs: { AUTO_APPROVE_TOOLS: newValue ? 'true' : 'false' }
+      });
+    } catch (err) {
+      console.error('Failed to update AUTO_APPROVE_TOOLS', err);
+      setAutoApproveTools(!newValue); // Revert on failure
+    }
+  };
   
   // Filters state
   const [searchQuery, setSearchQuery] = useState('');
@@ -378,10 +407,29 @@ export default function AgentsPage() {
       }}
     >
       {/* 1. Header Title Block */}
-      <div className="mx-[18px] mb-5 flex flex-col gap-1">
-        <h1 className="text-xl font-bold text-white tracking-tight">Agents</h1>
-        <p className="text-[11.5px] text-slate-400">Real-time status of all AI agents in your project</p>
+      <div className="mx-[18px] mb-5 flex items-start justify-between">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-xl font-bold text-white tracking-tight">Agents</h1>
+          <p className="text-[11.5px] text-slate-400">Real-time status of all AI agents in your project</p>
+        </div>
+        
+        <div className="flex items-center gap-4">
+          <button
+            onClick={toggleAutoApprove}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors ${
+              autoApproveTools 
+                ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' 
+                : 'bg-[#2a2a3c] border-gray-700 text-gray-400 hover:text-white'
+            }`}
+            title={autoApproveTools ? "Agents will execute tools without asking" : "Agents will prompt you before executing any tool"}
+          >
+            {autoApproveTools ? <ToggleRight className="w-4 h-4 text-blue-400" /> : <ToggleLeft className="w-4 h-4" />}
+            <span className="text-[11px] font-medium">Auto-Approve Tools (Rảnh tay)</span>
+          </button>
+        </div>
       </div>
+      
+      <ToolApprovalPrompt onApprovalComplete={() => loadData()} />
 
       {/* 2. Top Filter and Layout Bar */}
       <div className="flex items-center justify-between mx-[18px] mb-6 flex-wrap gap-3 pb-4 border-b border-outline-variant/40">

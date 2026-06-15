@@ -241,7 +241,7 @@ async def _run_agent(node_target: str, input_data, trace_context=None):
 
 
 async def _stream_agent(
-    node_target: str, input_data, trace_context=None
+    node_target: str, input_data, trace_context=None, session_id: str = "default", auto_approve: bool = False
 ) -> AsyncGenerator[dict, None]:
     """Stream the appropriate agent with the parsed input."""
     from src.utils.router import get_agent_config
@@ -273,7 +273,8 @@ async def _stream_agent(
         from src.agents.dev_agent import stream_dev_agent
 
         async for chunk in stream_dev_agent(
-            input_data, model_config=model_config, trace_context=trace_context
+            input_data, model_config=model_config, trace_context=trace_context,
+            session_id=session_id, auto_approve=auto_approve
         ):
             yield chunk
     elif node_target == "qa_agent":
@@ -336,7 +337,7 @@ async def run_agent(request: RunAgentRequest):
     async def event_stream() -> AsyncGenerator[str, None]:
         try:
             async for chunk in _stream_agent(
-                request.node_target, input_data, trace_context
+                request.node_target, input_data, trace_context, request.session_id, request.auto_approve
             ):
                 # Debug logging
                 if chunk.get("event") == "completed":
@@ -360,6 +361,80 @@ async def run_agent(request: RunAgentRequest):
                 f"data: {json.dumps({'message': str(e), 'observability': trace_context.fail(str(e))}, ensure_ascii=False)}\n\n"
             )
             yield error_line
+        finally:
+            flush_observability()
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+class ResumeAgentRequest(BaseModel):
+    session_id: str
+    node_target: str
+    approved: bool
+    feedback: str = ""
+
+@app.post("/v1/agent/resume")
+async def resume_agent(request: ResumeAgentRequest):
+    """Resume a paused agent (like DEV Agent) after human tool approval."""
+    if request.node_target != "dev_agent":
+        raise HTTPException(status_code=400, detail="Only dev_agent supports resume")
+        
+    trace_context = create_trace_context(
+        session_id=request.session_id,
+        node_target=request.node_target,
+    )
+    
+    async def event_stream() -> AsyncGenerator[str, None]:
+        try:
+            from src.agents.dev_agent import stream_dev_agent, create_dev_graph
+            from langchain_core.messages import ToolMessage
+            import sqlite3
+            from langgraph.checkpoint.sqlite import SqliteSaver
+            
+            graph = create_dev_graph(auto_approve=False)
+            config = {"configurable": {"thread_id": request.session_id}}
+            
+            if not request.approved:
+                # If rejected, we must inject a ToolMessage with the rejection reason
+                # so the LLM knows its tool call failed.
+                current_state = graph.get_state(config)
+                if current_state.next and "tools" in current_state.next:
+                    last_msg = current_state.values["messages"][-1]
+                    tool_calls = last_msg.tool_calls
+                    tool_msgs = []
+                    for tc in tool_calls:
+                        tool_msgs.append(ToolMessage(
+                            tool_call_id=tc["id"],
+                            name=tc["name"],
+                            content=f"Human rejected this action. Reason: {request.feedback}"
+                        ))
+                    graph.update_state(config, {"messages": tool_msgs}, as_node="tools")
+            
+            # Resume the graph by streaming with None as input
+            async for event in graph.astream(None, config=config, stream_mode="values"):
+                messages = event.get("messages", [])
+                if messages:
+                    last_msg = messages[-1]
+                    # We can yield intermediate text if needed
+            
+            # After graph finishes or pauses again
+            new_state = graph.get_state(config)
+            if new_state.next and "tools" in new_state.next:
+                last_msg = new_state.values["messages"][-1]
+                tool_calls = last_msg.tool_calls
+                yield f"event: requires_action\ndata: {json.dumps({'message': 'Tool execution requires approval.', 'tool_calls': tool_calls})}\n\n"
+            elif new_state.values.get("final_output"):
+                yield f"event: completed\ndata: {json.dumps(new_state.values['final_output'], ensure_ascii=False)}\n\n"
+        except Exception as e:
+            logger.error(f"Agent resume error: {e}", exc_info=True)
+            yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
         finally:
             flush_observability()
 
