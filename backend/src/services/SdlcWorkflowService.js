@@ -2156,19 +2156,13 @@ class SdlcWorkflowService {
   // =========================================================================
 
   async resumeTask(taskId, approved, feedback) {
-    const task = await prisma.task.findUnique({
-      where: { id: taskId },
-      include: { project: true }
-    });
+    const task = await Task.findById(taskId);
 
     if (!task) throw new Error('Task not found');
     if (task.status !== 'PENDING_TOOL_APPROVAL') throw new Error('Task is not awaiting tool approval');
 
     // Update status to running
-    await prisma.task.update({
-      where: { id: taskId },
-      data: { status: 'running' }
-    });
+    await Task.update(taskId, { status: 'running' });
 
     // We do NOT block the API response; we handle the stream in the background
     this._resumeAgentStream(task, approved, feedback).catch(err => {
@@ -2252,13 +2246,10 @@ class SdlcWorkflowService {
           
           if (requiresActionData) {
             console.log(`[SDLC._resumeAgentStream] Task ${task.id} requires ANOTHER tool approval.`);
-            await prisma.task.update({
-              where: { id: task.id },
-              data: {
-                status: 'PENDING_TOOL_APPROVAL',
-                error: null,
-                agentOutput: JSON.stringify(requiresActionData)
-              }
+            await Task.update(task.id, {
+              status: 'PENDING_TOOL_APPROVAL',
+              error: null,
+              agentOutput: requiresActionData
             });
             const socketService = require('./socketService');
             socketService.getIo().to('global_approvals').emit('tool_approval_pending', {
