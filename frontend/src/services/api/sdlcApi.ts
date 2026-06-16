@@ -238,7 +238,7 @@ export const submitHitlDecision = async (
     comment?: string;
   }
 ) => {
-  const { data } = await api.post(`/dev/tasks/${taskId}/hitl`, payload);
+  const { data } = await api.post(`${BASE}/dev/tasks/${taskId}/hitl`, payload);
   return data;
 };
 
@@ -250,7 +250,7 @@ export const approveToolCall = async (
   approved: boolean,
   feedback: string
 ) => {
-  const { data } = await api.post(`/dev/tasks/${taskId}/approve-tool`, {
+  const { data } = await api.post(`${BASE}/dev/tasks/${taskId}/approve-tool`, {
     approved,
     feedback,
   });
@@ -258,7 +258,7 @@ export const approveToolCall = async (
 };
 
 export const getPendingToolApprovals = async (projectId: string) => {
-  const { data } = await api.get(`/dev/projects/${projectId}/pending-approvals`);
+  const { data } = await api.get(`${BASE}/dev/projects/${projectId}/pending-approvals`);
   return data;
 };
 
