@@ -2071,7 +2071,7 @@ class SdlcWorkflowService {
 
     const tasks = await Task.findByProjectId(projectId);
     const { poTask, qaTask } = this._selectCurrentTaskChain(tasks);
-    const skipsUx = this._routeSkipsUx(poTask);
+    const skipsUx = this._poRouteSkipsUx(poTask);
 
     // Determine overall status
     let overallStatus = 'idle';

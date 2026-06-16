@@ -75,13 +75,18 @@ export default function FeatureRequestChatbox({ onClose }: { onClose?: () => voi
           <div className="flex justify-end pt-1">
             <button
               type="submit"
-              disabled={isLoading || !requestText.trim()}
+              disabled={isLoading || !requestText.trim() || !currentProjectId}
               className="bg-indigo-600/90 text-white rounded-md px-5 py-2 hover:bg-indigo-600 transition-colors flex items-center justify-center font-bold text-[13px] disabled:opacity-40 disabled:cursor-not-allowed gap-2 shadow-[0_0_15px_rgba(99,102,241,0.3)] hover:shadow-[0_0_20px_rgba(99,102,241,0.5)] cursor-pointer"
             >
               {isLoading ? (
                 <>
                   <Loader2 size={15} className="animate-spin" />
                   <span>Launching Agents...</span>
+                </>
+              ) : !currentProjectId ? (
+                <>
+                  <Play size={13} fill="currentColor" />
+                  <span>Select a Project First</span>
                 </>
               ) : (
                 <>
