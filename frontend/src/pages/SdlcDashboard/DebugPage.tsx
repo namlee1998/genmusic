@@ -32,6 +32,7 @@ export default function DebugPage() {
   const [healthData, setHealthData] = useState<SystemHealthData | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [healthError, setHealthError] = useState<string | null>(null);
+  const [healthJustRefreshed, setHealthJustRefreshed] = useState(false);
 
   // Diagnosis inputs
   const [errorInput, setErrorInput] = useState('');
@@ -55,6 +56,8 @@ export default function DebugPage() {
     try {
       const data = await getProjectHealth();
       setHealthData(data);
+      setHealthJustRefreshed(true);
+      setTimeout(() => setHealthJustRefreshed(false), 2000);
     } catch (err: unknown) {
       console.error('Failed to load project health:', err);
       setHealthError(err instanceof Error ? err.message : 'Failed to connect to backend server health API');
@@ -266,8 +269,14 @@ export default function DebugPage() {
             disabled={healthLoading}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-container hover:bg-surface-container-high border border-outline-variant/40 rounded-lg text-xs font-semibold text-on-surface transition-all cursor-pointer disabled:opacity-50"
           >
-            <RefreshCw size={13} className={healthLoading ? 'animate-spin' : ''} />
-            <span>{healthLoading ? 'Checking...' : 'Refresh Health'}</span>
+            {healthJustRefreshed ? (
+              <CheckCircle2 size={13} className="text-green-500" />
+            ) : (
+              <RefreshCw size={13} className={healthLoading ? 'animate-spin' : ''} />
+            )}
+            <span className={healthJustRefreshed ? 'text-green-500' : ''}>
+              {healthLoading ? 'Checking...' : healthJustRefreshed ? 'Up to Date!' : 'Refresh Health'}
+            </span>
           </button>
         </div>
       </div>

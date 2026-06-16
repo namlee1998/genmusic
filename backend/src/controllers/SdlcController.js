@@ -640,6 +640,11 @@ class SdlcController {
     try {
       const { taskId } = req.params;
       const { approved, feedback } = req.body;
+      
+      if (approved === undefined) {
+        return res.status(400).json({ status: 'error', message: 'The "approved" boolean field is required.' });
+      }
+
       const result = await SdlcWorkflowService.resumeTask(taskId, approved, feedback);
       res.json(result);
     } catch (error) {

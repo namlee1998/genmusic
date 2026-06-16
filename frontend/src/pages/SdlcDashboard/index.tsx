@@ -43,6 +43,21 @@ const TASK_ICON: Record<string, React.ReactNode> = {
   skipped: <SkipForward size={14} className="text-on-surface-variant/60" />,
 };
 
+const translateError = (err: string | null): string | null => {
+  if (!err) return null;
+  const errStr = typeof err === 'string' ? err : (err as any).message || String(err);
+  
+  if (errStr.includes('project_id with feature_request.title')) return 'Vui lòng chọn một Dự án trước khi gửi yêu cầu tính năng mới.';
+  if (errStr.includes('Failed to start SDLC')) return 'Có lỗi xảy ra khi khởi động Agent Pipeline. Vui lòng thử lại.';
+  if (errStr.includes('Failed to check status')) return 'Không thể cập nhật trạng thái từ hệ thống. Đang kết nối lại...';
+  if (errStr.includes('Failed to resolve risk')) return 'Không thể phản hồi yêu cầu phê duyệt cổng bảo mật.';
+  if (errStr.includes('Failed to submit final release')) return 'Không thể gửi quyết định phê duyệt tính năng.';
+  if (errStr.includes('Network Error') || errStr.includes('Failed to fetch')) return 'Lỗi mạng: Không thể kết nối đến máy chủ Backend.';
+  if (errStr.includes('this._routeSkipsUx is not a function')) return 'Lỗi hệ thống: Cấu hình luồng UX bị lỗi (Đã được khắc phục).';
+  
+  return errStr;
+};
+
 export default function SdlcDashboard() {
   const {
     status, error, pollStatus, workflowId, cleanupConnections,
@@ -156,7 +171,7 @@ export default function SdlcDashboard() {
       style={{ padding: '24px 32px' }}>
       {error && (
         <div className="mx-[18px] mb-4 p-3 bg-error/10 border border-error/25 rounded-lg text-error text-[13px] flex items-center gap-2">
-          <Bug size={14} /> {error}
+          <Bug size={14} /> {translateError(error)}
         </div>
       )}
 
