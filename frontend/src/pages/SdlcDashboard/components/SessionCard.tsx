@@ -53,7 +53,7 @@ export default function SessionCard({ session, isActive, onSelect, onClose }: Se
     return <Circle size={16} className="text-gray-300" />;
   };
 
-  const completedPhases = session.pipelinePhases.filter(p => p.status === 'completed').length;
+  const completedPhases = (session.pipelinePhases || []).filter(p => p.status === 'completed').length;
   const progressPercent = (completedPhases / 4) * 100;
 
   const formatTime = (timestamp: number) => {
@@ -112,7 +112,7 @@ export default function SessionCard({ session, isActive, onSelect, onClose }: Se
 
       {/* Phase indicators */}
       <div className="grid grid-cols-4 gap-2 mb-3">
-        {session.pipelinePhases.map((phase, idx) => (
+        {(session.pipelinePhases || []).map((phase, idx) => (
           <div key={idx} className="flex flex-col items-center gap-1">
             <div className="flex items-center justify-center w-6 h-6">
               {getPhaseIcon(phase.status)}

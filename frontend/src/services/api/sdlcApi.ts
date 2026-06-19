@@ -50,6 +50,7 @@ export interface AuditEntry {
 export interface PhaseStatus {
   agent: 'PO' | 'UX' | 'DEV' | 'QA';
   status: 'pending' | 'running' | 'gate_pending' | 'completed' | 'failed' | 'skipped';
+  taskId?: string;
   duration?: string;
   awaitingReview?: boolean;
   invalid?: boolean;

@@ -300,6 +300,9 @@ export default function SdlcDashboard() {
             const duration = phaseDuration(agent);
             const hasOutputToReview = ps === 'gate_pending' && !!pendingGateForAgent(agent);
 
+            const isCompletedOrFailed = ps === 'completed' || ps === 'failed' || ps === 'gate_pending';
+            const canOpenPanel = isCompletedOrFailed && tasks.length > 0;
+
             const columnBorder = {
               pending: 'border-outline-variant/20', running: 'border-blue-500/30',
               gate_pending: 'border-amber-500/30', completed: 'border-emerald-500/20',
@@ -310,8 +313,8 @@ export default function SdlcDashboard() {
               <div
                 key={agent}
                 data-agent={agent}
-                onClick={() => hasOutputToReview && setOpenAgentPanel(agent)}
-                className={`flex flex-col gap-3 p-4 rounded-xl bg-surface-container/60 border transition-all ${columnBorder} ${hasOutputToReview ? 'cursor-pointer hover:border-amber-500/50' : ''}`}
+                onClick={() => canOpenPanel && setOpenAgentPanel(agent)}
+                className={`flex flex-col gap-3 p-4 rounded-xl bg-surface-container/60 border transition-all ${columnBorder} ${canOpenPanel ? 'cursor-pointer hover:border-white/20' : ''}`}
               >
                 {/* Agent header */}
                 <div className="flex items-center gap-2.5 pb-3 border-b border-outline-variant/20">
@@ -361,10 +364,11 @@ export default function SdlcDashboard() {
         </div>
       </div>
 
-      {openAgentPanel && activeSession && pendingGateForAgent(openAgentPanel) && (
+      {openAgentPanel && activeSession && tasksFor(openAgentPanel).length > 0 && (
         <AgentOutputPanel
           agent={openAgentPanel}
-          gate={pendingGateForAgent(openAgentPanel)!}
+          gate={pendingGateForAgent(openAgentPanel) || undefined}
+          taskId={pipelinePhases?.find(p => p.agent === openAgentPanel)?.taskId || tasksFor(openAgentPanel)[0].id}
           onClose={() => setOpenAgentPanel(null)}
           onResolved={() => activeSessionId && void pollStatus(activeSessionId)}
         />

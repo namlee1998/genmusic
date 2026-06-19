@@ -93,7 +93,9 @@ async function prepareSessionRepo({ projectId, sessionId, request = '' }) {
     canonicalExists = false;
   }
   if (!canonicalExists) {
-    throw new ApiError(400, 'No uploaded repo found for this project', 'REPO_OPEN_FAILED', 'REPO_OPEN');
+    // Auto-initialize an empty directory to support "from scratch" AI generation
+    await fs.mkdir(canonicalPath, { recursive: true });
+    await fs.writeFile(path.join(canonicalPath, 'README.md'), `# Project ${projectId}\n\nAuto-initialized by AIFA.`);
   }
 
   await fs.rm(sessionPath, { recursive: true, force: true }).catch(() => {});

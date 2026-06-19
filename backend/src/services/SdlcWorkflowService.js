@@ -37,6 +37,7 @@ const { assertOutputConforms, hasContent } = require('./agentContract');
 const repoService = require('./repoService');
 const gateBridge = require('./gateBridge');
 const claudeCodeRunner = require('../agents/claudeCodeRunner');
+const codexRunner = require('../agents/codexRunner');
 const claudePermissionDispatcher = require('../agents/claudePermissionDispatcher');
 const workflowReport = require('./workflowReport');
 const logger = require('../config/logger');
@@ -2247,7 +2248,7 @@ class SdlcWorkflowService {
 
     // Determine overall status
     let overallStatus = 'idle';
-    if (qaTask?.status === 'completed' || legacyStatus.releaseGate?.status === 'released') {
+    if ((qaTask?.status === 'completed' && qaTask?.versionStatus === 'committed') || legacyStatus.releaseGate?.status === 'released') {
       overallStatus = 'qa_complete';
     } else if (legacyStatus.currentPhase !== 'draft') {
       if (legacyStatus.currentPhase.endsWith('_REVIEW')) overallStatus = 'awaiting_approval';
@@ -2264,6 +2265,7 @@ class SdlcWorkflowService {
       return {
         agent: agentName,
         status,
+        taskId: phaseData.taskId,
         awaitingReview: phaseData.awaitingReview,
         invalid: phaseData.invalid
       };
@@ -3055,6 +3057,37 @@ class SdlcWorkflowService {
     });
 
     const executionPath = EXECUTION_PATH();
+
+    // Experimental Codex CLI path using terminal scraping
+    if (executionPath === 'codex') {
+      try {
+        const repoContext = context.repoContext || await this._getRepoContext(task.projectId);
+        const repoPath = repoContext?.repoPath || null;
+        const onGate = this._makeOnGate(task.id, task.type, {
+          projectId: task.projectId,
+          scope: { featurePaths: ['src/', 'tests/', 'docs/'] },
+        });
+
+        // Stream progress to console (no ChatService in this project)
+        const onProgress = (event) => console.log('[codexRunner:progress]', event.data?.slice?.(0, 100));
+
+        const { output } = await codexRunner.runAgent({
+          role: task.type,
+          repoPath,
+          taskId: task.id,
+          context,
+          onGate,
+          onProgress,
+        });
+
+        await this._saveAgentData(task, output, userId);
+        return;
+      } catch (err) {
+        console.error(`[SDLC._runAgent] codex path failed for task ${task.id}:`, err);
+        await this._markTaskFailed(task, err);
+        return;
+      }
+    }
 
     // Both mock and real Claude SDK runners use the same onGate and validated
     // persistence path. Opt in with EXECUTION_PATH=claude-code.
