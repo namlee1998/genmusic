@@ -3,7 +3,6 @@
 Fill this out after completing any control-plane change. It becomes the PR description and feeds the CHANGELOG.
 
 ---
-
 ## Summary
 
 ```

@@ -64,12 +64,11 @@ class SdlcController {
         repoPath: repo_path || null,
         branch: branch || 'main',
         request: request || feature_request?.title || '',
-        newWorkflow: !source_task_id,
         user: req.user,
       });
 
       return res.status(202).json({
-        workflowId: task.projectId,
+        workflowId: task.sessionId,
         task_id: task.id,
         status: task.status,
         type: task.type
@@ -260,8 +259,29 @@ class SdlcController {
 
   async listAllInterventions(req, res, next) {
     try {
-      const interventions = await SdlcWorkflowService.getAllInterventions(req.user);
+      const { project_id } = req.query || {};
+      const interventions = await SdlcWorkflowService.getAllInterventions(req.user, project_id || null);
       return res.json({ status: 'success', data: interventions });
+    } catch (err) { next(err); }
+  }
+
+  // ─── Output review gates (always-on approve/reject after every agent) ────
+
+  async resolveOutputReviewGate(req, res, next) {
+    try {
+      const { approval_id } = req.params;
+      const { action, comment } = req.body || {};
+
+      if (!action || !['approve', 'reject'].includes(action?.toLowerCase())) {
+        return res.status(400).json({ status: 'error', message: "Invalid action. Must be 'approve' or 'reject'." });
+      }
+      const result = await SdlcWorkflowService.resolveOutputReviewGate({
+        approvalId: approval_id,
+        action: action.toLowerCase(),
+        comment: comment || '',
+        user: req.user,
+      });
+      return res.json({ status: 'success', data: result });
     } catch (err) { next(err); }
   }
 
@@ -538,28 +558,36 @@ class SdlcController {
 
   async getWorkflowStatus(req, res, next) {
     try {
-      const { project_id } = req.query;
-      if (!project_id) return res.status(400).json({ status: 'error', message: 'project_id is required' });
+      const { session_id } = req.query;
+      if (!session_id) return res.status(400).json({ status: 'error', message: 'session_id is required' });
 
-      const result = await SdlcWorkflowService.getWorkflowStatus(project_id, req.user);
+      const result = await SdlcWorkflowService.getWorkflowStatus(session_id, req.user);
       return res.json({ status: 'success', data: result });
     } catch (err) { next(err); }
   }
 
   async getFinalReviewPacket(req, res, next) {
     try {
-      const { project_id } = req.params;
-      const packet = await SdlcWorkflowService.getFinalReviewPacket(project_id, req.user);
+      const { session_id } = req.params;
+      const packet = await SdlcWorkflowService.getFinalReviewPacket(session_id, req.user);
       return res.json({ status: 'success', data: packet });
+    } catch (err) { next(err); }
+  }
+
+  async listSessions(req, res, next) {
+    try {
+      const { project_id } = req.params;
+      const sessions = await SdlcWorkflowService.listSessions(project_id, req.user);
+      return res.json({ status: 'success', data: sessions });
     } catch (err) { next(err); }
   }
 
   async submitReleaseDecision(req, res, next) {
     try {
-      const { project_id } = req.params;
+      const { session_id } = req.params;
       const { decision_id, decision, comment } = req.body;
       const result = await SdlcWorkflowService.submitReleaseDecision({
-        projectId: project_id,
+        sessionId: session_id,
         decisionId: decision_id,
         decision,
         comment: comment || '',
@@ -666,8 +694,8 @@ class SdlcController {
 
   async downloadReleaseFile(req, res, next) {
     try {
-      const { project_id, file_name } = req.params;
-      const filePath = await SdlcWorkflowService.getReleaseFile(project_id, file_name, req.user);
+      const { session_id, file_name } = req.params;
+      const filePath = await SdlcWorkflowService.getReleaseFile(session_id, file_name, req.user);
       return res.download(filePath, file_name);
     } catch (err) { next(err); }
   }

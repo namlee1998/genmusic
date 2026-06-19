@@ -28,17 +28,42 @@ model Project {
   createdBy   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  
+
   tasks       Task[]
+  pipelineSessions PipelineSession[]
 }
 
 // ============================================
 // SDLC Pipeline Tables
 // ============================================
 
+// One independent PO->UX->DEV->QA feature-request run against a project's
+// uploaded repo. A project can have several of these running concurrently
+// (capped by MAX_PARALLEL_WORKFLOWS) — each gets its own working copy under
+// workspace/projects/{projectId}/sessions/{id}/repo, so sessions never share
+// or overwrite each other's (or the original upload's) files.
+model PipelineSession {
+  id            String   @id @default(uuid())
+  projectId     String
+  title         String?
+  status        String   @default("running") // running|completed|failed
+  repoPath      String?
+  workingBranch String?
+  baseBranch    String?
+  outputDir     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  project       Project  @relation(fields: [projectId], references: [id])
+  tasks         Task[]
+
+  @@index([projectId])
+}
+
 model Task {
   id                String   @id @default(uuid())
   projectId         String
+  sessionId         String?
   type              String   // "extract-flows", "generate-testcases", etc.
   status            String   @default("pending")
   promptProfile     String?
@@ -68,8 +93,11 @@ model Task {
   updatedAt         DateTime @updatedAt
 
   project           Project  @relation(fields: [projectId], references: [id])
+  session           PipelineSession? @relation(fields: [sessionId], references: [id])
   artifacts         AgentArtifact[]
   events            AgentEvent[]
+
+  @@index([projectId, sessionId])
 }
 
 model AgentEvent {

@@ -63,21 +63,70 @@ function isHttpUrl(url) {
   return /^https?:\/\/[^\s]+$/i.test(String(url || '').trim());
 }
 
-function repoPathFor(projectId) {
-  return path.join(WORKSPACE_DIR, projectId, 'repo');
+/**
+ * Canonical upload path when called with just `projectId`; the isolated,
+ * per-session working copy when `sessionId` is also given. Sessions never
+ * write into the canonical path, so concurrent sessions (and the original
+ * upload) can never clobber each other.
+ */
+function repoPathFor(projectId, sessionId) {
+  return sessionId
+    ? path.join(WORKSPACE_DIR, projectId, 'sessions', sessionId, 'repo')
+    : path.join(WORKSPACE_DIR, projectId, 'repo');
+}
+
+/**
+ * Copy the canonical uploaded repo into a fresh per-session working copy and
+ * cut the session's working branch there. Used when a new session starts
+ * against a project that was set up via "upload folder" (no remote/local
+ * repoUrl to (re)clone from).
+ * @returns {{ repoPath, workingBranch, baseBranch }}
+ */
+async function prepareSessionRepo({ projectId, sessionId, request = '' }) {
+  const canonicalPath = repoPathFor(projectId);
+  const sessionPath = repoPathFor(projectId, sessionId);
+
+  let canonicalExists = true;
+  try {
+    await fs.access(canonicalPath);
+  } catch (_) {
+    canonicalExists = false;
+  }
+  if (!canonicalExists) {
+    throw new ApiError(400, 'No uploaded repo found for this project', 'REPO_OPEN_FAILED', 'REPO_OPEN');
+  }
+
+  await fs.rm(sessionPath, { recursive: true, force: true }).catch(() => {});
+  await fs.mkdir(path.dirname(sessionPath), { recursive: true });
+  await fs.cp(canonicalPath, sessionPath, { recursive: true });
+  // Drop the canonical repo's own .git history — each session starts its own.
+  await fs.rm(path.join(sessionPath, '.git'), { recursive: true, force: true }).catch(() => {});
+
+  await git(['init'], sessionPath);
+  await git(['config', 'user.email', 'aifa-bot@local'], sessionPath);
+  await git(['config', 'user.name', 'AIFA Bot'], sessionPath);
+  await git(['checkout', '-B', 'main'], sessionPath).catch(() => {});
+  await git(['add', '-A'], sessionPath);
+  await git(['commit', '--allow-empty', '-m', 'aifa: session workspace from uploaded repo'], sessionPath).catch(() => {});
+
+  const workingBranch = `aifa/${slugify(request)}`;
+  await git(['checkout', '-B', workingBranch], sessionPath);
+
+  logger.info('session repo prepared from canonical upload', { projectId, sessionId, sessionPath });
+  return { repoPath: sessionPath, workingBranch, baseBranch: 'main' };
 }
 
 /**
  * T1.1 — clone a repo, checkout `branch`, cut a working branch `aifa/<slug>`.
  * @returns {{ repoPath, workingBranch, baseBranch }}
  */
-async function cloneRepo({ repoUrl, branch = 'main', projectId, request = '' }) {
+async function cloneRepo({ repoUrl, branch = 'main', projectId, sessionId, request = '' }) {
   if (!isHttpUrl(repoUrl)) {
     throw new ApiError(400, 'repo_url must be a valid http(s) URL', 'REPO_CLONE_FAILED', 'REPO_CLONE');
   }
   if (!projectId) throw new ApiError(400, 'projectId is required for clone', 'REPO_CLONE_FAILED', 'REPO_CLONE');
 
-  const repoPath = repoPathFor(projectId);
+  const repoPath = repoPathFor(projectId, sessionId);
   // Start from a clean target directory.
   await fs.rm(repoPath, { recursive: true, force: true }).catch(() => {});
   await fs.mkdir(path.dirname(repoPath), { recursive: true });
@@ -291,6 +340,7 @@ module.exports = {
   cloneRepo,
   useLocalRepo,
   prepareUploadedRepo,
+  prepareSessionRepo,
   commitAndDiff,
   assertRepoSafe,
   cleanupWorkspace,

@@ -46,7 +46,7 @@ function buildFinalMarkdown({ projectId, packet, audit, evidence, releaseDecisio
   md += section('Feature', evidence?.feature ? '```json\n' + JSON.stringify(evidence.feature, null, 2) + '\n```' : null);
   md += section('Product Requirements (PO)', joinedArtifacts(artifacts, 'po-agent', ['prd', 'acceptance_criteria']));
   md += section('UX Spec', artifactText(artifacts, 'ux-agent', 'ux_spec'));
-  md += section('Development Evidence', joinedArtifacts(artifacts, 'dev-agent', ['implementation_plan', 'sandbox_result', 'self_test_report']));
+  md += section('Development Evidence', joinedArtifacts(artifacts, 'dev-agent', ['implementation_plan', 'build_result', 'self_test_report']));
   md += section('Patch / Diff', diff ? '```diff\n' + diff.slice(0, 8000) + '\n```' : artifactText(artifacts, 'dev-agent', 'patch_diff'));
   md += section('QA Evidence', joinedArtifacts(artifacts, 'qa-agent', ['qa_report', 'test_run_report', 'ac_coverage_matrix']));
 
@@ -67,16 +67,16 @@ function buildFinalMarkdown({ projectId, packet, audit, evidence, releaseDecisio
 }
 
 /**
- * Write the release bundle. When a repo was cloned, final.md + QA report are
- * written INTO the repo and committed on the working branch; otherwise they go
- * to the per-project workspace so the demo still produces files.
+ * Write the release bundle into a NEW subfolder of the project's uploaded
+ * repo — `sessions/{slug}-{shortId}/` — rather than a single shared
+ * `release/` directory. This is what lets several sessions on the same
+ * uploaded project each keep their own release output without overwriting
+ * one another (or the original upload).
  *
- * @returns {{ outputs: object[], finalMdPath: string, commitHash: string|null, diff: string }}
+ * @returns {{ outputs: object[], finalMdPath: string, commitHash: string|null, diff: string, outputDir: string }}
  */
-async function writeReleaseBundle({ projectId, repoContext, packet, audit, evidence, releaseDecision }) {
+async function writeReleaseBundle({ projectId, session, repoContext, packet, audit, evidence, releaseDecision }) {
   const repoPath = repoContext?.repoPath || null;
-  const baseDir = repoPath || path.join(repoService.WORKSPACE_DIR, projectId, 'release');
-  await fs.mkdir(baseDir, { recursive: true });
 
   // Capture the diff first (DEV changes already committed during the run).
   let diff = '';
@@ -91,35 +91,45 @@ async function writeReleaseBundle({ projectId, repoContext, packet, audit, evide
     }
   }
 
+  const canonicalRepoPath = repoService.repoPathFor(projectId);
+  const slug = repoService.slugify(session?.title || 'session', 'session');
+  const shortId = String(session?.id || '').slice(0, 8) || Date.now().toString(36);
+  const outputDir = path.join(canonicalRepoPath, 'sessions', `${slug}-${shortId}`);
+  await fs.mkdir(outputDir, { recursive: true });
+
+  // Copy the session's working tree (its code changes) alongside the report,
+  // excluding git metadata — the canonical upload is left untouched.
+  if (repoPath) {
+    try {
+      const entries = await fs.readdir(repoPath);
+      await Promise.all(entries
+        .filter((entry) => entry !== '.git')
+        .map((entry) => fs.cp(path.join(repoPath, entry), path.join(outputDir, entry), { recursive: true })));
+    } catch (e) {
+      logger.warn('release bundle: working tree copy failed', { projectId, error: e.message });
+    }
+  }
+
   const finalMd = buildFinalMarkdown({ projectId, packet, audit, evidence, releaseDecision, diff });
-  const finalMdPath = path.join(baseDir, 'final.md');
+  const finalMdPath = path.join(outputDir, 'final.md');
   await fs.writeFile(finalMdPath, finalMd, 'utf8');
 
   // QA report as its own file for convenience.
   const qaReport = joinedArtifacts(packet?.artifacts || [], 'qa-agent', ['qa_report', 'test_run_report', 'ac_coverage_matrix'])
     || '_No QA evidence_';
-  const qaPath = path.join(baseDir, 'qa-report.md');
+  const qaPath = path.join(outputDir, 'qa-report.md');
   await fs.writeFile(qaPath, qaReport, 'utf8');
-
-  // Commit the report files onto the working branch when in a repo.
-  if (repoPath) {
-    try {
-      const res = await repoService.commitAndDiff({ repoPath, branch: repoContext.baseBranch || 'main', message: 'aifa: release report (final.md, qa-report.md)' });
-      if (res.commitHash) commitHash = res.commitHash;
-    } catch (e) {
-      logger.warn('release bundle: report commit failed', { projectId, error: e.message });
-    }
-  }
 
   const outputs = [
     { type: 'branch', value: repoContext?.workingBranch || null },
     { type: 'commit', value: commitHash },
+    { type: 'output_dir', value: outputDir },
     { type: 'final_md', value: finalMdPath },
     { type: 'qa_report', value: qaPath },
     { type: 'release_decision', value: releaseDecision?.decision || 'APPROVE' },
   ];
-  logger.info('release bundle written', { projectId, finalMdPath, commitHash, branch: repoContext?.workingBranch || null });
-  return { outputs, finalMdPath, commitHash, diff };
+  logger.info('release bundle written', { projectId, outputDir, finalMdPath, commitHash, branch: repoContext?.workingBranch || null });
+  return { outputs, finalMdPath, commitHash, diff, outputDir };
 }
 
 module.exports = { writeReleaseBundle, buildFinalMarkdown };

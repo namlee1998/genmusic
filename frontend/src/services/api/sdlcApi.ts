@@ -9,13 +9,24 @@ import api, { getBaseURL } from './client';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
-export type GateType = 'DEV_FILE_GATE' | 'PO_CLARIFY' | 'HITL_REVIEW' | 'FINAL_RELEASE';
+export type GateType =
+  | 'DEV_FILE_GATE'
+  | 'PO_CLARIFY'
+  | 'HITL_REVIEW'
+  | 'FINAL_RELEASE'
+  | 'PO_OUTPUT_REVIEW'
+  | 'UX_OUTPUT_REVIEW'
+  | 'DEV_OUTPUT_REVIEW'
+  | 'QA_OUTPUT_REVIEW'
+  | 'AGENT_OUTPUT_REVIEW';
 export type RouteType = 'UI' | 'BACKEND' | 'ANALYSIS' | 'FULLSTACK';
 export type GateAction = 'approve' | 'reject';
 
 export interface GateItem {
   id: string;
+  taskId?: string;
   type: GateType;
+  role?: string;             // owning agent role, e.g. 'po-agent'
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   payload: {
     action?: string;         // 'MODIFY' | 'DELETE' | 'CREATE'
@@ -23,6 +34,8 @@ export interface GateItem {
     reason?: string;         // risk reason
     diff?: string;           // unified diff
     questions?: string[];    // PO clarification questions (max 3)
+    outputSummary?: string | null;   // agent's completed-output summary (output_review gates)
+    validationIssues?: Array<{ rule: string; message?: string | null }>;
   };
   createdAt: string;
 }
@@ -367,6 +380,17 @@ export const resolveApproval = (
   body: { action?: 'approve' | 'reject'; comment?: string; answers?: string[] | Record<string, string> },
 ) => api.post(`${BASE}/approvals/${approvalId}`, body).then((r) => r.data.data);
 
+/**
+ * Resolve the always-on output-review gate created after every agent
+ * (PO/UX/DEV/QA) finishes. Reject requires a non-empty `comment` — it is fed
+ * back into a re-run of that same agent.
+ */
+export const resolveOutputReviewGate = (
+  approvalId: string,
+  action: GateAction,
+  comment?: string,
+) => api.post(`${BASE}/output-review/${approvalId}`, { action, comment }).then((r) => r.data.data);
+
 export const downloadReleaseFile = (projectId: string, fileName: 'final.md' | 'qa-report.md') =>
   api.get(`${BASE}/projects/${projectId}/release-files/${fileName}`, { responseType: 'blob' })
     .then((r) => r.data as Blob);
@@ -375,7 +399,7 @@ export const downloadReleaseFile = (projectId: string, fileName: 'final.md' | 'q
 
 export interface CardAction {
   label: string;
-  kind?: 'review' | 'penpot' | 'diff' | 'test-report' | 'approve' | 'reject';
+  kind?: 'review' | 'diff' | 'test-report' | 'approve' | 'reject';
   placeholder?: string;
 }
 export interface BoardCard {
@@ -388,7 +412,6 @@ export interface BoardCard {
   stage?: string;
   invalid: boolean;
   validationIssues?: Array<{ rule: string; detail: string }>;
-  penpotUrl?: string | null;
   patchDiff?: string | null;
   changedFiles?: string[] | null;
   testCases?: Array<Record<string, unknown>> | null;
@@ -502,17 +525,20 @@ export const getWorkflowTimeline = (projectId: string): Promise<WorkflowTimeline
 export interface GlobalInterventionItem extends GateItem {
   projectId: string;
   projectName: string;
+  sessionId: string | null;  // which of the project's (up to 4) concurrent sessions this gate belongs to
   repoUrl: string;
   pipelineStatus: string;   // e.g. 'awaiting_approval', 'qa_complete'
   currentPhase: string;     // e.g. 'PO', 'DEV', 'QA'
   updatedAt: string;        // ISO timestamp for sorting
 }
 
-const getAllInterventionsReal = (): Promise<GlobalInterventionItem[]> =>
-  api.get(`${BASE}/interventions`).then((r) => r.data.data);
+const getAllInterventionsReal = (projectId?: string): Promise<GlobalInterventionItem[]> =>
+  api.get(`${BASE}/interventions`, { params: projectId ? { project_id: projectId } : undefined }).then((r) => r.data.data);
 
-export const getAllInterventions = (): Promise<GlobalInterventionItem[]> =>
-  getAllInterventionsReal();
+// Scoped to the current project by default so one user's other projects never
+// show up as bottlenecks on this dashboard. Pass no arg to fall back to global.
+export const getAllInterventions = (projectId?: string): Promise<GlobalInterventionItem[]> =>
+  getAllInterventionsReal(projectId);
 
 export interface SystemHealthData {
   db: {

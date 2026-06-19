@@ -8,8 +8,6 @@ import { NotFoundPage } from '@/pages/NotFound';
 const SdlcDashboard = lazy(() => import('@/pages/SdlcDashboard'));
 const AuditPage = lazy(() => import('@/pages/SdlcDashboard/AuditPage'));
 const HitlDashboard = lazy(() => import('@/pages/SdlcDashboard/HitlDashboard'));
-const DebugPage = lazy(() => import('@/pages/SdlcDashboard/DebugPage'));
-const AgentsPage = lazy(() => import('@/pages/SdlcDashboard/AgentsPage'));
 import { AppTopBar } from './AppTopBar';
 import { useSdlcStore } from '@/store/useSdlcStore';
 import * as sdlcApi from '@/services/api/sdlcApi';
@@ -35,14 +33,31 @@ export const AppShell: React.FC = () => {
   const navigate = useNavigate();
   const isFeatureRequestFormOpen = useSdlcStore((s) => s.isFeatureRequestFormOpen);
   const setFeatureRequestFormOpen = useSdlcStore((s) => s.setFeatureRequestFormOpen);
+
+  // Handle feature request form navigation when project is already selected.
+  // Always (re)navigate with focusRequest=true — even when already on the
+  // Build Dashboard — since the chatbox visibility is driven purely by that
+  // URL param, not by this flag. Previously this skipped the navigate call
+  // when already on /sdlc/build, so the flag flipped true→false without ever
+  // setting focusRequest, leaving the "new feature request" button inert.
+  useEffect(() => {
+    if (!isFeatureRequestFormOpen || !currentProjectId) return;
+    navigate('/sdlc/build?focusRequest=true');
+    setFeatureRequestFormOpen(false);
+  }, [isFeatureRequestFormOpen, currentProjectId, navigate, setFeatureRequestFormOpen]);
   const isDefaultRoute = location.pathname === '/sdlc' || location.pathname === '/sdlc/'; // → HitlDashboard
   const isBuildRoute = location.pathname === '/sdlc/build' || location.pathname === '/sdlc/build/';
   const isAuditRoute = location.pathname === '/sdlc/audit' || location.pathname === '/sdlc/audit/';
-  const isDebugRoute = location.pathname === '/sdlc/debug' || location.pathname === '/sdlc/debug/';
-  const isAgentsRoute = location.pathname === '/sdlc/agents' || location.pathname === '/sdlc/agents/';
+  // Removed tabs (Platform Debugger, Agents View) redirect to Build Dashboard
+  // instead of 404'ing old bookmarks/links.
+  const isRemovedTabRoute = location.pathname.startsWith('/sdlc/debug') || location.pathname.startsWith('/sdlc/agents');
   const isUnknownAppRoute = location.pathname.startsWith('/sdlc/')
     && location.pathname !== '/sdlc/' && location.pathname !== '/sdlc'
-    && !isBuildRoute && !isAuditRoute && !isDebugRoute && !isAgentsRoute;
+    && !isBuildRoute && !isAuditRoute && !isRemovedTabRoute;
+
+  useEffect(() => {
+    if (isRemovedTabRoute) navigate('/sdlc/build', { replace: true });
+  }, [isRemovedTabRoute, navigate]);
 
   const [panelCollapsed, setPanelCollapsed] = useState(() => {
     return localStorage.getItem('project-panel-collapsed') === 'true';
@@ -62,15 +77,15 @@ export const AppShell: React.FC = () => {
     localStorage.setItem('project-panel-collapsed', String(next));
   }
 
-  async function handleCreateProject(name: string, url: string, files?: File[]) {
+  async function handleCreateProject(name: string, url: string, files?: File[], onProgress?: (pct: number) => void) {
     const res = await api.createProject(name);
     upsertProject(res.data);
-    
+
     let finalRepoUrl = url;
-    
-    if (files && import.meta.env.VITE_USE_MOCK !== 'true') {
+
+    if (files && files.length > 0 && import.meta.env.VITE_USE_MOCK !== 'true') {
       try {
-        const uploadRes = await sdlcApi.uploadRepoFolder(res.data.project_id, files);
+        const uploadRes = await sdlcApi.uploadRepoFolder(res.data.project_id, files, '', onProgress);
         if (uploadRes && uploadRes.repo_path) {
           finalRepoUrl = uploadRes.repo_path;
         }
@@ -145,17 +160,9 @@ export const AppShell: React.FC = () => {
                 <div className="flex flex-col h-full bg-background">
                   <HitlDashboard />
                 </div>
-              ) : isBuildRoute ? (
+              ) : isBuildRoute || isRemovedTabRoute ? (
                 <div className="flex flex-col h-full bg-background">
                   <SdlcDashboard />
-                </div>
-              ) : isDebugRoute ? (
-                <div className="flex flex-col h-full bg-background">
-                  <DebugPage />
-                </div>
-              ) : isAgentsRoute ? (
-                <div className="flex flex-col h-full bg-background">
-                  <AgentsPage />
                 </div>
               ) : (
                 <div className="flex flex-col h-full bg-background">
@@ -174,7 +181,7 @@ export const AppShell: React.FC = () => {
         />
       )}
 
-      {isFeatureRequestFormOpen && (
+      {isFeatureRequestFormOpen && !currentProjectId && (
         <FeatureRequestProjectDialog
           projects={panelProjects}
           onCancel={() => setFeatureRequestFormOpen(false)}

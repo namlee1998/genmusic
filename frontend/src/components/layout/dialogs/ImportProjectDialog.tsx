@@ -6,7 +6,7 @@ export function ImportProjectDialog({
   onSubmit,
 }: {
   onCancel: () => void;
-  onSubmit: (name: string, url: string, files?: File[]) => Promise<void>;
+  onSubmit: (name: string, url: string, files?: File[], onProgress?: (pct: number) => void) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const [mode, setMode] = useState<'browse' | 'manual'>('browse');
@@ -16,6 +16,7 @@ export function ImportProjectDialog({
   const [folderName, setFolderName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const validatePath = (pathStr: string) => {
@@ -105,9 +106,10 @@ export function ImportProjectDialog({
       }
       setSubmitting(true);
       setError(null);
+      setUploadProgress(selectedFiles.length > 0 ? 0 : null);
       try {
         const dummyPath = `C:\\Projects\\${name}`;
-        await onSubmit(name, dummyPath, selectedFiles);
+        await onSubmit(name, dummyPath, selectedFiles, selectedFiles.length > 0 ? setUploadProgress : undefined);
       } catch (err: unknown) {
         const msg =
           (err as { response?: { data?: { message?: string } } })?.response?.data?.message ??
@@ -116,6 +118,7 @@ export function ImportProjectDialog({
         setError(msg);
       } finally {
         setSubmitting(false);
+        setUploadProgress(null);
       }
     } else {
       const pathStr = value.trim();
@@ -272,6 +275,22 @@ export function ImportProjectDialog({
             {error}
           </p>
         )}
+
+        {submitting && uploadProgress !== null && (
+          <div className="mt-3">
+            <div className="flex items-center justify-between text-[10px] text-on-surface-variant mb-1">
+              <span>Uploading {selectedFiles.length} file{selectedFiles.length === 1 ? '' : 's'}…</span>
+              <span className="font-semibold text-on-surface">{uploadProgress}%</span>
+            </div>
+            <div className="w-full h-1.5 rounded-full bg-surface-container-high overflow-hidden">
+              <div
+                className="h-full bg-primary transition-all duration-200"
+                style={{ width: `${uploadProgress}%` }}
+              />
+            </div>
+          </div>
+        )}
+
         <div className="mt-4 flex justify-end gap-2">
           <button
             onClick={onCancel}
@@ -285,7 +304,9 @@ export function ImportProjectDialog({
             disabled={submitting || (mode === 'browse' ? !projectName.trim() : !value.trim())}
             className="flex-1 rounded bg-primary px-4 py-2 text-xs font-semibold text-on-primary hover:bg-primary/90 disabled:opacity-50 transition-colors shadow-[0_0_10px_rgba(99,102,241,0.2)]"
           >
-            {submitting ? t('layout.creating') : t('layout.createProjectBtn')}
+            {submitting
+              ? (uploadProgress !== null ? `Uploading… ${uploadProgress}%` : t('layout.creating'))
+              : t('layout.createProjectBtn')}
           </button>
         </div>
       </div>
