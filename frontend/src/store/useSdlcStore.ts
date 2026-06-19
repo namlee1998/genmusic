@@ -115,7 +115,7 @@ export interface WorkflowMetrics {
   human_rejection_rate: number;
   rerun_count_per_stage: Record<string, number>;
   gate_failure_reason_distribution: Record<string, number>;
-  sandbox_pass: boolean | null;
+  build_pass: boolean | null;
   qa_gate: string | null;
   requirement_coverage_percentage: number | null;
   false_auto_approval_rate: number;
@@ -131,51 +131,56 @@ export interface WorkflowMetrics {
   agent_policy: Record<string, { max_attempts: number; timeout_seconds: number }>;
 }
 
-export interface SdlcState {
-  // ── Input ─────────────────────────────────────────────────────────────
-  repoUrl: string;
-  featureRequest: string;
-
-  // ── Pipeline State ─────────────────────────────────────────────────────
-  workflowId: string | null;
+// ── Multi-Session State ─────────────────────────────────────────────────────
+export interface SessionData {
+  sessionId: string;
+  status: 'pending' | 'running' | 'awaiting_approval' | 'completed' | 'failed';
   routeType: sdlcApi.RouteType | null;
   pipelinePhases: sdlcApi.PhaseStatus[];
-  status: string; // cloning, analyzing, dev_running, awaiting_approval, etc.
-  isLoading: boolean;
-  error: string | null;
-
-  // ── Gates ──────────────────────────────────────────────────────────────
   pendingGates: sdlcApi.GateItem[];
   gateHistory: sdlcApi.GateItem[];
-
-  // ── Audit Log ──────────────────────────────────────────────────────────
   auditLog: sdlcApi.AuditEntry[];
-
-  // ── Output ─────────────────────────────────────────────────────────────
   qaResult: sdlcApi.QAResult | null;
   releaseStatus: 'pending' | 'approved' | 'rejected' | null;
   repoInfo: sdlcApi.PipelineResponse['repoInfo'] | null;
-
-  // ── SSE Controller ─────────────────────────────────────────────────────
+  error: string | null;
   sseAbortController: AbortController | null;
+  pollTimeout: NodeJS.Timeout | null;
+  featureRequest: string;
+  repoUrl: string;
+  createdAt: number;
+  updatedAt: number;
+}
 
+export interface SdlcState {
+  // ── Multi-Session Management ───────────────────────────────────────────
+  sessions: Record<string, SessionData>;
+  activeSessionId: string | null;
   projectId: string | null;
+
+  // ── UI State ────────────────────────────────────────────────────────────
+  isLoading: boolean;
   isFeatureRequestFormOpen: boolean;
   auditEvents: AuditEvent[];
   phaseTransitions: PhaseTransition[];
 
   // ── Actions ────────────────────────────────────────────────────────────
   startPipeline: (projectId: string, repoUrl: string, request: string) => Promise<void>;
-  resolveGate: (gateId: string, action: 'approve' | 'reject', comment?: string) => Promise<void>;
-  releaseDecision: (action: 'approve' | 'reject') => Promise<void>;
-  pollStatus: () => Promise<void>;
-  setError: (msg: string | null) => void;
+  setActiveSession: (sessionId: string | null) => void;
+  resolveGate: (sessionId: string, gateId: string, action: 'approve' | 'reject', comment?: string) => Promise<void>;
+  resolveOutputReviewGate: (sessionId: string, gateId: string, action: 'approve' | 'reject', comment?: string) => Promise<void>;
+  releaseDecision: (sessionId: string, action: 'approve' | 'reject') => Promise<void>;
+  pollStatus: (sessionId: string) => Promise<void>;
+  cleanupSession: (sessionId: string) => void;
+  setError: (sessionId: string, msg: string | null) => void;
   resetState: () => void;
   cleanupConnections: () => void;
   setProjectId: (id: string | null) => void;
   setFeatureRequestFormOpen: (isOpen: boolean) => void;
   setAuditEvents: (events: AuditEvent[]) => void;
   setPhaseTransitions: (transitions: PhaseTransition[]) => void;
+  getActiveSession: () => SessionData | null;
+  getAllSessions: () => SessionData[];
 }
 
 const DEFAULT_PHASES: sdlcApi.PhaseStatus[] = [
@@ -186,218 +191,374 @@ const DEFAULT_PHASES: sdlcApi.PhaseStatus[] = [
 ];
 
 export const useSdlcStore = create<SdlcState>((set, get) => {
-  let pollInterval: ReturnType<typeof setInterval> | null = null;
-
-  // Closes existing connections
+  // Closes existing connections for all sessions
   const cleanupConnections = () => {
-    const { sseAbortController } = get();
-    if (sseAbortController) {
-      sseAbortController.abort();
-    }
-    if (pollInterval) {
-      clearInterval(pollInterval);
-      pollInterval = null;
-    }
+    const { sessions } = get();
+    Object.values(sessions).forEach(session => {
+      if (session.sseAbortController) {
+        session.sseAbortController.abort();
+      }
+      if (session.pollTimeout) {
+        clearTimeout(session.pollTimeout);
+      }
+    });
   };
 
-  const startPolling = () => {
-    if (pollInterval) clearInterval(pollInterval);
-    pollInterval = setInterval(async () => {
-      const { status } = get();
-      if (status === 'qa_complete' || status === 'failed') {
-        if (pollInterval) {
-          clearInterval(pollInterval);
-          pollInterval = null;
-        }
+  // Start polling for a specific session (fallback only)
+  const startPollingForSession = (sessionId: string) => {
+    const session = get().sessions[sessionId];
+    if (!session) return;
+
+    // Clear existing timeout
+    if (session.pollTimeout) {
+      clearTimeout(session.pollTimeout);
+    }
+
+    const pollFn = async () => {
+      const currentSession = get().sessions[sessionId];
+      if (!currentSession) return;
+
+      if (currentSession.status === 'completed' || currentSession.status === 'failed') {
         return;
       }
-      await get().pollStatus();
-    }, 4000);
+
+      await get().pollStatus(sessionId);
+
+      // Schedule next poll
+      const nextTimeout = setTimeout(pollFn, 4000);
+      set(s => ({
+        sessions: {
+          ...s.sessions,
+          [sessionId]: { ...s.sessions[sessionId], pollTimeout: nextTimeout }
+        }
+      }));
+    };
+
+    const timeout = setTimeout(pollFn, 4000);
+    set(s => ({
+      sessions: {
+        ...s.sessions,
+        [sessionId]: { ...s.sessions[sessionId], pollTimeout: timeout }
+      }
+    }));
   };
 
   return {
-    repoUrl: '',
-    featureRequest: '',
-    workflowId: null,
-    routeType: null,
-    pipelinePhases: DEFAULT_PHASES,
-    status: 'idle',
-    isLoading: false,
-    error: null,
-    cleanupConnections,
-    pendingGates: [],
-    gateHistory: [],
-    auditLog: [],
-    qaResult: null,
-    releaseStatus: null,
-    repoInfo: null,
-    sseAbortController: null,
-
+    sessions: {},
+    activeSessionId: null,
     projectId: 'default-project',
+    isLoading: false,
     isFeatureRequestFormOpen: false,
     auditEvents: [],
     phaseTransitions: [],
 
+    cleanupConnections,
     setProjectId: (id) => set({ projectId: id }),
-    setError: (msg) => set({ error: msg }),
     setFeatureRequestFormOpen: (isOpen) => set({ isFeatureRequestFormOpen: isOpen }),
     setAuditEvents: (events) => set({ auditEvents: events }),
     setPhaseTransitions: (transitions) => set({ phaseTransitions: transitions }),
+    setActiveSession: (sessionId) => set({ activeSessionId: sessionId }),
+
+    setError: (sessionId, msg) => {
+      set(s => ({
+        sessions: {
+          ...s.sessions,
+          [sessionId]: { ...s.sessions[sessionId], error: msg }
+        }
+      }));
+    },
+
+    getActiveSession: () => {
+      const { sessions, activeSessionId } = get();
+      return activeSessionId ? sessions[activeSessionId] || null : null;
+    },
+
+    getAllSessions: () => {
+      return Object.values(get().sessions);
+    },
 
     resetState: () => {
       cleanupConnections();
       set({
-        workflowId: null,
-        routeType: null,
-        pipelinePhases: DEFAULT_PHASES,
-        status: 'idle',
-        isLoading: false,
-        error: null,
-        pendingGates: [],
-        gateHistory: [],
-        auditLog: [],
-        qaResult: null,
-        releaseStatus: null,
-        repoInfo: null
+        sessions: {},
+        activeSessionId: null
+      });
+    },
+
+    cleanupSession: (sessionId) => {
+      const session = get().sessions[sessionId];
+      if (session?.sseAbortController) {
+        session.sseAbortController.abort();
+      }
+      if (session?.pollTimeout) {
+        clearTimeout(session.pollTimeout);
+      }
+      set(s => {
+        const newSessions = { ...s.sessions };
+        delete newSessions[sessionId];
+        return {
+          sessions: newSessions,
+          activeSessionId: s.activeSessionId === sessionId ? null : s.activeSessionId
+        };
       });
     },
 
     startPipeline: async (projectId, repoUrl, request) => {
-      cleanupConnections();
-      set({
-        isLoading: true,
-        error: null,
-        repoUrl,
-        featureRequest: request,
-        status: 'cloning',
-        pipelinePhases: request.toLowerCase().includes('backend')
-          ? [
-              { agent: 'PO', status: 'pending' },
-              { agent: 'UX', status: 'skipped' },
-              { agent: 'DEV', status: 'pending' },
-              { agent: 'QA', status: 'pending' }
-            ]
-          : DEFAULT_PHASES,
-        pendingGates: [],
-        auditLog: [],
-        qaResult: null,
-        releaseStatus: 'pending'
-      });
+      set({ isLoading: true });
 
       try {
         const { workflowId, status } = await sdlcApi.startPipeline(projectId, repoUrl, request);
-        set({ workflowId, status, projectId: workflowId });
+        // Note: workflowId from API is actually the sessionId from backend
+        const sessionId = workflowId;
 
-        // Connect SSE stream
-        const abort = sdlcApi.subscribeWorkflowSSE(workflowId, {
+        const initialSession: SessionData = {
+          sessionId,
+          status: 'pending',
+          routeType: null,
+          pipelinePhases: request.toLowerCase().includes('backend')
+            ? [
+                { agent: 'PO', status: 'pending' },
+                { agent: 'UX', status: 'skipped' },
+                { agent: 'DEV', status: 'pending' },
+                { agent: 'QA', status: 'pending' }
+              ]
+            : DEFAULT_PHASES,
+          pendingGates: [],
+          gateHistory: [],
+          auditLog: [],
+          qaResult: null,
+          releaseStatus: 'pending',
+          repoInfo: null,
+          error: null,
+          sseAbortController: null,
+          pollTimeout: null,
+          featureRequest: request,
+          repoUrl,
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        };
+
+        set(s => ({
+          sessions: { ...s.sessions, [sessionId]: initialSession },
+          activeSessionId: sessionId
+        }));
+
+        // Connect SSE stream (polling starts only on error)
+        const abort = sdlcApi.subscribeWorkflowSSE(sessionId, {
           onMessage: (event, data) => {
+            const session = get().sessions[sessionId];
+            if (!session) return;
+
             if (event === 'progress') {
-              set({
-                status: (data.status as string) || get().status,
-                pipelinePhases: (data.pipelinePhases as sdlcApi.PhaseStatus[]) || get().pipelinePhases,
-                auditLog: (data.auditLog as sdlcApi.AuditEntry[]) || get().auditLog
-              });
+              set(s => ({
+                sessions: {
+                  ...s.sessions,
+                  [sessionId]: {
+                    ...s.sessions[sessionId],
+                    status: (data.status as string) || session.status,
+                    pipelinePhases: (data.pipelinePhases as sdlcApi.PhaseStatus[]) || session.pipelinePhases,
+                    auditLog: (data.auditLog as sdlcApi.AuditEntry[]) || session.auditLog,
+                    updatedAt: Date.now()
+                  }
+                }
+              }));
             } else if (event === 'gate_pending') {
               const newGate = data.gate as sdlcApi.GateItem;
               set(s => {
-                const exists = s.pendingGates.some(g => g.id === newGate.id);
-                const updatedGates = exists ? s.pendingGates : [...s.pendingGates, newGate];
+                const existingSession = s.sessions[sessionId];
+                const exists = existingSession?.pendingGates.some(g => g.id === newGate.id);
+                const updatedGates = exists ? existingSession.pendingGates : [...existingSession.pendingGates, newGate];
                 return {
-                  pendingGates: updatedGates,
-                  status: 'awaiting_approval'
+                  sessions: {
+                    ...s.sessions,
+                    [sessionId]: {
+                      ...existingSession,
+                      pendingGates: updatedGates,
+                      status: 'awaiting_approval' as const,
+                      updatedAt: Date.now()
+                    }
+                  }
                 };
               });
             } else if (event === 'gate_resolved') {
               const gateId = data.gateId as string;
               set(s => ({
-                pendingGates: s.pendingGates.filter(g => g.id !== gateId)
+                sessions: {
+                  ...s.sessions,
+                  [sessionId]: {
+                    ...s.sessions[sessionId],
+                    pendingGates: s.sessions[sessionId].pendingGates.filter(g => g.id !== gateId),
+                    updatedAt: Date.now()
+                  }
+                }
               }));
             } else if (event === 'completed') {
-              set({
-                status: 'qa_complete',
-                qaResult: (data.qaResult as sdlcApi.QAResult) || null
-              });
+              set(s => ({
+                sessions: {
+                  ...s.sessions,
+                  [sessionId]: {
+                    ...s.sessions[sessionId],
+                    status: 'completed' as const,
+                    qaResult: (data.qaResult as sdlcApi.QAResult) || null,
+                    updatedAt: Date.now()
+                  }
+                }
+              }));
             } else if (event === 'error') {
-              set({
-                status: 'failed',
-                error: (data.message as string) || 'An error occurred during execution'
-              });
+              set(s => ({
+                sessions: {
+                  ...s.sessions,
+                  [sessionId]: {
+                    ...s.sessions[sessionId],
+                    status: 'failed' as const,
+                    error: (data.message as string) || 'An error occurred during execution',
+                    updatedAt: Date.now()
+                  }
+                }
+              }));
             }
           },
           onError: (err) => {
-            console.error('SSE Error:', err);
-            if (get().workflowId) {
-              startPolling();
-            }
+            console.error('SSE Error for session', sessionId, err);
+            // Only start polling on SSE error (FIX for redundant polling bug)
+            startPollingForSession(sessionId);
           }
         });
 
-        set({ sseAbortController: abort });
-        startPolling();
+        set(s => ({
+          sessions: {
+            ...s.sessions,
+            [sessionId]: { ...s.sessions[sessionId], sseAbortController: abort }
+          }
+        }));
 
       } catch (err: unknown) {
-        set({ error: err instanceof Error ? err.message : 'Failed to start SDLC pipeline workflow', status: 'failed' });
+        const errorMsg = err instanceof Error ? err.message : 'Failed to start SDLC pipeline workflow';
+        console.error('startPipeline error:', errorMsg);
       } finally {
         set({ isLoading: false });
       }
     },
 
-    resolveGate: async (gateId, action, comment) => {
-      const { workflowId } = get();
-      if (!workflowId) return;
+    resolveGate: async (sessionId, gateId, action, comment) => {
+      const session = get().sessions[sessionId];
+      if (!session) return;
 
       set(s => ({
-        pendingGates: s.pendingGates.filter(g => g.id !== gateId),
+        sessions: {
+          ...s.sessions,
+          [sessionId]: {
+            ...s.sessions[sessionId],
+            pendingGates: s.sessions[sessionId].pendingGates.filter(g => g.id !== gateId)
+          }
+        },
         isLoading: true
       }));
 
       try {
         await sdlcApi.resolveGate(gateId, action, comment);
-        await get().pollStatus();
+        await get().pollStatus(sessionId);
       } catch (err: unknown) {
-        set({ error: err instanceof Error ? err.message : 'Failed to resolve risk control gate' });
+        set(s => ({
+          sessions: {
+            ...s.sessions,
+            [sessionId]: { ...s.sessions[sessionId], error: err instanceof Error ? err.message : 'Failed to resolve risk control gate' }
+          }
+        }));
       } finally {
         set({ isLoading: false });
       }
     },
 
-    releaseDecision: async (action) => {
-      const { workflowId } = get();
-      if (!workflowId) return;
+    resolveOutputReviewGate: async (sessionId, gateId, action, comment) => {
+      const session = get().sessions[sessionId];
+      if (!session) return;
+
+      set(s => ({
+        sessions: {
+          ...s.sessions,
+          [sessionId]: {
+            ...s.sessions[sessionId],
+            pendingGates: s.sessions[sessionId].pendingGates.filter(g => g.id !== gateId)
+          }
+        },
+        isLoading: true
+      }));
+
+      try {
+        await sdlcApi.resolveOutputReviewGate(gateId, action, comment);
+        await get().pollStatus(sessionId);
+      } catch (err: unknown) {
+        set(s => ({
+          sessions: {
+            ...s.sessions,
+            [sessionId]: { ...s.sessions[sessionId], error: err instanceof Error ? err.message : 'Failed to resolve output review gate' }
+          }
+        }));
+      } finally {
+        set({ isLoading: false });
+      }
+    },
+
+    releaseDecision: async (sessionId, action) => {
+      const session = get().sessions[sessionId];
+      if (!session) return;
 
       set({ isLoading: true });
       try {
-        const res = await sdlcApi.releaseDecision(workflowId, action);
-        if (res.success) {
-          set({ releaseStatus: action === 'approve' ? 'approved' : 'rejected' });
-        } else {
-          set({ releaseStatus: 'rejected' });
-        }
-        await get().pollStatus();
+        const res = await sdlcApi.releaseDecision(session.sessionId, action);
+        set(s => ({
+          sessions: {
+            ...s.sessions,
+            [sessionId]: {
+              ...s.sessions[sessionId],
+              releaseStatus: res.success ? (action === 'approve' ? 'approved' : 'rejected') : 'rejected'
+            }
+          }
+        }));
+        await get().pollStatus(sessionId);
       } catch (err: unknown) {
-        set({ error: err instanceof Error ? err.message : 'Failed to submit final release decision' });
+        set(s => ({
+          sessions: {
+            ...s.sessions,
+            [sessionId]: { ...s.sessions[sessionId], error: err instanceof Error ? err.message : 'Failed to submit final release decision' }
+          }
+        }));
       } finally {
         set({ isLoading: false });
       }
     },
 
-    pollStatus: async () => {
-      const { workflowId } = get();
-      if (!workflowId) return;
+    pollStatus: async (sessionId) => {
+      const session = get().sessions[sessionId];
+      if (!session) return;
+
       try {
-        const res = await sdlcApi.getPipelineStatus(workflowId);
-        set({
-          status: res.status,
-          routeType: res.routeType,
-          pipelinePhases: res.pipelinePhases,
-          pendingGates: res.pendingGates,
-          auditLog: res.auditLog,
-          qaResult: res.qaResult || null,
-          releaseStatus: res.releaseStatus || 'pending',
-          repoInfo: res.repoInfo || null
-        });
+        const res = await sdlcApi.getPipelineStatus(session.sessionId);
+        set(s => ({
+          sessions: {
+            ...s.sessions,
+            [sessionId]: {
+              ...s.sessions[sessionId],
+              status: res.status as SessionData['status'],
+              routeType: res.routeType,
+              pipelinePhases: res.pipelinePhases,
+              pendingGates: res.pendingGates,
+              auditLog: res.auditLog,
+              qaResult: res.qaResult || null,
+              releaseStatus: res.releaseStatus || 'pending',
+              repoInfo: res.repoInfo || null,
+              updatedAt: Date.now()
+            }
+          }
+        }));
       } catch (err: unknown) {
-        set({ error: err instanceof Error ? err.message : 'Failed to check status updates' });
+        set(s => ({
+          sessions: {
+            ...s.sessions,
+            [sessionId]: { ...s.sessions[sessionId], error: err instanceof Error ? err.message : 'Failed to check status updates' }
+          }
+        }));
       }
     }
   };

@@ -7,6 +7,7 @@ const AgentArtifact = require('./AgentArtifact');
 const HitlDecision = require('./HitlDecision');
 const PendingGate = require('./PendingGate');
 const AgentEvent = require('./AgentEvent');
+const PipelineSession = require('./PipelineSession');
 
 module.exports = {
   Document,
@@ -18,5 +19,6 @@ module.exports = {
   HitlDecision,
   PendingGate,
   AgentEvent,
+  PipelineSession,
 };
 

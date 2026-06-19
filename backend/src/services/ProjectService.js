@@ -62,6 +62,7 @@ class ProjectService {
       prisma.featureBacklog.deleteMany({ where: { projectId } }),
       prisma.sessionState.deleteMany({ where: { projectId } }),
       prisma.task.deleteMany({ where: { projectId } }),
+      prisma.pipelineSession.deleteMany({ where: { projectId } }),
       prisma.folder.deleteMany({ where: { projectId } }),
       prisma.project.delete({ where: { id: projectId } }),
     ]);

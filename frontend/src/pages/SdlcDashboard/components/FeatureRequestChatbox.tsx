@@ -29,12 +29,16 @@ export default function FeatureRequestChatbox({ onClose }: { onClose?: () => voi
     // Get the repository path silently from local storage (established when importing project)
     const repoUrl = currentProjectId ? (localStorage.getItem(`repoUrl_${currentProjectId}`) || '') : '';
 
-    // Start pipeline
+    // Start pipeline (creates a new session)
     await startPipeline(currentProjectId || '', repoUrl, requestText.trim());
 
-    // Clear focusRequest query parameter
+    // Clear input and close modal
+    setRequestText('');
     searchParams.delete('focusRequest');
     setSearchParams(searchParams, { replace: true });
+
+    // Optional: Show toast notification "New session started"
+    // (assuming there's a toast system available)
   };
 
   return (

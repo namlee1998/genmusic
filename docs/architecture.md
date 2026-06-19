@@ -575,3 +575,31 @@ De doc kien truc tu tong quan den chi tiet:
 12. `backend/src/services/workflowReport.js`
 13. `frontend/src/pages/SdlcDashboard/index.tsx`
 14. `agents/main.py`
+
+
+
+Add Session model + Task.sessionId to prisma schema, push schema
+
+Add Task.findLatestBySession + repoService session-aware paths/copy
+
+Rework SdlcWorkflowService run*Agent/getPipelineResponse/_countActiveWorkflows to be session-scoped
+
+Remove mock delay, parallelize artifact resolution
+
+Update SdlcController/routes for sessions (list sessions, session-scoped release/final-review)
+
+Update workflowReport.js to write release bundle into uploaded-folder subfolder
+
+Remove Penpot service/docker-compose/UI references
+
+Rename sandbox_result/sandboxDir to build_result/workspace across backend+frontend
+
+Refactor useSdlcStore to multi-session map + fix redundant polling bug
+
+Update SdlcDashboard UI to render 4 session cards with distinct status colors
+
+Update FeatureRequestChatbox + sdlcApi.ts for session-based start/list
+
+Fix claudeCodeRunner retry backoff to fail fast on non-transient errors
+
+Run backend tests + frontend typecheck, manual verification

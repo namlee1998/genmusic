@@ -6,7 +6,7 @@ interface HitlState {
   isLoading: boolean;
   error: string | null;
   lastFetchedAt: string | null;
-  fetchInterventions: () => Promise<void>;
+  fetchInterventions: (projectId?: string) => Promise<void>;
   clearError: () => void;
 }
 
@@ -16,10 +16,10 @@ export const useHitlStore = create<HitlState>((set) => ({
   error: null,
   lastFetchedAt: null,
 
-  fetchInterventions: async () => {
+  fetchInterventions: async (projectId?: string) => {
     set({ isLoading: true });
     try {
-      const data = await getAllInterventions();
+      const data = await getAllInterventions(projectId);
       // Sort by updatedAt descending
       const sorted = [...data].sort(
         (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()

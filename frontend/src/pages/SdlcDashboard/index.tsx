@@ -1,15 +1,21 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSdlcStore } from '@/store/useSdlcStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useAppStore } from '@/store/useAppStore';
 import { useSearchParams } from 'react-router-dom';
 import {
   Check, Loader2, Clock, AlertCircle, SkipForward, PlayCircle,
-  User, Palette, Code, ShieldCheck, Bug
+  User, Palette, Code, ShieldCheck, Bug, Plus, CheckCircle2
 } from 'lucide-react';
 import EmptyProjectState from './components/EmptyProjectState';
 import FeatureRequestChatbox from './components/FeatureRequestChatbox';
+import SessionCard from './components/SessionCard';
+import AgentOutputPanel from './components/AgentOutputPanel';
 import { Badge } from '@/components/ui/Badge';
+
+const AGENT_TO_ROLE: Record<'PO' | 'UX' | 'DEV' | 'QA', string> = {
+  PO: 'po-agent', UX: 'ux-agent', DEV: 'dev-agent', QA: 'qa-agent',
+};
 
 interface TaskItem {
   id: string;
@@ -21,7 +27,7 @@ interface TaskItem {
 const AGENT_META = {
   PO: { title: 'Product Owner (PO)', desc: 'Requirements & Risk Analysis', icon: <User size={18} className="text-indigo-400" /> },
   UX: { title: 'UI/UX Designer (UX)', desc: 'User Flows & Wireframes', icon: <Palette size={18} className="text-pink-400" /> },
-  DEV: { title: 'Developer (DEV)', desc: 'Code & Sandbox Execution', icon: <Code size={18} className="text-emerald-400" /> },
+  DEV: { title: 'Developer (DEV)', desc: 'Code & Build Execution', icon: <Code size={18} className="text-emerald-400" /> },
   QA: { title: 'Quality Assurance (QA)', desc: 'Validation & Compliance', icon: <ShieldCheck size={18} className="text-amber-400" /> },
 };
 
@@ -60,32 +66,67 @@ const translateError = (err: string | null): string | null => {
 
 export default function SdlcDashboard() {
   const {
-    status, error, pollStatus, workflowId, cleanupConnections,
-    pipelinePhases,
+    sessions, activeSessionId, getActiveSession, getAllSessions, setActiveSession, cleanupSession,
+    cleanupConnections, pollStatus
   } = useSdlcStore(
     useShallow((state) => ({
-      status: state.status,
-      error: state.error,
-      pollStatus: state.pollStatus,
-      workflowId: state.workflowId,
+      sessions: state.sessions,
+      activeSessionId: state.activeSessionId,
+      getActiveSession: state.getActiveSession,
+      getAllSessions: state.getAllSessions,
+      setActiveSession: state.setActiveSession,
+      cleanupSession: state.cleanupSession,
       cleanupConnections: state.cleanupConnections,
-      pipelinePhases: state.pipelinePhases,
+      pollStatus: state.pollStatus,
     }))
   );
+
+  const activeSession = getActiveSession();
+  const allSessions = getAllSessions();
+  const status = activeSession?.status || 'idle';
+  const error = activeSession?.error || null;
+  const pipelinePhases = activeSession?.pipelinePhases || [];
+
   const currentProjectId = useAppStore((s) => s.currentProjectId);
   const [searchParams, setSearchParams] = useSearchParams();
   const focusRequest = searchParams.get('focusRequest') === 'true';
   const highlightGate = searchParams.get('highlightGate');
+  const deepLinkSessionId = searchParams.get('sessionId');
+  const deepLinkAgentKey = searchParams.get('agentKey') as 'PO' | 'UX' | 'DEV' | 'QA' | null;
+
+  const [openAgentPanel, setOpenAgentPanel] = useState<'PO' | 'UX' | 'DEV' | 'QA' | null>(null);
+
+  // Jump to the session a HITL gate came from (e.g. navigated from the
+  // Intervention Center's "Review" action) before auto-opening its panel.
+  useEffect(() => {
+    if (deepLinkSessionId && deepLinkSessionId !== activeSessionId && sessions[deepLinkSessionId]) {
+      setActiveSession(deepLinkSessionId);
+    }
+  }, [deepLinkSessionId, activeSessionId, sessions, setActiveSession]);
+
+  useEffect(() => {
+    if (deepLinkAgentKey && ['PO', 'UX', 'DEV', 'QA'].includes(deepLinkAgentKey)) {
+      setOpenAgentPanel(deepLinkAgentKey);
+      const params = new URLSearchParams(searchParams);
+      params.delete('agentKey');
+      params.delete('sessionId');
+      setSearchParams(params, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkAgentKey]);
+
+  const pendingGateForAgent = (agent: 'PO' | 'UX' | 'DEV' | 'QA') =>
+    activeSession?.pendingGates.find((g) => g.role === AGENT_TO_ROLE[agent]) || null;
 
   useEffect(() => {
     return () => cleanupConnections();
   }, [cleanupConnections]);
 
   useEffect(() => {
-    if (workflowId && status !== 'idle' && status !== 'failed') {
-      void pollStatus();
+    if (activeSessionId && status !== 'idle' && status !== 'failed' && status !== 'completed') {
+      void pollStatus(activeSessionId);
     }
-  }, [workflowId, status, pollStatus]);
+  }, [activeSessionId, status, pollStatus]);
 
   // Highlight gate when navigated from Intervention Center
   useEffect(() => {
@@ -120,13 +161,13 @@ export default function SdlcDashboard() {
   const phaseDuration = (agent: 'PO' | 'UX' | 'DEV' | 'QA') =>
     pipelinePhases?.find(p => p.agent === agent)?.duration;
 
-  const getTaskStatus = (agent: 'PO' | 'UX' | 'DEV' | 'QA', idx: 1 | 2 | 3): TaskItem['status'] => {
+  const getTaskStatus = (agent: 'PO' | 'UX' | 'DEV' | 'QA', idx: number): TaskItem['status'] => {
     const ps = phaseStatus(agent);
     if (ps === 'skipped') return 'skipped';
-    if (ps === 'failed') return idx === 3 ? 'failed' : 'completed';
+    if (ps === 'failed') return 'failed';
     if (ps === 'pending') return 'pending';
     if (ps === 'running') return idx === 1 ? 'running' : 'pending';
-    if (ps === 'gate_pending') return idx === 3 ? 'gate_pending' : 'completed';
+    if (ps === 'gate_pending') return 'gate_pending';
     if (ps === 'completed') return 'completed';
     return 'pending';
   };
@@ -134,24 +175,17 @@ export default function SdlcDashboard() {
   const tasksFor = (agent: 'PO' | 'UX' | 'DEV' | 'QA'): TaskItem[] => {
     const lists: Record<string, TaskItem[]> = {
       PO: [
-        { id: 'po-1', title: 'Requirement Classification', description: 'Classify feature scope & execution route.', status: getTaskStatus('PO', 1) },
-        { id: 'po-2', title: 'PRD Generation', description: 'Generate product requirements document.', status: getTaskStatus('PO', 2) },
-        { id: 'po-3', title: 'Requirements Gate', description: 'Awaiting human review for clarification.', status: getTaskStatus('PO', 3) },
+        { id: 'po-1', title: 'Generate PRD', description: 'Create product requirements document.', status: getTaskStatus('PO', 1) },
       ],
       UX: [
-        { id: 'ux-1', title: 'User Flow Design', description: 'Outline interaction paths and navigation.', status: getTaskStatus('UX', 1) },
-        { id: 'ux-2', title: 'Wireframes & UI Specs', description: 'Draft visual specs and layout.', status: getTaskStatus('UX', 2) },
-        { id: 'ux-3', title: 'Component Inventory', description: 'Finalize component elements.', status: getTaskStatus('UX', 3) },
+        { id: 'ux-1', title: 'Create HTML Mockup', description: 'Design interactive HTML interface.', status: getTaskStatus('UX', 1) },
       ],
       DEV: [
-        { id: 'dev-1', title: 'Implementation Plan', description: 'Draft file modifications and test plans.', status: getTaskStatus('DEV', 1) },
-        { id: 'dev-2', title: 'Code Modification', description: 'Apply changes and check security rules.', status: getTaskStatus('DEV', 2) },
-        { id: 'dev-3', title: 'Sandbox Execution & Gate', description: 'Run compiler, linter, tests.', status: getTaskStatus('DEV', 3) },
+        { id: 'dev-1', title: 'Generate Code Diff', description: 'Create and review code changes.', status: getTaskStatus('DEV', 1) },
+        { id: 'dev-2', title: 'Execute Build', description: 'Run compiler, linter, and tests.', status: getTaskStatus('DEV', 2) },
       ],
       QA: [
-        { id: 'qa-1', title: 'Test Cases Execution', description: 'Verify coverage and regression tests.', status: getTaskStatus('QA', 1) },
-        { id: 'qa-2', title: 'Security Scan & Compliance', description: 'Check OWASP and dependency audit.', status: getTaskStatus('QA', 2) },
-        { id: 'qa-3', title: 'Release Recommendation', description: 'Provide final QA audit report.', status: getTaskStatus('QA', 3) },
+        { id: 'qa-1', title: 'Test & Verify', description: 'Create and auto-execute test cases.', status: getTaskStatus('QA', 1) },
       ],
     };
     return lists[agent];
@@ -176,7 +210,43 @@ export default function SdlcDashboard() {
       )}
 
       <div className="flex flex-col gap-5">
-        {focusRequest && <FeatureRequestChatbox />}
+        {focusRequest && <FeatureRequestChatbox onClose={() => {
+        searchParams.delete('focusRequest');
+        setSearchParams(searchParams);
+      }} />}
+
+        {/* Session Grid */}
+        {Object.keys(sessions).length > 0 && (
+          <div className="mx-[18px] space-y-2">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-on-surface">Active Sessions ({allSessions.length})</h2>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {allSessions.map(session => (
+                <SessionCard
+                  key={session.sessionId}
+                  session={session}
+                  isActive={session.sessionId === activeSessionId}
+                  onSelect={setActiveSession}
+                  onClose={cleanupSession}
+                />
+              ))}
+              {allSessions.length < 4 && (
+                <div className="border-2 border-dashed border-outline-variant/40 rounded-lg p-4 flex items-center justify-center text-center hover:bg-surface-container/30 transition-colors cursor-pointer"
+                  onClick={() => {
+                    const params = new URLSearchParams(searchParams);
+                    params.set('focusRequest', 'true');
+                    setSearchParams(params);
+                  }}>
+                  <div className="flex flex-col items-center gap-2">
+                    <Plus size={20} className="text-on-surface-variant" />
+                    <span className="text-xs text-on-surface-variant font-medium">New Session</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Header */}
         <div className="mx-[18px] flex items-center justify-between flex-wrap gap-3">
@@ -188,6 +258,18 @@ export default function SdlcDashboard() {
             <Badge variant={getBadgeVariant(status || 'idle')} className="px-2.5 py-1 text-[10px]">
               {(status || 'idle').replace('_', ' ').toUpperCase()}
             </Badge>
+            {status === 'awaiting_approval' && (
+              <button
+                onClick={() => {
+                  const blocked = (['PO', 'UX', 'DEV', 'QA'] as const).find((a) => phaseStatus(a) === 'gate_pending');
+                  if (blocked) setOpenAgentPanel(blocked);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-400 hover:bg-amber-500/30 transition-colors text-xs font-semibold"
+              >
+                <CheckCircle2 size={14} />
+                View & Approve
+              </button>
+            )}
           </div>
         </div>
 
@@ -216,6 +298,10 @@ export default function SdlcDashboard() {
             const tasks = tasksFor(agent);
             const meta = AGENT_META[agent];
             const duration = phaseDuration(agent);
+            const hasOutputToReview = ps === 'gate_pending' && !!pendingGateForAgent(agent);
+
+            const isCompletedOrFailed = ps === 'completed' || ps === 'failed' || ps === 'gate_pending';
+            const canOpenPanel = isCompletedOrFailed && tasks.length > 0;
 
             const columnBorder = {
               pending: 'border-outline-variant/20', running: 'border-blue-500/30',
@@ -224,7 +310,12 @@ export default function SdlcDashboard() {
             }[ps] || 'border-outline-variant/20';
 
             return (
-              <div key={agent} data-agent={agent} className={`flex flex-col gap-3 p-4 rounded-xl bg-surface-container/60 border transition-all ${columnBorder}`}>
+              <div
+                key={agent}
+                data-agent={agent}
+                onClick={() => canOpenPanel && setOpenAgentPanel(agent)}
+                className={`flex flex-col gap-3 p-4 rounded-xl bg-surface-container/60 border transition-all ${columnBorder} ${canOpenPanel ? 'cursor-pointer hover:border-white/20' : ''}`}
+              >
                 {/* Agent header */}
                 <div className="flex items-center gap-2.5 pb-3 border-b border-outline-variant/20">
                   <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-surface-container-high/60">
@@ -272,6 +363,16 @@ export default function SdlcDashboard() {
           })}
         </div>
       </div>
+
+      {openAgentPanel && activeSession && tasksFor(openAgentPanel).length > 0 && (
+        <AgentOutputPanel
+          agent={openAgentPanel}
+          gate={pendingGateForAgent(openAgentPanel) || undefined}
+          taskId={pipelinePhases?.find(p => p.agent === openAgentPanel)?.taskId || tasksFor(openAgentPanel)[0].id}
+          onClose={() => setOpenAgentPanel(null)}
+          onResolved={() => activeSessionId && void pollStatus(activeSessionId)}
+        />
+      )}
     </main>
   );
 }

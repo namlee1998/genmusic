@@ -45,6 +45,10 @@ router.get('/approvals', SdlcController.listPendingApprovals.bind(SdlcController
 router.post('/approvals/:approval_id', SdlcController.resolveApproval.bind(SdlcController));
 router.get('/interventions', SdlcController.listAllInterventions.bind(SdlcController));
 
+// ── Output review gates — always-on approve/reject after every agent finishes ─
+// POST /api/v1/sdlc/output-review/:approval_id  { action:'approve'|'reject', comment? }
+router.post('/output-review/:approval_id', SdlcController.resolveOutputReviewGate.bind(SdlcController));
+
 // ── Task Status ──────────────────────────────────────────────────────────
 router.get('/tasks/:task_id', SdlcController.getTaskStatus.bind(SdlcController));
 router.get('/tasks/:task_id/events', SdlcController.getTaskEvents.bind(SdlcController));
@@ -57,14 +61,16 @@ router.get('/stream/:workflowId', SdlcController.streamPipelineStatus.bind(SdlcC
 // ── Workflow-level views ──────────────────────────────────────────────────
 // GET /api/v1/sdlc/workflow-status?project_id=xxx
 router.get('/workflow-status', SdlcController.getWorkflowStatus.bind(SdlcController));
-router.get('/final-review-packet/:project_id', SdlcController.getFinalReviewPacket.bind(SdlcController));
-router.post('/projects/:project_id/release-decision', SdlcController.submitReleaseDecision.bind(SdlcController));
+// ── Sessions (a project can run several feature-request pipelines at once) ─
+router.get('/projects/:project_id/sessions', SdlcController.listSessions.bind(SdlcController));
+router.get('/sessions/:session_id/final-review-packet', SdlcController.getFinalReviewPacket.bind(SdlcController));
+router.post('/sessions/:session_id/release-decision', SdlcController.submitReleaseDecision.bind(SdlcController));
+router.get('/sessions/:session_id/release-files/:file_name', SdlcController.downloadReleaseFile.bind(SdlcController));
 router.get('/audit-trail/:project_id', SdlcController.getAuditTrail.bind(SdlcController));
 // T7: alias — same event timeline as audit-trail, UI-friendly path.
 router.get('/workflow/:id/timeline', SdlcController.getTimeline.bind(SdlcController));
 router.get('/projects/:project_id/metrics', SdlcController.getWorkflowMetrics.bind(SdlcController));
 router.get('/projects/:project_id/artifacts', SdlcController.getProjectArtifacts.bind(SdlcController));
-router.get('/projects/:project_id/release-files/:file_name', SdlcController.downloadReleaseFile.bind(SdlcController));
 
 router.get('/dev/projects/:project_id/artifacts', authenticateDev, SdlcController.getProjectArtifacts.bind(SdlcController));
 

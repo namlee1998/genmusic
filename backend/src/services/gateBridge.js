@@ -103,10 +103,17 @@ function requestGate({ taskId, projectId = null, role, kind, payload = {}, emitS
   // drive an agent await `ready`, so a visible gate always has durable state.
   const ready = (async () => {
     await PendingGate.create(eventData);
-    await taskLifecycle.transitionIfPresent(taskId, 'awaiting_gate', {
-      actor: role,
-      payload: { approvalId, kind },
-    });
+    // 'output_review' gates are created AFTER the owning agent's task has
+    // already reached the terminal `completed` executionStatus — there is no
+    // live in-process thread to suspend (unlike 'question'/'tool' gates, which
+    // pause a still-running agent). `completed` has no outgoing transitions,
+    // so attempting awaiting_gate/running here would throw; skip it.
+    if (kind !== 'output_review') {
+      await taskLifecycle.transitionIfPresent(taskId, 'awaiting_gate', {
+        actor: role,
+        payload: { approvalId, kind },
+      });
+    }
     if (typeof emitSse === 'function') emitSse('gate_pending', eventData);
     emit(taskId, 'gate_pending', eventData);
     logger.info('gate_pending', { approvalId, taskId, role, kind });
@@ -135,11 +142,16 @@ async function resolveGate(approvalId, result = {}) {
   rec.status = result.timedOut ? 'timed_out' : (result.action === 'reject' ? 'rejected' : 'resolved');
   pending.delete(approvalId);
   await PendingGate.resolve(approvalId, rec.status, result);
-  await taskLifecycle.transitionIfPresent(rec.taskId, 'running', {
-    actor: 'human',
-    payload: { approvalId, result, gateStatus: rec.status },
-    eventType: 'gate_resolved',
-  });
+  // See requestGate: 'output_review' gates never moved the task to
+  // awaiting_gate (it was already terminal/`completed`), so there is nothing
+  // to resume here — resolveOutputReviewGate drives the next step directly.
+  if (rec.kind !== 'output_review') {
+    await taskLifecycle.transitionIfPresent(rec.taskId, 'running', {
+      actor: 'human',
+      payload: { approvalId, result, gateStatus: rec.status },
+      eventType: 'gate_resolved',
+    });
+  }
   emit(rec.taskId, 'gate_resolved', { approvalId, taskId: rec.taskId, result });
   logger.info('gate_resolved', { approvalId, taskId: rec.taskId, action: result.action || 'allow' });
   rec.resolve(result);

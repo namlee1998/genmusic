@@ -23,6 +23,7 @@ class TaskModel {
         data: {
           id: data.id,
           projectId: data.projectId,
+          sessionId: data.sessionId || null,
           type: data.type,
           status: data.status || 'pending',
           promptProfile: data.promptProfile,
@@ -114,6 +115,14 @@ class TaskModel {
     return (data || []).map(this._map);
   }
 
+  static async findBySessionId(sessionId) {
+    const data = await prisma.task.findMany({
+      where: { sessionId },
+      orderBy: { createdAt: 'desc' }
+    });
+    return (data || []).map(this._map);
+  }
+
   static async list(filters = {}) {
     const limit = Number.isFinite(filters.limit) ? filters.limit : 50;
     const take = Math.max(1, Math.min(limit, 200));
@@ -151,6 +160,22 @@ class TaskModel {
     return this._map(data);
   }
 
+  /** Same as findLatestByProject, scoped to one pipeline session instead of
+   * the whole project — needed once a project can have several sessions
+   * running concurrently. */
+  static async findLatestBySession(sessionId, type, status = null, versionStatus = null) {
+    const where = { sessionId };
+    if (type) where.type = type;
+    if (status) where.status = status;
+    if (versionStatus) where.versionStatus = versionStatus;
+
+    const data = await prisma.task.findFirst({
+      where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
+    });
+    return this._map(data);
+  }
+
   static async commitTask(id) {
     const record = await prisma.task.update({
       where: { id },
@@ -164,6 +189,7 @@ class TaskModel {
     return {
       id: row.id,
       projectId: row.projectId,
+      sessionId: row.sessionId || null,
       type: row.type,
       status: row.status,
       promptProfile: row.promptProfile,

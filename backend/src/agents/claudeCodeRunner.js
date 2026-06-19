@@ -88,7 +88,7 @@ function compactContext(role, context = {}) {
     ],
     'qa-agent': [
       'acceptance_criteria', 'risk_classification', 'ux_spec', 'implementation_plan',
-      'patch_diff', 'mock_code_diff', 'changed_files', 'sandbox_result',
+      'patch_diff', 'mock_code_diff', 'changed_files', 'build_result',
       'self_test_report', 'risk_assessment', 'security_notes', 'security_gate', 'feedbackPrompt', 'repoContext',
     ],
   }[role] || Object.keys(context);
@@ -403,11 +403,10 @@ async function runAgent({
   context = {},
   onGate,
   onProgress,
-  sandboxDir,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 }) {
   const { query } = await loadSdk();
-  const cwd = repoPath || sandboxDir || process.cwd();
+  const cwd = repoPath || process.cwd();
   const prompt = await buildPrompt({ role, repoPath, context });
 
   // One streaming run of the agent. Returns the raw result fields; throws on
