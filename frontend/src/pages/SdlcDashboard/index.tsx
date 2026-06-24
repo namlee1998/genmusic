@@ -538,7 +538,8 @@ export default function SdlcDashboard() {
           agent={openAgentPanel}
           gate={pendingGateForAgent(openAgentPanel) || undefined}
           taskId={pipelinePhases.find(p => p.agent === openAgentPanel)?.taskId || tasksFor(openAgentPanel)[0].id}
-          phaseStatus={phaseStatus(openAgentPanel)}
+          sessionId={activeSessionId!}
+          phaseStatus={phaseStatus(openAgentPanel) as any}
           onClose={() => setOpenAgentPanel(null)}
           onResolved={() => activeSessionId && void pollStatus(activeSessionId)}
         />

@@ -860,8 +860,8 @@ class SdlcController {
           try {
             output = await repoService.git(['commit', '-m', msg], repoPath);
           } catch (e) {
-            if (e.message.includes('nothing to commit')) {
-              output = 'Nothing to commit, working tree clean.';
+            if (e.message.includes('nothing to commit') || e.message.includes('không có gì để chuyển giao')) {
+              output = 'Không có thay đổi nào mới để Commit (Working tree clean).';
             } else {
               throw e;
             }

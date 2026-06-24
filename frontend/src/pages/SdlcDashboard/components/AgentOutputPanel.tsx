@@ -39,7 +39,8 @@ interface AgentOutputPanelProps {
   agent: 'PO' | 'UX' | 'DEV' | 'QA';
   gate?: GateItem;
   taskId: string;
-  phaseStatus?: string;
+  sessionId: string;
+  phaseStatus: 'pending' | 'running' | 'gate_pending' | 'completed' | 'skipped' | 'failed';
   onClose: () => void;
   onResolved: () => void;
 }
@@ -386,7 +387,7 @@ function DevDiffViewer({ devData }: { devData: DevArtifacts }) {
 
 // ── Main Panel ─────────────────────────────────────────────────────────────
 
-export default function AgentOutputPanel({ agent, gate, taskId, phaseStatus, onClose, onResolved }: AgentOutputPanelProps) {
+export default function AgentOutputPanel({ agent, gate, taskId, sessionId, phaseStatus, onClose, onResolved }: AgentOutputPanelProps) {
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<string | null>(null);
   const [artifacts, setArtifacts] = useState<TaskArtifact[]>([]);
@@ -421,15 +422,6 @@ export default function AgentOutputPanel({ agent, gate, taskId, phaseStatus, onC
     }
 
     try {
-      // sessionId is actually what we pass to SdlcController. 
-      // The parent passes taskId, but in our pipeline, sessionId and taskId might differ.
-      // Wait, executeGitAction expects sessionId. We need to parse sessionId from somewhere or use currentProjectId.
-      // Wait, in SdlcDashboard, activeSessionId is available, but AgentOutputPanel only has taskId.
-      // Actually, we can get sessionId from the URL or pass it as prop. Let's assume the backend expects sessionId.
-      // Let's pass the taskId as sessionId for now, or get active session from URL params.
-      const urlParams = new URLSearchParams(window.location.search);
-      const sessionId = urlParams.get('session') || taskId.split('-')[0]; // fallback
-      
       const res = await executeGitAction(sessionId, action, agent, token);
       if (res.success) {
         setGitSuccess(`Thành công! ${res.output ? res.output : ''}`);

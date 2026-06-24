@@ -37,9 +37,10 @@ const SECRET_PATTERNS = [
 /** Run a git command, rejecting with a readable error envelope on failure. */
 function git(args, cwd, { timeout = 120000 } = {}) {
   return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, timeout, maxBuffer: 1024 * 1024 * 64, windowsHide: true }, (err, stdout, stderr) => {
+    const env = { ...process.env, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' };
+    execFile('git', args, { cwd, timeout, maxBuffer: 1024 * 1024 * 64, windowsHide: true, env }, (err, stdout, stderr) => {
       if (err) {
-        const detail = (stderr || err.message || '').toString().trim();
+        const detail = (stderr || stdout || err.message || '').toString().trim();
         reject(new ApiError(502, `git ${args[0]} failed: ${detail}`, 'REPO_CLONE_FAILED', 'REPO_CLONE'));
         return;
       }
