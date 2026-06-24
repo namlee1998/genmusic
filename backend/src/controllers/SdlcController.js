@@ -922,7 +922,9 @@ class SdlcController {
               'Accept': 'application/vnd.github.v3+json'
             }
           }).catch(e => {
-            throw new Error(`Failed to create PR: ${e.response?.data?.message || e.message}`);
+            const { ApiError } = require('../middleware/errorHandler');
+            const detail = e.response?.data?.errors?.[0]?.message || e.response?.data?.message || e.message;
+            throw new ApiError(400, `Failed to create PR: ${detail}`);
           });
           
           output = `Pull request created successfully! URL: ${prResponse.data.html_url}`;
