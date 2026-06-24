@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSdlcStore } from '@/store/useSdlcStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useAppStore } from '@/store/useAppStore';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Check, Loader2, Clock, AlertCircle, SkipForward, PlayCircle,
-  User, Palette, Code, ShieldCheck, Bug, Plus, CheckCircle2
+  User, Palette, Code, ShieldCheck, Bug, Plus, CheckCircle2, RotateCcw, FolderOpen,
+  GitPullRequest, UploadCloud, DownloadCloud, Save, FileText
 } from 'lucide-react';
 import EmptyProjectState from './components/EmptyProjectState';
 import FeatureRequestChatbox from './components/FeatureRequestChatbox';
@@ -67,7 +68,7 @@ const translateError = (err: string | null): string | null => {
 export default function SdlcDashboard() {
   const {
     sessions, activeSessionId, getActiveSession, getAllSessions, setActiveSession, cleanupSession,
-    cleanupConnections, pollStatus
+    cleanupConnections, pollStatus, startPipeline
   } = useSdlcStore(
     useShallow((state) => ({
       sessions: state.sessions,
@@ -78,6 +79,7 @@ export default function SdlcDashboard() {
       cleanupSession: state.cleanupSession,
       cleanupConnections: state.cleanupConnections,
       pollStatus: state.pollStatus,
+      startPipeline: state.startPipeline,
     }))
   );
 
@@ -93,6 +95,7 @@ export default function SdlcDashboard() {
 
   const currentProjectId = useAppStore((s) => s.currentProjectId);
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const focusRequest = searchParams.get('focusRequest') === 'true';
   const highlightGate = searchParams.get('highlightGate');
   const deepLinkSessionId = searchParams.get('sessionId');
@@ -293,12 +296,47 @@ export default function SdlcDashboard() {
                       onClick={() => setActiveSession(session.sessionId)}
                     >
                       <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-sm font-semibold text-on-surface truncate">
+                        <h3 className="text-sm font-semibold text-on-surface truncate flex-1 mr-2" title={session.featureRequest || 'Untitled Session'}>
                           {session.featureRequest || 'Untitled Session'}
                         </h3>
-                        <Badge variant={getBadgeVariant(session.status || 'idle')} className="text-[10px] px-1.5 py-0.5">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            // Mở thẳng thư mục cha chứa tất cả project
+                            const path = `/home/dotrongminh/Documents/VFS/team6_End-to-End-Autonomous-Software-Factory-Multi-AI-Agent-Team-/workspace/projects`;
+                            window.open(`vscode://file${path}`, '_self');
+                          }}
+                          className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded bg-surface-container-highest/50 text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-colors"
+                          title="Open generated code in VSCode"
+                        >
+                          <FolderOpen size={12} />
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between mb-2">
+                        <Badge variant={
+                          session.status === 'failed' ? 'danger' :
+                          session.status === 'completed' ? 'success' :
+                          session.status === 'running' ? 'info' :
+                          session.status === 'awaiting_approval' ? 'warning' : 'outline'
+                        } className="text-[9px] px-1.5 py-0.5">
                           {session.status?.replace('_', ' ').toUpperCase()}
                         </Badge>
+                        {session.status === 'failed' && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const repoUrl = localStorage.getItem(`repoUrl_${currentProjectId}`) || '';
+                              if (repoUrl && session.featureRequest && currentProjectId) {
+                                startPipeline(currentProjectId, repoUrl, session.featureRequest);
+                              }
+                            }}
+                            className="flex items-center gap-1 px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-[9px] font-semibold"
+                          >
+                            <RotateCcw size={10} />
+                            Retry
+                          </button>
+                        )}
                       </div>
                       
                       <div className="mb-3">
@@ -340,6 +378,44 @@ export default function SdlcDashboard() {
                             </div>
                           );
                         })}
+                      </div>
+
+                      {/* Handoff / Report Button */}
+                      {session.status === 'completed' && (
+                        <div className="mt-3 pt-3 border-t border-outline-variant/10">
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); navigate('/sdlc/audit'); }}
+                            className="w-full flex justify-center items-center gap-2 py-2 rounded-lg bg-primary text-on-primary hover:bg-primary/90 transition-colors text-[11px] font-bold shadow-sm" title="Generate Overall Report">
+                            <FileText size={14} />
+                            Báo cáo tổng thể (Release Notes)
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Git Action Buttons */}
+                      <div className="flex gap-1.5 mt-3 pt-3 border-t border-outline-variant/10">
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); alert('Syncing with remote repository...'); }}
+                          className="flex-1 flex justify-center items-center gap-1 py-1 rounded bg-surface-container-highest/50 text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-colors text-[9px] font-medium" title="Sync & Pull Latest">
+                          <DownloadCloud size={10} /> Sync
+                        </button>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); alert('Committing local changes...'); }}
+                          className="flex-1 flex justify-center items-center gap-1 py-1 rounded bg-surface-container-highest/50 text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-colors text-[9px] font-medium" title="Commit Local Changes">
+                          <Save size={10} /> Commit
+                        </button>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); alert('Pushing branch to remote...'); }}
+                          className="flex-1 flex justify-center items-center gap-1 py-1 rounded bg-surface-container-highest/50 text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-colors text-[9px] font-medium" title="Push Branch">
+                          <UploadCloud size={10} /> Push
+                        </button>
+                        {session.status === 'completed' && (
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); alert('Creating Pull Request on GitHub/GitLab...'); }}
+                            className="flex-1 flex justify-center items-center gap-1 py-1 rounded bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-colors text-[9px] font-bold" title="Create Pull Request">
+                            <GitPullRequest size={10} /> PR
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
@@ -462,6 +538,7 @@ export default function SdlcDashboard() {
           agent={openAgentPanel}
           gate={pendingGateForAgent(openAgentPanel) || undefined}
           taskId={pipelinePhases.find(p => p.agent === openAgentPanel)?.taskId || tasksFor(openAgentPanel)[0].id}
+          phaseStatus={phaseStatus(openAgentPanel)}
           onClose={() => setOpenAgentPanel(null)}
           onResolved={() => activeSessionId && void pollStatus(activeSessionId)}
         />

@@ -92,7 +92,7 @@ const startPipelineReal = (projectId: string, repoUrl: string, request: string):
       title: request,
       description: request
     },
-    repo_path: repoUrl,
+    repo_url: repoUrl,
     request
   }).then((r) => r.data);
 
@@ -126,6 +126,21 @@ const resolveGateReal = (gateId: string, action: 'approve' | 'reject', comment?:
 
 const releaseDecisionReal = (projectId: string, action: 'approve' | 'reject'): Promise<{ success: boolean; branch?: string; finalMd?: string }> =>
   api.post(`${BASE}/projects/${projectId}/release-decision`, { action }).then((r) => r.data);
+
+export const executeGitAction = async (
+  sessionId: string,
+  action: 'sync' | 'commit' | 'push' | 'pr',
+  agent: string,
+  githubToken?: string,
+  commitMessage?: string
+): Promise<{ success: boolean; output?: string; message?: string }> => {
+  return api.post(`${BASE}/session/${sessionId}/git-action`, {
+    action,
+    agent,
+    githubToken,
+    commitMessage
+  }).then(r => r.data);
+};
 
 // ── Real SSE Subscription ──────────────────────────────────────────────────
 

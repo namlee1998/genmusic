@@ -20,11 +20,12 @@ export function ImportProjectDialog({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const validatePath = (pathStr: string) => {
-    if (!pathStr.trim()) return t('layout.projectNameLabel', 'Local folder path is required');
+    if (!pathStr.trim()) return t('layout.projectNameLabel', 'Local folder path or Git URL is required');
     const isWindowsAbsolute = /^[a-zA-Z]:[\\/]/i.test(pathStr.trim());
     const isUnixAbsolute = pathStr.trim().startsWith('/') || pathStr.trim().startsWith('\\\\');
-    if (!isWindowsAbsolute && !isUnixAbsolute) {
-      return 'Please enter a valid absolute local directory path (e.g., C:\\Projects\\my-app or /Users/name/my-app)';
+    const isHttpUrl = /^https?:\/\//i.test(pathStr.trim());
+    if (!isWindowsAbsolute && !isUnixAbsolute && !isHttpUrl) {
+      return 'Please enter a valid absolute local directory path or a Git HTTP URL (e.g., https://github.com/user/repo)';
     }
     return '';
   };
@@ -172,7 +173,7 @@ export function ImportProjectDialog({
                 : 'text-on-surface-variant hover:text-on-surface'
             }`}
           >
-            Enter Path
+            Enter Path / URL
           </button>
         </div>
 
@@ -247,7 +248,7 @@ export function ImportProjectDialog({
                 </p>
               )}
               <p className="text-[9px] text-on-surface-variant/60 mt-1.5 leading-normal text-center">
-                Tip: Use <strong>Enter Path</strong> tab for immediate local workspace linking.
+                Tip: Use <strong>Enter Path / URL</strong> tab to link an existing Github repo or local path.
               </p>
             </div>
           </div>

@@ -38,6 +38,9 @@ router.post('/tasks/:task_id/decision', SdlcController.submitStructuredDecision.
 // Cancel a running/awaiting task (DMO — timeout & cancel)
 router.post('/tasks/:task_id/cancel', SdlcController.cancelTask.bind(SdlcController));
 
+// ── Git Actions ───────────────────────────────────────────────────────────
+router.post('/session/:session_id/git-action', SdlcController.executeGitAction.bind(SdlcController));
+
 // ── Gate approvals (T2.4) — claude-code onGate pending gates ───────────────
 // GET  /api/v1/sdlc/approvals?task_id=xxx   list pending gates
 // POST /api/v1/sdlc/approvals/:approval_id  { action, comment } | { answers }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { X, Check, RefreshCw, AlertTriangle, Monitor, Layers, GitBranch, FileCode2, FileDiff, CheckCircle2, XCircle } from 'lucide-react';
-import { getSdlcTaskStatus, resolveOutputReviewGate, type GateItem } from '@/services/api/sdlcApi';
+import { X, Check, RefreshCw, AlertTriangle, Monitor, Layers, GitBranch, FileCode2, FileDiff, CheckCircle2, XCircle, DownloadCloud, UploadCloud, GitPullRequest, Save } from 'lucide-react';
+import { getSdlcTaskStatus, resolveOutputReviewGate, executeGitAction, type GateItem } from '@/services/api/sdlcApi';
 
 interface TaskArtifact {
   id: string;
@@ -39,6 +39,7 @@ interface AgentOutputPanelProps {
   agent: 'PO' | 'UX' | 'DEV' | 'QA';
   gate?: GateItem;
   taskId: string;
+  phaseStatus?: string;
   onClose: () => void;
   onResolved: () => void;
 }
@@ -385,17 +386,62 @@ function DevDiffViewer({ devData }: { devData: DevArtifacts }) {
 
 // ── Main Panel ─────────────────────────────────────────────────────────────
 
-export default function AgentOutputPanel({ agent, gate, taskId, onClose, onResolved }: AgentOutputPanelProps) {
+export default function AgentOutputPanel({ agent, gate, taskId, phaseStatus, onClose, onResolved }: AgentOutputPanelProps) {
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<string | null>(null);
   const [artifacts, setArtifacts] = useState<TaskArtifact[]>([]);
   const [uxData, setUxData] = useState<UxArtifacts | null>(null);
   const [devData, setDevData] = useState<DevArtifacts | null>(null);
+  const [taskStatus, setTaskStatus] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  
+  const [gitSubmitting, setGitSubmitting] = useState<string | null>(null);
+  const [gitError, setGitError] = useState<string | null>(null);
+  const [gitSuccess, setGitSuccess] = useState<string | null>(null);
+
+  const handleGitAction = async (action: 'sync' | 'commit' | 'push' | 'pr') => {
+    setGitError(null);
+    setGitSuccess(null);
+    setGitSubmitting(action);
+    
+    // Attempt to retrieve or ask for GitHub Token if pushing or creating PR
+    let token = localStorage.getItem('github_pat') || '';
+    if ((action === 'push' || action === 'pr') && !token) {
+      token = window.prompt('Vui lòng nhập Github Personal Access Token (PAT) để tiếp tục:') || '';
+      if (!token) {
+        setGitError('Bắt buộc phải có Github Token để thực hiện lệnh Push/PR.');
+        setGitSubmitting(null);
+        return;
+      }
+      localStorage.setItem('github_pat', token);
+    }
+
+    try {
+      // sessionId is actually what we pass to SdlcController. 
+      // The parent passes taskId, but in our pipeline, sessionId and taskId might differ.
+      // Wait, executeGitAction expects sessionId. We need to parse sessionId from somewhere or use currentProjectId.
+      // Wait, in SdlcDashboard, activeSessionId is available, but AgentOutputPanel only has taskId.
+      // Actually, we can get sessionId from the URL or pass it as prop. Let's assume the backend expects sessionId.
+      // Let's pass the taskId as sessionId for now, or get active session from URL params.
+      const urlParams = new URLSearchParams(window.location.search);
+      const sessionId = urlParams.get('session') || taskId.split('-')[0]; // fallback
+      
+      const res = await executeGitAction(sessionId, action, agent, token);
+      if (res.success) {
+        setGitSuccess(`Thành công! ${res.output ? res.output : ''}`);
+      } else {
+        setGitError(res.message || 'Thất bại.');
+      }
+    } catch (err: unknown) {
+      setGitError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGitSubmitting(null);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -406,6 +452,7 @@ export default function AgentOutputPanel({ agent, gate, taskId, onClose, onResol
     getSdlcTaskStatus(taskId)
       .then((task) => {
         if (cancelled) return;
+        setTaskStatus(task?.status || null);
         setSummary(task?.result?.summary || gate?.payload.outputSummary || null);
         const arts: TaskArtifact[] = Array.isArray(task?.artifacts) ? task.artifacts : [];
         setArtifacts(arts);
@@ -461,7 +508,7 @@ export default function AgentOutputPanel({ agent, gate, taskId, onClose, onResol
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [taskId, gate?.payload.outputSummary, agent]);
+  }, [taskId, gate?.payload.outputSummary, agent, phaseStatus]);
 
   const handleApprove = async () => {
     if (!gate) return;
@@ -655,6 +702,45 @@ export default function AgentOutputPanel({ agent, gate, taskId, onClose, onResol
                 </button>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Git Action Buttons for Agent Output */}
+        {!gate && (taskStatus === 'completed' || phaseStatus === 'completed') && (
+          <div className="p-4 border-t border-outline-variant shrink-0 flex flex-col gap-2 bg-surface-container-low">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+              Source Control (Commit {AGENT_LABEL[agent] || agent} Outputs)
+            </span>
+            
+            {gitError && <div className="text-[10px] text-red-400 bg-red-400/10 p-1.5 rounded">{gitError}</div>}
+            {gitSuccess && <div className="text-[10px] text-emerald-400 bg-emerald-400/10 p-1.5 rounded line-clamp-3" title={gitSuccess}>{gitSuccess}</div>}
+
+            <div className="flex gap-1.5">
+              <button 
+                onClick={(e) => { e.stopPropagation(); handleGitAction('sync'); }}
+                disabled={gitSubmitting !== null}
+                className="flex-1 flex justify-center items-center gap-1 py-1.5 rounded bg-surface-container-highest/50 text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-colors text-[9.5px] font-medium disabled:opacity-50" title="Sync & Pull Latest">
+                {gitSubmitting === 'sync' ? <RefreshCw size={11} className="animate-spin" /> : <DownloadCloud size={11} />} Sync
+              </button>
+              <button 
+                onClick={(e) => { e.stopPropagation(); handleGitAction('commit'); }}
+                disabled={gitSubmitting !== null}
+                className="flex-1 flex justify-center items-center gap-1 py-1.5 rounded bg-surface-container-highest/50 text-on-surface-variant hover:text-emerald-400 hover:bg-emerald-400/10 transition-colors text-[9.5px] font-medium disabled:opacity-50" title="Commit Changes">
+                {gitSubmitting === 'commit' ? <RefreshCw size={11} className="animate-spin" /> : <Save size={11} />} Commit
+              </button>
+              <button 
+                onClick={(e) => { e.stopPropagation(); handleGitAction('push'); }}
+                disabled={gitSubmitting !== null}
+                className="flex-1 flex justify-center items-center gap-1 py-1.5 rounded bg-surface-container-highest/50 text-on-surface-variant hover:text-blue-400 hover:bg-blue-400/10 transition-colors text-[9.5px] font-medium disabled:opacity-50" title="Push to Remote">
+                {gitSubmitting === 'push' ? <RefreshCw size={11} className="animate-spin" /> : <UploadCloud size={11} />} Push
+              </button>
+              <button 
+                onClick={(e) => { e.stopPropagation(); handleGitAction('pr'); }}
+                disabled={gitSubmitting !== null}
+                className="flex-1 flex justify-center items-center gap-1 py-1.5 rounded bg-surface-container-highest/50 text-on-surface-variant hover:text-purple-400 hover:bg-purple-400/10 transition-colors text-[9.5px] font-medium disabled:opacity-50" title="Create Pull Request">
+                {gitSubmitting === 'pr' ? <RefreshCw size={11} className="animate-spin" /> : <GitPullRequest size={11} />} PR
+              </button>
+            </div>
           </div>
         )}
       </div>

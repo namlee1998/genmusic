@@ -170,6 +170,7 @@ async function runAgent({
     const args = [
       'exec',
       '-',
+      '--skip-git-repo-check',
       '-c', 'sandbox_permissions=["disk-full-read-access", "disk-write-access", "network-full-access"]',
     ];
 

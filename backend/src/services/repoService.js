@@ -353,5 +353,6 @@ module.exports = {
   isHttpUrl,
   WORKSPACE_DIR,
   SECRET_PATTERNS,
+  git,
 };
 

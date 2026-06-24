@@ -474,8 +474,9 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
         }));
 
       } catch (err: unknown) {
-        const errorMsg = err instanceof Error ? err.message : 'Failed to start SDLC pipeline workflow';
+        const errorMsg = (err as any)?.response?.data?.message || err instanceof Error ? (err as Error).message : 'Failed to start SDLC pipeline workflow';
         console.error('startPipeline error:', errorMsg);
+        set({ error: errorMsg });
       } finally {
         set({ isLoading: false });
       }

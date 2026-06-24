@@ -11,4 +11,5 @@ PyYAML>=6.0
 pytest>=8.0.0
 claude-agent-sdk>=0.1.0
 langchain-google-genai>=2.0.0
+langchain-anthropic>=0.2.0
 langgraph-checkpoint-sqlite>=3.0.0
