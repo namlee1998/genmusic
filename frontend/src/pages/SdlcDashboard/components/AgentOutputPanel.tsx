@@ -399,10 +399,8 @@ export default function AgentOutputPanel({ agent, gate, taskId, onClose, onResol
 
   useEffect(() => {
     let cancelled = false;
-    if (!taskId) {
-      setLoading(false);
-      return;
-    }
+    if (!taskId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     setLoadError(null);
     getSdlcTaskStatus(taskId)

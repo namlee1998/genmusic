@@ -85,7 +85,11 @@ export default function SdlcDashboard() {
   const allSessions = getAllSessions();
   const status = activeSession?.status || 'idle';
   const error = activeSession?.error || null;
-  const pipelinePhases = activeSession?.pipelinePhases || [];
+  const pipelinePhases = useMemo(
+    () => activeSession?.pipelinePhases ?? [],
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization
+    [activeSession?.pipelinePhases]
+  );
 
   const currentProjectId = useAppStore((s) => s.currentProjectId);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -94,7 +98,9 @@ export default function SdlcDashboard() {
   const deepLinkSessionId = searchParams.get('sessionId');
   const deepLinkAgentKey = searchParams.get('agentKey') as 'PO' | 'UX' | 'DEV' | 'QA' | null;
 
-  const [openAgentPanel, setOpenAgentPanel] = useState<'PO' | 'UX' | 'DEV' | 'QA' | null>(null);
+  const [openAgentPanel, setOpenAgentPanel] = useState<'PO' | 'UX' | 'DEV' | 'QA' | null>(() =>
+    deepLinkAgentKey && ['PO', 'UX', 'DEV', 'QA'].includes(deepLinkAgentKey) ? deepLinkAgentKey : null
+  );
 
   // Jump to the session a HITL gate came from (e.g. navigated from the
   // Intervention Center's "Review" action) before auto-opening its panel.
@@ -106,7 +112,6 @@ export default function SdlcDashboard() {
 
   useEffect(() => {
     if (deepLinkAgentKey && ['PO', 'UX', 'DEV', 'QA'].includes(deepLinkAgentKey)) {
-      setOpenAgentPanel(deepLinkAgentKey);
       const params = new URLSearchParams(searchParams);
       params.delete('agentKey');
       params.delete('sessionId');
@@ -150,16 +155,16 @@ export default function SdlcDashboard() {
   const taskStatuses = ['pending', 'running', 'gate_pending', 'completed', 'skipped', 'failed'] as const;
   const statusCounts = useMemo(() => {
     const counts = { pending: 0, running: 0, gate_pending: 0, completed: 0, skipped: 0, failed: 0 };
-    pipelinePhases?.forEach(p => { if (p.status in counts) counts[p.status as keyof typeof counts]++; });
+    pipelinePhases.forEach(p => { if (p.status in counts) counts[p.status as keyof typeof counts]++; });
     return counts;
   }, [pipelinePhases]);
 
   // Derive phase status from pipelinePhases
   const phaseStatus = (agent: 'PO' | 'UX' | 'DEV' | 'QA') =>
-    pipelinePhases?.find(p => p.agent === agent)?.status ?? 'pending';
+    pipelinePhases.find(p => p.agent === agent)?.status ?? 'pending';
 
   const phaseDuration = (agent: 'PO' | 'UX' | 'DEV' | 'QA') =>
-    pipelinePhases?.find(p => p.agent === agent)?.duration;
+    pipelinePhases.find(p => p.agent === agent)?.duration;
 
   const getTaskStatus = (agent: 'PO' | 'UX' | 'DEV' | 'QA', idx: number): TaskItem['status'] => {
     const ps = phaseStatus(agent);
@@ -298,7 +303,6 @@ export default function SdlcDashboard() {
             const tasks = tasksFor(agent);
             const meta = AGENT_META[agent];
             const duration = phaseDuration(agent);
-            const hasOutputToReview = ps === 'gate_pending' && !!pendingGateForAgent(agent);
 
             const isCompletedOrFailed = ps === 'completed' || ps === 'failed' || ps === 'gate_pending';
             const canOpenPanel = isCompletedOrFailed && tasks.length > 0;
@@ -368,7 +372,7 @@ export default function SdlcDashboard() {
         <AgentOutputPanel
           agent={openAgentPanel}
           gate={pendingGateForAgent(openAgentPanel) || undefined}
-          taskId={pipelinePhases?.find(p => p.agent === openAgentPanel)?.taskId || tasksFor(openAgentPanel)[0].id}
+          taskId={pipelinePhases.find(p => p.agent === openAgentPanel)?.taskId || tasksFor(openAgentPanel)[0].id}
           onClose={() => setOpenAgentPanel(null)}
           onResolved={() => activeSessionId && void pollStatus(activeSessionId)}
         />

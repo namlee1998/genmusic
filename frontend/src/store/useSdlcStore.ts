@@ -164,6 +164,12 @@ export interface SdlcState {
   auditEvents: AuditEvent[];
   phaseTransitions: PhaseTransition[];
 
+  // ── Active-Session Derived Fields ─────────────────────────────────────
+  pipelinePhases: sdlcApi.PhaseStatus[];
+  auditLog: sdlcApi.AuditEntry[];
+  pendingGates: sdlcApi.GateItem[];
+  error: string | null;
+
   // ── Actions ────────────────────────────────────────────────────────────
   startPipeline: (projectId: string, repoUrl: string, request: string) => Promise<void>;
   setActiveSession: (sessionId: string | null) => void;
@@ -251,13 +257,26 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
     isFeatureRequestFormOpen: false,
     auditEvents: [],
     phaseTransitions: [],
+    pipelinePhases: [],
+    auditLog: [],
+    pendingGates: [],
+    error: null,
 
     cleanupConnections,
     setProjectId: (id) => set({ projectId: id }),
     setFeatureRequestFormOpen: (isOpen) => set({ isFeatureRequestFormOpen: isOpen }),
     setAuditEvents: (events) => set({ auditEvents: events }),
     setPhaseTransitions: (transitions) => set({ phaseTransitions: transitions }),
-    setActiveSession: (sessionId) => set({ activeSessionId: sessionId }),
+    setActiveSession: (sessionId) => {
+      const session = sessionId ? get().sessions[sessionId] : null;
+      set({
+        activeSessionId: sessionId,
+        pipelinePhases: session?.pipelinePhases ?? [],
+        auditLog: session?.auditLog ?? [],
+        pendingGates: session?.pendingGates ?? [],
+        error: session?.error ?? null,
+      });
+    },
 
     setError: (sessionId, msg) => {
       set(s => ({
@@ -307,7 +326,7 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
       set({ isLoading: true });
 
       try {
-        const { workflowId, status } = await sdlcApi.startPipeline(projectId, repoUrl, request);
+        const { workflowId } = await sdlcApi.startPipeline(projectId, repoUrl, request);
         // Note: workflowId from API is actually the sessionId from backend
         const sessionId = workflowId;
 
@@ -340,7 +359,11 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
 
         set(s => ({
           sessions: { ...s.sessions, [sessionId]: initialSession },
-          activeSessionId: sessionId
+          activeSessionId: sessionId,
+          pipelinePhases: initialSession.pipelinePhases,
+          auditLog: initialSession.auditLog,
+          pendingGates: initialSession.pendingGates,
+          error: initialSession.error,
         }));
 
         // Connect SSE stream (polling starts only on error)
@@ -350,18 +373,26 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
             if (!session) return;
 
             if (event === 'progress') {
-              set(s => ({
-                sessions: {
-                  ...s.sessions,
-                  [sessionId]: {
-                    ...s.sessions[sessionId],
-                    status: (data.status as string) || session.status,
-                    pipelinePhases: (data.pipelinePhases as sdlcApi.PhaseStatus[]) || session.pipelinePhases,
-                    auditLog: (data.auditLog as sdlcApi.AuditEntry[]) || session.auditLog,
-                    updatedAt: Date.now()
-                  }
-                }
-              }));
+              const activeSessionId = get().activeSessionId;
+              const newPipelinePhases = (data.pipelinePhases as sdlcApi.PhaseStatus[]) || session.pipelinePhases;
+              const newAuditLog = (data.auditLog as sdlcApi.AuditEntry[]) || session.auditLog;
+              const newStatus = (data.status as SessionData['status']) || session.status;
+              set(s => {
+                const isActive = sessionId === activeSessionId;
+                return {
+                  sessions: {
+                    ...s.sessions,
+                    [sessionId]: {
+                      ...s.sessions[sessionId],
+                      status: newStatus,
+                      pipelinePhases: newPipelinePhases,
+                      auditLog: newAuditLog,
+                      updatedAt: Date.now()
+                    }
+                  },
+                  ...(isActive ? { pipelinePhases: newPipelinePhases, auditLog: newAuditLog } : {}),
+                };
+              });
             } else if (event === 'gate_pending') {
               const newGate = data.gate as sdlcApi.GateItem;
               set(s => {
@@ -382,17 +413,23 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
               });
             } else if (event === 'gate_resolved') {
               const gateId = data.gateId as string;
-              set(s => ({
-                sessions: {
-                  ...s.sessions,
-                  [sessionId]: {
-                    ...s.sessions[sessionId],
-                    pendingGates: s.sessions[sessionId].pendingGates.filter(g => g.id !== gateId),
-                    updatedAt: Date.now()
-                  }
-                }
-              }));
+              const activeSessionId = get().activeSessionId;
+              set(s => {
+                const updatedGates = s.sessions[sessionId].pendingGates.filter(g => g.id !== gateId);
+                return {
+                  sessions: {
+                    ...s.sessions,
+                    [sessionId]: {
+                      ...s.sessions[sessionId],
+                      pendingGates: updatedGates,
+                      updatedAt: Date.now()
+                    }
+                  },
+                  pendingGates: sessionId === activeSessionId ? updatedGates : s.pendingGates,
+                };
+              });
             } else if (event === 'completed') {
+              const activeSessionId = get().activeSessionId;
               set(s => ({
                 sessions: {
                   ...s.sessions,
@@ -402,19 +439,23 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
                     qaResult: (data.qaResult as sdlcApi.QAResult) || null,
                     updatedAt: Date.now()
                   }
-                }
+                },
+                ...(sessionId === activeSessionId ? { error: null } : {}),
               }));
             } else if (event === 'error') {
+              const activeSessionId = get().activeSessionId;
+              const errorMsg = (data.message as string) || 'An error occurred during execution';
               set(s => ({
                 sessions: {
                   ...s.sessions,
                   [sessionId]: {
                     ...s.sessions[sessionId],
                     status: 'failed' as const,
-                    error: (data.message as string) || 'An error occurred during execution',
+                    error: errorMsg,
                     updatedAt: Date.now()
                   }
-                }
+                },
+                ...(sessionId === activeSessionId ? { error: errorMsg } : {}),
               }));
             }
           },
@@ -535,23 +576,32 @@ export const useSdlcStore = create<SdlcState>((set, get) => {
 
       try {
         const res = await sdlcApi.getPipelineStatus(session.sessionId);
-        set(s => ({
-          sessions: {
-            ...s.sessions,
-            [sessionId]: {
-              ...s.sessions[sessionId],
-              status: res.status as SessionData['status'],
-              routeType: res.routeType,
+        const activeSessionId = get().activeSessionId;
+        set(s => {
+          const isActive = sessionId === activeSessionId;
+          return {
+            sessions: {
+              ...s.sessions,
+              [sessionId]: {
+                ...s.sessions[sessionId],
+                status: res.status as SessionData['status'],
+                routeType: res.routeType,
+                pipelinePhases: res.pipelinePhases,
+                pendingGates: res.pendingGates,
+                auditLog: res.auditLog,
+                qaResult: res.qaResult || null,
+                releaseStatus: res.releaseStatus || 'pending',
+                repoInfo: res.repoInfo || null,
+                updatedAt: Date.now()
+              }
+            },
+            ...(isActive ? {
               pipelinePhases: res.pipelinePhases,
-              pendingGates: res.pendingGates,
               auditLog: res.auditLog,
-              qaResult: res.qaResult || null,
-              releaseStatus: res.releaseStatus || 'pending',
-              repoInfo: res.repoInfo || null,
-              updatedAt: Date.now()
-            }
-          }
-        }));
+              pendingGates: res.pendingGates,
+            } : {}),
+          };
+        });
       } catch (err: unknown) {
         set(s => ({
           sessions: {

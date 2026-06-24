@@ -16,17 +16,16 @@ interface AuditTrailResponse {
 
 export default function AuditPage() {
   const { currentProjectId } = useAppStore();
+  const [localError, setLocalError] = useState<string | null>(null);
   const {
-    projectId, auditEvents, error,
-    setProjectId, setAuditEvents, setError,
+    projectId, auditEvents,
+    setProjectId, setAuditEvents,
   } = useSdlcStore(
     useShallow((state) => ({
       projectId: state.projectId,
       auditEvents: state.auditEvents,
-      error: state.error,
       setProjectId: state.setProjectId,
       setAuditEvents: state.setAuditEvents,
-      setError: state.setError,
     }))
   );
 
@@ -41,7 +40,7 @@ export default function AuditPage() {
         setSelectedEvent(trail.events[trail.events.length - 1]);
       }
     },
-    onError: (errMessage) => setError(errMessage)
+    onError: (errMessage) => setLocalError(errMessage)
     }
   );
 
@@ -92,7 +91,7 @@ export default function AuditPage() {
         backgroundImage: 'radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.05) 0px, transparent 50%), radial-gradient(at 100% 0%, rgba(14, 165, 233, 0.05) 0px, transparent 50%)'
       }}
     >
-      <DeliveryErrorBanner error={error} onDismiss={() => setError(null)} />
+      <DeliveryErrorBanner error={localError} onDismiss={() => setLocalError(null)} />
 
       {/* Header */}
       <div className="flex items-center justify-between mx-[18px] mb-6 flex-wrap gap-3">
@@ -110,10 +109,10 @@ export default function AuditPage() {
       </div>
 
       {/* Error banner */}
-      {error && !loading && (
+      {localError && !loading && (
         <div className="mx-[18px] mb-6 flex items-center gap-3 p-3.5 bg-red-500/10 border border-red-500/20 rounded-xl text-red-300 text-[12px]">
           <ShieldAlert size={16} />
-          <span>{error}</span>
+          <span>{localError}</span>
         </div>
       )}
 

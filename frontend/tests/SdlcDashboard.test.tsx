@@ -28,6 +28,48 @@ describe('SdlcDashboard Component', () => {
   const mockUseAppStore = useAppStore as unknown as Mock;
   const mockUseSdlcStore = useSdlcStore as unknown as Mock;
 
+  const makeSdlcState = (overrides: Record<string, any> = {}) => ({
+    projectId: 'project-123',
+    workflowId: 'project-123',
+    status: 'idle',
+    routeType: 'FULLSTACK',
+    pipelinePhases: [
+      { agent: 'PO', status: 'pending' },
+      { agent: 'UX', status: 'pending' },
+      { agent: 'DEV', status: 'pending' },
+      { agent: 'QA', status: 'pending' }
+    ],
+    pendingGates: [],
+    gateHistory: [],
+    auditLog: [],
+    qaResult: null,
+    releaseStatus: 'pending',
+    repoUrl: '',
+    featureRequest: 'add google login',
+    isLoading: false,
+    error: null,
+    sessions: [],
+    activeSessionId: null,
+    pollStatus: vi.fn(),
+    startPipeline: vi.fn(),
+    resolveGate: vi.fn(),
+    releaseDecision: vi.fn(),
+    setProjectId: vi.fn(),
+    setError: vi.fn(),
+    cleanupConnections: vi.fn(),
+    getAllSessions: () => [],
+    getActiveSession: () => null,
+    setActiveSession: vi.fn(),
+    cleanupSession: vi.fn(),
+    ...overrides,
+  });
+
+  const mockSdlc = (state: Record<string, any>) => {
+    mockUseSdlcStore.mockImplementation((selector) =>
+      selector ? selector(state) : state
+    );
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
 
@@ -37,34 +79,7 @@ describe('SdlcDashboard Component', () => {
       fetchTree: vi.fn(),
     });
 
-    mockUseSdlcStore.mockReturnValue({
-      projectId: 'project-123',
-      workflowId: 'project-123',
-      status: 'idle',
-      routeType: 'FULLSTACK',
-      pipelinePhases: [
-        { agent: 'PO', status: 'pending' },
-        { agent: 'UX', status: 'pending' },
-        { agent: 'DEV', status: 'pending' },
-        { agent: 'QA', status: 'pending' }
-      ],
-      pendingGates: [],
-      gateHistory: [],
-      auditLog: [],
-      qaResult: null,
-      releaseStatus: 'pending',
-      repoUrl: '',
-      featureRequest: 'add google login',
-      isLoading: false,
-      error: null,
-      pollStatus: vi.fn(),
-      startPipeline: vi.fn(),
-      resolveGate: vi.fn(),
-      releaseDecision: vi.fn(),
-      setProjectId: vi.fn(),
-      setError: vi.fn(),
-      cleanupConnections: vi.fn(),
-    });
+    mockSdlc(makeSdlcState());
   });
 
 
@@ -72,9 +87,7 @@ describe('SdlcDashboard Component', () => {
 
 
   it('renders the Pipeline Stepper when pipeline starts running', () => {
-    mockUseSdlcStore.mockReturnValue({
-      projectId: 'project-123',
-      workflowId: 'project-123',
+    mockSdlc(makeSdlcState({
       status: 'dev_running',
       routeType: 'BACKEND',
       pipelinePhases: [
@@ -83,23 +96,26 @@ describe('SdlcDashboard Component', () => {
         { agent: 'DEV', status: 'running' },
         { agent: 'QA', status: 'pending' }
       ],
-      pendingGates: [],
-      gateHistory: [],
-      auditLog: [],
-      qaResult: null,
-      releaseStatus: 'pending',
       repoUrl: 'https://github.com/test/repo.git',
-      featureRequest: 'add google login',
-      isLoading: false,
-      error: null,
-      pollStatus: vi.fn(),
-      startPipeline: vi.fn(),
-      resolveGate: vi.fn(),
-      releaseDecision: vi.fn(),
-      setProjectId: vi.fn(),
-      setError: vi.fn(),
-      cleanupConnections: vi.fn(),
-    });
+      getActiveSession: () => ({
+        status: 'dev_running',
+        routeType: 'BACKEND',
+        pipelinePhases: [
+          { agent: 'PO', status: 'completed' },
+          { agent: 'UX', status: 'skipped' },
+          { agent: 'DEV', status: 'running' },
+          { agent: 'QA', status: 'pending' }
+        ],
+        repoUrl: 'https://github.com/test/repo.git',
+        featureRequest: 'add google login',
+        releaseStatus: 'pending',
+        qaResult: null,
+        auditLog: [],
+        pendingGates: [],
+        gateHistory: [],
+        error: null,
+      }),
+    }));
 
     render(
       <MemoryRouter>
@@ -114,34 +130,36 @@ describe('SdlcDashboard Component', () => {
 
   it('calls pollStatus on mount when a workflow is active', async () => {
     const pollStatusSpy = vi.fn();
-    mockUseSdlcStore.mockReturnValue({
-      projectId: 'project-123',
-      workflowId: 'project-123',
+    mockSdlc(makeSdlcState({
+      activeSessionId: 'project-123',
       status: 'po_running',
-      routeType: 'FULLSTACK',
       pipelinePhases: [
         { agent: 'PO', status: 'running' },
         { agent: 'UX', status: 'pending' },
         { agent: 'DEV', status: 'pending' },
         { agent: 'QA', status: 'pending' }
       ],
-      pendingGates: [],
-      gateHistory: [],
-      auditLog: [],
-      qaResult: null,
-      releaseStatus: 'pending',
       repoUrl: 'https://github.com/test/repo.git',
-      featureRequest: 'add google login',
-      isLoading: false,
-      error: null,
       pollStatus: pollStatusSpy,
-      startPipeline: vi.fn(),
-      resolveGate: vi.fn(),
-      releaseDecision: vi.fn(),
-      setProjectId: vi.fn(),
-      setError: vi.fn(),
-      cleanupConnections: vi.fn(),
-    });
+      getActiveSession: () => ({
+        status: 'po_running',
+        routeType: 'FULLSTACK',
+        pipelinePhases: [
+          { agent: 'PO', status: 'running' },
+          { agent: 'UX', status: 'pending' },
+          { agent: 'DEV', status: 'pending' },
+          { agent: 'QA', status: 'pending' }
+        ],
+        repoUrl: 'https://github.com/test/repo.git',
+        featureRequest: 'add google login',
+        releaseStatus: 'pending',
+        qaResult: null,
+        auditLog: [],
+        pendingGates: [],
+        gateHistory: [],
+        error: null,
+      }),
+    }));
 
     render(
       <MemoryRouter>
