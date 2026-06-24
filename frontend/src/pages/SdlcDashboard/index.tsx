@@ -276,6 +276,95 @@ export default function SdlcDashboard() {
               </button>
             )}
           </div>
+
+          {/* Feature Request Boxes - Horizontal Layout */}
+          {allSessions.length > 0 && (
+            <div className="mx-[18px] mb-4">
+              <div className="flex gap-3 overflow-x-auto pb-2">
+                {/* Existing feature request boxes */}
+                {allSessions.map((session) => {
+                  const completedPhases = (session.pipelinePhases || []).filter(p => p.status === 'completed').length;
+                  const progressPercent = (completedPhases / 4) * 100;
+                  
+                  return (
+                    <div
+                      key={session.sessionId}
+                      className="flex-shrink-0 w-72 rounded-xl border border-outline-variant/20 bg-surface-container/60 p-4 cursor-pointer hover:border-primary/20 transition-all"
+                      onClick={() => setActiveSession(session.sessionId)}
+                    >
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-semibold text-on-surface truncate">
+                          {session.featureRequest || 'Untitled Session'}
+                        </h3>
+                        <Badge variant={getBadgeVariant(session.status || 'idle')} className="text-[10px] px-1.5 py-0.5">
+                          {session.status?.replace('_', ' ').toUpperCase()}
+                        </Badge>
+                      </div>
+                      
+                      <div className="mb-3">
+                        <div className="w-full bg-surface-container-high/40 rounded-full h-1.5">
+                          <div
+                            className="bg-primary h-1.5 rounded-full transition-all duration-300"
+                            style={{ width: `${progressPercent}%` }}
+                          />
+                        </div>
+                        <p className="text-[10px] text-on-surface-variant mt-1 font-medium">
+                          {completedPhases}/4 phases completed
+                        </p>
+                      </div>
+                      
+                      <div className="grid grid-cols-4 gap-1">
+                        {(session.pipelinePhases || []).map((phase, idx) => {
+                          const isActive = phase.status === 'running' || phase.status === 'gate_pending';
+                          const isCompleted = phase.status === 'completed';
+                          const isFailed = phase.status === 'failed';
+                          const isSkipped = phase.status === 'skipped';
+                          
+                          return (
+                            <div
+                              key={idx}
+                              className={`flex flex-col items-center gap-0.5 p-1 rounded ${isActive ? 'bg-blue-500/20' : isCompleted ? 'bg-emerald-500/20' : isFailed ? 'bg-red-500/20' : isSkipped ? 'bg-outline-variant/20 opacity-50' : ''}
+                            `}
+                            >
+                              <div className={`w-5 h-5 rounded flex items-center justify-center text-[9px] font-semibold
+                                ${isActive ? 'bg-blue-500 text-white' : isCompleted ? 'bg-emerald-500 text-white' : isFailed ? 'bg-red-500 text-white' : isSkipped ? 'bg-on-surface-variant/30 text-on-surface-variant' : 'bg-surface-container-high/60 text-on-surface-variant'}
+                              `}
+                              >
+                                {phase.agent}
+                              </div>
+                              <span className={`text-[8px] ${isActive ? 'text-blue-400' : isCompleted ? 'text-emerald-400' : isFailed ? 'text-red-400' : isSkipped ? 'text-on-surface-variant/60' : 'text-on-surface-variant'}
+                              `}
+                              >
+                                {phase.status === 'running' ? 'RUN' : phase.status === 'gate_pending' ? 'GATE' : phase.status === 'completed' ? 'OK' : phase.status === 'failed' ? 'FAIL' : phase.status === 'skipped' ? 'SKIP' : 'PEND'}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+                
+                {/* Add Feature Request box */}
+                <div
+                  className="flex-shrink-0 w-72 rounded-xl border-2 border-dashed border-outline-variant/40 bg-surface-container/20 p-4 cursor-pointer hover:border-primary/30 hover:bg-surface-container/40 transition-all"
+                  onClick={() => {
+                    const params = new URLSearchParams(searchParams);
+                    params.set('focusRequest', 'true');
+                    setSearchParams(params);
+                  }}
+                >
+                  <div className="flex flex-col items-center justify-center h-full gap-2">
+                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                      <Plus size={20} className="text-primary" />
+                    </div>
+                    <span className="text-xs font-medium text-on-surface-variant">Request a new feature</span>
+                    <span className="text-[10px] text-on-surface-variant/60">Click to add</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Status counters */}
