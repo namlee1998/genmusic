@@ -42,13 +42,13 @@ export interface GateItem {
 
 export interface AuditEntry {
   timestamp: string;
-  actor: 'PO' | 'UX' | 'DEV' | 'QA' | 'A2A' | 'SYSTEM' | 'USER';
+  actor: 'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA' | 'A2A' | 'SYSTEM' | 'USER';
   action: string;
   status: 'ok' | 'warning' | 'error' | 'pending';
 }
 
 export interface PhaseStatus {
-  agent: 'PO' | 'UX' | 'DEV' | 'QA';
+  agent: 'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA';
   status: 'pending' | 'running' | 'gate_pending' | 'completed' | 'failed' | 'skipped';
   taskId?: string;
   duration?: string;

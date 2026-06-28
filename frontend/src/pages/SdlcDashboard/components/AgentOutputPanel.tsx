@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { X, Check, RefreshCw, AlertTriangle, Monitor, Layers, GitBranch, FileCode2, FileDiff, CheckCircle2, XCircle, DownloadCloud, UploadCloud, GitPullRequest, Save } from 'lucide-react';
+import { X, Check, RefreshCw, AlertTriangle, Monitor, Layers, GitBranch, FileCode2, FileDiff, CheckCircle2, XCircle, DownloadCloud, UploadCloud, GitPullRequest, Save, Network, MapPin, Package, Code2 } from 'lucide-react';
 import { getSdlcTaskStatus, resolveOutputReviewGate, executeGitAction, type GateItem } from '@/services/api/sdlcApi';
 
 interface TaskArtifact {
@@ -36,7 +36,7 @@ interface DevArtifacts {
 }
 
 interface AgentOutputPanelProps {
-  agent: 'PO' | 'UX' | 'DEV' | 'QA';
+  agent: 'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA';
   gate?: GateItem;
   taskId: string;
   sessionId: string;
@@ -46,7 +46,7 @@ interface AgentOutputPanelProps {
 }
 
 const AGENT_LABEL: Record<string, string> = {
-  PO: 'Product Owner', UX: 'UI/UX Designer', DEV: 'Developer', QA: 'Quality Assurance',
+  ARCH: 'Architecture', PO: 'Product Owner', UX: 'UI/UX Designer', DEV: 'Developer', QA: 'Quality Assurance',
 };
 
 // ── Wireframe Component Renderer ────────────────────────────────────────────
@@ -259,7 +259,155 @@ function UxWireframePreview({ uxData }: { uxData: UxArtifacts }) {
   );
 }
 
-// ── DEV Code Diff Viewer ────────────────────────────────────────────────────
+// ── Architecture Brief Viewer ───────────────────────────────────────────────
+
+interface ArchBriefData {
+  architecture_brief?: string;
+  repo_summary?: string;
+  tech_stack?: Record<string, string>;
+  routing?: {
+    target_module?: string;
+    framework?: string;
+    language?: string;
+    search_scope?: string;
+    ignore?: string[];
+    confidence?: number;
+  };
+  technical_decisions?: string[];
+  constraints?: string[];
+}
+
+function ArchBriefViewer({ archData }: { archData: ArchBriefData }) {
+  const routing = archData.routing || {};
+  const techStack = archData.tech_stack || {};
+  const decisions = archData.technical_decisions || [];
+  const constraints = archData.constraints || [];
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* Repository Routing — most important section */}
+      {Object.keys(routing).length > 0 && (
+        <div className="bg-[#0f1117] rounded-xl border border-cyan-500/20 p-3">
+          <div className="flex items-center gap-1.5 mb-3">
+            <MapPin size={12} className="text-cyan-400" />
+            <span className="text-[9px] font-bold uppercase tracking-wider text-cyan-400">Repository Routing</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {routing.target_module && (
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[8px] font-bold uppercase text-white/30">Target Module</span>
+                <span className="text-[10px] font-mono text-cyan-300 bg-cyan-500/10 px-2 py-0.5 rounded">{routing.target_module}</span>
+              </div>
+            )}
+            {routing.framework && (
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[8px] font-bold uppercase text-white/30">Framework</span>
+                <span className="text-[10px] font-mono text-purple-300 bg-purple-500/10 px-2 py-0.5 rounded">{routing.framework}</span>
+              </div>
+            )}
+            {routing.language && (
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[8px] font-bold uppercase text-white/30">Language</span>
+                <span className="text-[10px] font-mono text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded">{routing.language}</span>
+              </div>
+            )}
+            {routing.confidence !== undefined && (
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[8px] font-bold uppercase text-white/30">Confidence</span>
+                <span className="text-[10px] font-mono text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded">{(routing.confidence * 100).toFixed(0)}%</span>
+              </div>
+            )}
+          </div>
+          {routing.search_scope && (
+            <div className="mt-2 flex flex-col gap-0.5">
+              <span className="text-[8px] font-bold uppercase text-white/30">Search Scope</span>
+              <code className="text-[10px] text-emerald-300 font-mono bg-white/4 px-2 py-1 rounded border border-white/8">{routing.search_scope}</code>
+            </div>
+          )}
+          {routing.ignore && routing.ignore.length > 0 && (
+            <div className="mt-2 flex flex-col gap-0.5">
+              <span className="text-[8px] font-bold uppercase text-white/30">Ignored Paths</span>
+              <div className="flex flex-wrap gap-1">
+                {routing.ignore.map((p, i) => (
+                  <span key={i} className="text-[9px] font-mono text-red-300/70 bg-red-500/8 border border-red-500/15 px-1.5 py-0.5 rounded">{p}</span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tech Stack */}
+      {Object.keys(techStack).length > 0 && (
+        <div className="bg-[#0f1117] rounded-xl border border-white/8 p-3">
+          <div className="flex items-center gap-1.5 mb-2">
+            <Package size={11} className="text-indigo-400" />
+            <span className="text-[9px] font-bold uppercase tracking-wider text-white/50">Technology Stack</span>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {Object.entries(techStack).map(([layer, tech]) => (
+              <div key={layer} className="flex items-center justify-between">
+                <span className="text-[9px] text-white/40 capitalize">{layer}</span>
+                <span className="text-[10px] font-semibold text-white/80 bg-white/5 px-2 py-0.5 rounded border border-white/8">{tech}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Technical Decisions */}
+      {decisions.length > 0 && (
+        <div className="bg-[#0f1117] rounded-xl border border-white/8 p-3">
+          <div className="flex items-center gap-1.5 mb-2">
+            <Code2 size={11} className="text-emerald-400" />
+            <span className="text-[9px] font-bold uppercase tracking-wider text-white/50">Technical Decisions</span>
+          </div>
+          <ul className="flex flex-col gap-1">
+            {decisions.map((d, i) => (
+              <li key={i} className="flex items-start gap-1.5 text-[10px] text-white/60">
+                <span className="text-emerald-400 mt-0.5">•</span>
+                {d}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Constraints */}
+      {constraints.length > 0 && (
+        <div className="bg-[#0f1117] rounded-xl border border-amber-500/15 p-3">
+          <div className="flex items-center gap-1.5 mb-2">
+            <AlertTriangle size={11} className="text-amber-400" />
+            <span className="text-[9px] font-bold uppercase tracking-wider text-amber-400">Constraints</span>
+          </div>
+          <ul className="flex flex-col gap-1">
+            {constraints.map((c, i) => (
+              <li key={i} className="flex items-start gap-1.5 text-[10px] text-amber-200/70">
+                <span className="text-amber-400 mt-0.5">!</span>
+                {c}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Raw Architecture Brief (collapsed) */}
+      {archData.architecture_brief && (
+        <details className="bg-[#0f1117] rounded-xl border border-white/8 overflow-hidden">
+          <summary className="px-3 py-2 text-[9px] font-bold uppercase tracking-wider text-white/40 cursor-pointer hover:text-white/60 list-none flex items-center justify-between">
+            <span>Architecture Brief (raw)</span>
+            <span className="text-[8px]">▾</span>
+          </summary>
+          <pre className="px-3 pb-3 text-[10px] text-white/50 whitespace-pre-wrap leading-relaxed font-mono max-h-[200px] overflow-y-auto">
+            {archData.architecture_brief}
+          </pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
+// ── UX Wireframe Preview ─────────────────────────────────────────────────────
 
 function renderDiffLine(line: string, idx: number) {
   if (line.startsWith('+++') || line.startsWith('---')) {
@@ -391,6 +539,7 @@ export default function AgentOutputPanel({ agent, gate, taskId, sessionId, phase
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<string | null>(null);
   const [artifacts, setArtifacts] = useState<TaskArtifact[]>([]);
+  const [archData, setArchData] = useState<ArchBriefData | null>(null);
   const [uxData, setUxData] = useState<UxArtifacts | null>(null);
   const [devData, setDevData] = useState<DevArtifacts | null>(null);
   const [taskStatus, setTaskStatus] = useState<string | null>(null);
@@ -448,6 +597,24 @@ export default function AgentOutputPanel({ agent, gate, taskId, sessionId, phase
         setSummary(task?.result?.summary || gate?.payload.outputSummary || null);
         const arts: TaskArtifact[] = Array.isArray(task?.artifacts) ? task.artifacts : [];
         setArtifacts(arts);
+
+        // For ARCH agent: extract architecture brief data
+        if (agent === 'ARCH') {
+          let archExtracted: ArchBriefData = {};
+          const agentOut = (task as { agentOutput?: unknown })?.agentOutput;
+          if (agentOut && typeof agentOut === 'object') {
+            archExtracted = agentOut as ArchBriefData;
+          } else {
+            for (const art of arts) {
+              if (art.type === 'architecture_brief' && art.contentText) archExtracted.architecture_brief = art.contentText;
+              if (art.type === 'tech_stack' && art.contentJson) archExtracted.tech_stack = art.contentJson as Record<string, string>;
+              if (art.type === 'routing' && art.contentJson) archExtracted.routing = art.contentJson as ArchBriefData['routing'];
+              if (art.type === 'technical_decisions' && art.contentJson) archExtracted.technical_decisions = art.contentJson as string[];
+              if (art.type === 'constraints' && art.contentJson) archExtracted.constraints = art.contentJson as string[];
+            }
+          }
+          setArchData(archExtracted);
+        }
 
         // For UX agent: try to extract structured UX data from agentOutput or artifacts
         if (agent === 'UX') {
@@ -532,6 +699,12 @@ export default function AgentOutputPanel({ agent, gate, taskId, sessionId, phase
     }
   };
 
+  const hasArchPreview = agent === 'ARCH' && archData && (
+    !!archData.architecture_brief ||
+    Object.keys(archData.tech_stack || {}).length > 0 ||
+    Object.keys(archData.routing || {}).length > 0
+  );
+
   const hasUxPreview = agent === 'UX' && uxData && (
     (uxData.screens && uxData.screens.length > 0) ||
     (uxData.user_flow && uxData.user_flow.length > 0) ||
@@ -595,6 +768,17 @@ export default function AgentOutputPanel({ agent, gate, taskId, sessionId, phase
                 </div>
               )}
 
+              {/* ARCH Architecture Brief Viewer */}
+              {hasArchPreview && archData && (
+                <div>
+                  <div className="flex items-center gap-1.5 mb-2 px-0.5">
+                    <Network size={11} className="text-cyan-400" />
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-white/50">Architecture Brief</span>
+                  </div>
+                  <ArchBriefViewer archData={archData} />
+                </div>
+              )}
+
               {/* UX Wireframe Preview */}
               {hasUxPreview && uxData && (
                 <div>
@@ -618,7 +802,7 @@ export default function AgentOutputPanel({ agent, gate, taskId, sessionId, phase
               )}
 
               {/* Other agents (PO/QA): raw artifact list */}
-              {!hasUxPreview && !hasDevPreview && (
+              {!hasArchPreview && !hasUxPreview && !hasDevPreview && (
                 <>
                   {artifacts.length === 0 && !summary ? (
                     <p className="text-[11px] text-on-surface-variant/70 text-center py-6">No artifacts produced yet.</p>

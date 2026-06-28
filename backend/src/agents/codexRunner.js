@@ -1,6 +1,7 @@
 const { spawn } = require('child_process');
 const claudeCodeRunner = require('./claudeCodeRunner');
 const { AGENT_CONTRACT_VERSION } = require('../services/agentContract');
+const gateBridge = require('../services/gateBridge');
 
 const DEFAULT_TIMEOUT_MS = Number(process.env.CODEX_TIMEOUT_MS) || 30 * 60 * 1000;
 
@@ -165,6 +166,52 @@ async function runAgent({
 }) {
   const cwd = repoPath || process.cwd();
   const prompt = buildCodexPrompt({ role, repoPath, context });
+
+  // --- MOCK HITL GATE FOR DEMO ---
+  try {
+    const mockPayload = {
+      type: 'clarifying_question',
+      taskId,
+      stage: role,
+      questions: [
+        {
+          question: `[MOCK] Q1 from ${role}: Are there any specific libraries or constraints for this task?`,
+          header: 'Constraints',
+          options: ['No constraints', 'Use React', 'Use Vue', 'Use standard JS'],
+          multiSelect: false
+        },
+        {
+          question: `[MOCK] Q2 from ${role}: How should we handle errors or edge cases?`,
+          header: 'Error Handling',
+          options: ['Fail silently', 'Show user alert', 'Log to console'],
+          multiSelect: false
+        },
+        {
+          question: `[MOCK] Q3 from ${role}: Do you approve this component structure?`,
+          header: 'Structure',
+          options: ['Yes, approved', 'Needs changes'],
+          multiSelect: false
+        }
+      ]
+    };
+    
+    console.log(`[codexRunner] Raising MOCK HITL questions for ${role}`);
+    const gate = gateBridge.requestGate({
+      taskId,
+      projectId: context.projectId,
+      role,
+      kind: 'question',
+      payload: mockPayload,
+      timeoutMs: 3600000,
+    });
+    
+    await gate.ready;
+    const result = await gate.promise;
+    console.log(`[codexRunner] Received mocked answers for ${role}:`, result.answers);
+  } catch (err) {
+    console.error(`[codexRunner] Error in MOCK HITL gate for ${role}:`, err);
+  }
+  // -------------------------------
 
   return new Promise((resolve, reject) => {
     const args = [

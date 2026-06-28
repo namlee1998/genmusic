@@ -6,7 +6,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Check, Loader2, Clock, AlertCircle, SkipForward, PlayCircle,
   User, Palette, Code, ShieldCheck, Bug, Plus, CheckCircle2, RotateCcw, FolderOpen,
-  GitPullRequest, UploadCloud, DownloadCloud, Save, FileText
+  GitPullRequest, UploadCloud, DownloadCloud, Save, FileText, Network
 } from 'lucide-react';
 import EmptyProjectState from './components/EmptyProjectState';
 import FeatureRequestChatbox from './components/FeatureRequestChatbox';
@@ -14,8 +14,8 @@ import SessionCard from './components/SessionCard';
 import AgentOutputPanel from './components/AgentOutputPanel';
 import { Badge } from '@/components/ui/Badge';
 
-const AGENT_TO_ROLE: Record<'PO' | 'UX' | 'DEV' | 'QA', string> = {
-  PO: 'po-agent', UX: 'ux-agent', DEV: 'dev-agent', QA: 'qa-agent',
+const AGENT_TO_ROLE: Record<'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA', string> = {
+  ARCH: 'architecture-agent', PO: 'po-agent', UX: 'ux-agent', DEV: 'dev-agent', QA: 'qa-agent',
 };
 
 interface TaskItem {
@@ -26,6 +26,7 @@ interface TaskItem {
 }
 
 const AGENT_META = {
+  ARCH: { title: 'Architecture (ARCH)', desc: 'System Design & Routing', icon: <Network size={18} className="text-cyan-400" /> },
   PO: { title: 'Product Owner (PO)', desc: 'Requirements & Risk Analysis', icon: <User size={18} className="text-indigo-400" /> },
   UX: { title: 'UI/UX Designer (UX)', desc: 'User Flows & Wireframes', icon: <Palette size={18} className="text-pink-400" /> },
   DEV: { title: 'Developer (DEV)', desc: 'Code & Build Execution', icon: <Code size={18} className="text-emerald-400" /> },
@@ -99,10 +100,10 @@ export default function SdlcDashboard() {
   const focusRequest = searchParams.get('focusRequest') === 'true';
   const highlightGate = searchParams.get('highlightGate');
   const deepLinkSessionId = searchParams.get('sessionId');
-  const deepLinkAgentKey = searchParams.get('agentKey') as 'PO' | 'UX' | 'DEV' | 'QA' | null;
+  const deepLinkAgentKey = searchParams.get('agentKey') as 'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA' | null;
 
-  const [openAgentPanel, setOpenAgentPanel] = useState<'PO' | 'UX' | 'DEV' | 'QA' | null>(() =>
-    deepLinkAgentKey && ['PO', 'UX', 'DEV', 'QA'].includes(deepLinkAgentKey) ? deepLinkAgentKey : null
+  const [openAgentPanel, setOpenAgentPanel] = useState<'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA' | null>(() =>
+    deepLinkAgentKey && ['ARCH', 'PO', 'UX', 'DEV', 'QA'].includes(deepLinkAgentKey) ? deepLinkAgentKey : null
   );
 
   // Jump to the session a HITL gate came from (e.g. navigated from the
@@ -114,7 +115,7 @@ export default function SdlcDashboard() {
   }, [deepLinkSessionId, activeSessionId, sessions, setActiveSession]);
 
   useEffect(() => {
-    if (deepLinkAgentKey && ['PO', 'UX', 'DEV', 'QA'].includes(deepLinkAgentKey)) {
+    if (deepLinkAgentKey && ['ARCH', 'PO', 'UX', 'DEV', 'QA'].includes(deepLinkAgentKey)) {
       const params = new URLSearchParams(searchParams);
       params.delete('agentKey');
       params.delete('sessionId');
@@ -123,7 +124,7 @@ export default function SdlcDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepLinkAgentKey]);
 
-  const pendingGateForAgent = (agent: 'PO' | 'UX' | 'DEV' | 'QA') =>
+  const pendingGateForAgent = (agent: 'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA') =>
     activeSession?.pendingGates.find((g) => g.role === AGENT_TO_ROLE[agent]) || null;
 
   useEffect(() => {
@@ -163,13 +164,13 @@ export default function SdlcDashboard() {
   }, [pipelinePhases]);
 
   // Derive phase status from pipelinePhases
-  const phaseStatus = (agent: 'PO' | 'UX' | 'DEV' | 'QA') =>
+  const phaseStatus = (agent: 'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA') =>
     pipelinePhases.find(p => p.agent === agent)?.status ?? 'pending';
 
-  const phaseDuration = (agent: 'PO' | 'UX' | 'DEV' | 'QA') =>
+  const phaseDuration = (agent: 'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA') =>
     pipelinePhases.find(p => p.agent === agent)?.duration;
 
-  const getTaskStatus = (agent: 'PO' | 'UX' | 'DEV' | 'QA', idx: number): TaskItem['status'] => {
+  const getTaskStatus = (agent: 'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA', idx: number): TaskItem['status'] => {
     const ps = phaseStatus(agent);
     if (ps === 'skipped') return 'skipped';
     if (ps === 'failed') return 'failed';
@@ -180,8 +181,12 @@ export default function SdlcDashboard() {
     return 'pending';
   };
 
-  const tasksFor = (agent: 'PO' | 'UX' | 'DEV' | 'QA'): TaskItem[] => {
+  const tasksFor = (agent: 'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA'): TaskItem[] => {
     const lists: Record<string, TaskItem[]> = {
+      ARCH: [
+        { id: 'arch-1', title: 'Detect Architecture', description: 'Read repo tree, config files & detect tech stack.', status: getTaskStatus('ARCH', 1) },
+        { id: 'arch-2', title: 'Generate Architecture_Brief.md', description: 'Output routing, modules & constraints.', status: getTaskStatus('ARCH', 2) },
+      ],
       PO: [
         { id: 'po-1', title: 'Generate PRD', description: 'Create product requirements document.', status: getTaskStatus('PO', 1) },
       ],
@@ -287,7 +292,7 @@ export default function SdlcDashboard() {
                 {/* Existing feature request boxes */}
                 {allSessions.map((session) => {
                   const completedPhases = (session.pipelinePhases || []).filter(p => p.status === 'completed').length;
-                  const progressPercent = (completedPhases / 4) * 100;
+                  const progressPercent = (completedPhases / 5) * 100;
                   
                   return (
                     <div
@@ -347,11 +352,11 @@ export default function SdlcDashboard() {
                           />
                         </div>
                         <p className="text-[10px] text-on-surface-variant mt-1 font-medium">
-                          {completedPhases}/4 phases completed
+                          {completedPhases}/5 phases completed
                         </p>
                       </div>
                       
-                      <div className="grid grid-cols-4 gap-1">
+                      <div className="grid grid-cols-5 gap-1">
                         {(session.pipelinePhases || []).map((phase, idx) => {
                           const isActive = phase.status === 'running' || phase.status === 'gate_pending';
                           const isCompleted = phase.status === 'completed';
@@ -462,8 +467,8 @@ export default function SdlcDashboard() {
         </div>
 
         {/* Agent Task Grid */}
-        <div className="mx-[18px] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {(['PO', 'UX', 'DEV', 'QA'] as const).map(agent => {
+        <div className="mx-[18px] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          {(['ARCH', 'PO', 'UX', 'DEV', 'QA'] as const).map(agent => {
             const ps = phaseStatus(agent);
             const tasks = tasksFor(agent);
             const meta = AGENT_META[agent];

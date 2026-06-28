@@ -411,29 +411,32 @@ export default function SessionHitlBlock({
                         </div>
                       )}
 
-                      <div className="flex flex-col gap-1.5">
+                      <div className="flex flex-col gap-2 mt-1">
                         <button
                           onClick={() => handleAction(item, 'approve')}
                           disabled={isActing}
-                          className="w-full flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-surface-container-high text-white text-[10px] font-bold px-3 py-2 rounded-lg cursor-pointer transition-all disabled:cursor-not-allowed"
+                          className="w-full relative overflow-hidden group flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 disabled:from-surface-container-high disabled:to-surface-container-high text-white text-[10.5px] font-bold px-3 py-2.5 rounded-lg cursor-pointer transition-all duration-300 shadow-[0_0_15px_rgba(16,185,129,0.2)] hover:shadow-[0_0_20px_rgba(16,185,129,0.4)] disabled:shadow-none disabled:cursor-not-allowed disabled:text-on-surface-variant/40"
                         >
-                          {isActing ? <RefreshCw size={11} className="animate-spin" /> : <Check size={11} />}
-                          Approve
+                          <div className="absolute inset-0 bg-white/20 translate-y-[-100%] group-hover:translate-y-[100%] transition-transform duration-500 ease-in-out"></div>
+                          {isActing ? <RefreshCw size={12} className="animate-spin relative z-10" /> : <Check size={12} className="relative z-10" />}
+                          <span className="relative z-10 tracking-wide uppercase">{item.type.includes('CLARIFY') ? 'Submit Answer' : 'Approve & Continue'}</span>
                         </button>
-                        <div className="flex gap-1.5">
+                        
+                        <div className="flex gap-2">
                           <button
                             onClick={() => handleAction(item, 'reject')}
                             disabled={isActing || (isOutputReview && !comment.trim())}
-                            className="flex-1 flex items-center justify-center gap-1 bg-red-600/80 hover:bg-red-500 disabled:bg-surface-container-high text-white text-[10px] font-bold px-2 py-1.5 rounded-lg cursor-pointer transition-all disabled:cursor-not-allowed"
+                            className="flex-1 flex items-center justify-center gap-1.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 hover:border-red-500/40 disabled:bg-surface-container-low disabled:border-transparent text-red-400 disabled:text-on-surface-variant/40 text-[10px] font-bold px-2 py-2 rounded-lg cursor-pointer transition-all duration-300 disabled:cursor-not-allowed uppercase tracking-wider"
                           >
-                            {isActing ? <RefreshCw size={10} className="animate-spin" /> : <X size={10} />}
+                            {isActing ? <RefreshCw size={11} className="animate-spin" /> : <X size={11} />}
                             Reject
                           </button>
+                          
                           <button
                             onClick={() => onReview(item)}
-                            className="flex items-center justify-center gap-1 bg-primary/10 hover:bg-primary/30 border border-primary/20 text-primary/80 text-[10px] font-bold px-2 py-1.5 rounded-lg cursor-pointer transition-all"
+                            className="flex items-center justify-center gap-1.5 bg-primary/10 hover:bg-primary/20 border border-primary/30 hover:border-primary/50 text-primary text-[10px] font-bold px-4 py-2 rounded-lg cursor-pointer transition-all duration-300 shadow-[0_0_10px_rgba(99,102,241,0.1)] hover:shadow-[0_0_15px_rgba(99,102,241,0.2)] uppercase tracking-wider"
                           >
-                            <Eye size={10} />
+                            <Eye size={11} />
                             Review
                           </button>
                         </div>
