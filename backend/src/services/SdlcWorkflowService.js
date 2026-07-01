@@ -1199,11 +1199,24 @@ class SdlcWorkflowService {
       auditLog,
       qaResult,
       releaseStatus: legacyStatus.releaseGate?.status || 'pending',
-      repoInfo: {
-        techStack: ['Detected from code'],
-        fileCount: 0,
-        components: []
-      }
+      repoInfo: await this._buildSessionRepoInfo({ projectId, sessionId }),
+    };
+  }
+
+  /**
+   * T7 (B7) — Compose the spec §8.1 Repository / Branch / Commit SHA fields
+   * by reading the session's working repo. Best-effort: returns a partial
+   * object (with nulls) if the workspace isn't materialized yet.
+   * repoUrl is NOT stored on PipelineSession (it's transient input) — the
+   * frontend already has it on the session seed (`session.repoUrl`).
+   */
+  async _buildSessionRepoInfo({ projectId, sessionId } = {}) {
+    const live = await repoService.getSessionRepoInfo({ projectId, sessionId }).catch(() => null);
+    return {
+      repoUrl: null,
+      branch: live?.branch ?? null,
+      commitSha: live?.commitSha ?? null,
+      fileCount: live?.fileCount ?? 0,
     };
   }
 

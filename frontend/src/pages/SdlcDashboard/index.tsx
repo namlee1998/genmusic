@@ -365,28 +365,110 @@ function SessionSummaryBar({
   session: NonNullable<ReturnType<typeof useWorkflowStore.getState>['sessions'][string]>;
   runtime: ReturnType<typeof selectRuntimeExecution>;
 }) {
+  // T7 (B7) — spec §8.1 Session Summary MUST show:
+  //   Repository · Branch · Commit SHA · Pipeline Status · Current Agent
+  // plus dashboard cards (Completed Agents / Generated Files / Errors / Warnings).
   const completed = session.pipelinePhases.filter((p) => p.status === 'completed').length;
-  const percent = Math.round((completed / 5) * 100);
+  const total = session.pipelinePhases.length || 5;
+  const percent = Math.round((completed / total) * 100);
   const gateCount = session.pendingGates.length;
+
+  const repoUrl = session.repoUrl || session.repoInfo?.repoUrl || null;
+  const branch = session.repoInfo?.branch ?? null;
+  const commitSha = session.repoInfo?.commitSha ?? null;
+  const fileCount = session.repoInfo?.fileCount ?? 0;
+
+  // Errors: derived from runtime events of type 'error' + session.error.
+  const errorCount = session.runtimeEvents.filter((e) => e.type === 'error').length
+    + (session.error ? 1 : 0);
+  // Warnings: derived from gate_audit + rejected gates (non-fatal).
+  const warningCount = session.gateHistory.filter((g) => g.decision === 'reject').length;
+
+  const pipelineStatusLabel = (() => {
+    if (session.status === 'completed') return 'Completed';
+    if (session.status === 'failed') return 'Failed';
+    if (session.status === 'awaiting_approval') return 'Awaiting Approval';
+    if (session.status === 'running') return runtime?.currentAgent ? `Running · ${runtime.currentAgent}` : 'Running';
+    return 'Pending';
+  })();
+
+  const compactHash = commitSha ? commitSha.slice(0, 7) : '—';
+  const compactRepo = repoUrl
+    ? (() => {
+        try {
+          const u = new URL(repoUrl);
+          return `${u.host}${u.pathname}`.replace(/\.git$/, '');
+        } catch {
+          return repoUrl;
+        }
+      })()
+    : '—';
+
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-outline-variant/30 bg-surface-container-lowest px-4 py-2.5 text-[11px]">
-      <div className="flex items-center gap-2 text-on-surface">
-        <span className="font-bold">「{session.featureRequest || 'Untitled'}」</span>
-        <code className="rounded bg-surface-container px-1.5 py-0.5 font-mono text-[10px] text-on-surface-variant">{session.sessionId.slice(0, 8)}</code>
-      </div>
-      <div className="flex items-center gap-3 text-on-surface-variant">
-        <span>{completed}/5 phases · {percent}%</span>
-        {runtime?.currentAgent && (
-          <span className="flex items-center gap-1">
-            <Loader2 size={10} className="animate-spin text-blue-400" />
-            <b className="text-on-surface">{runtime.currentAgent}</b>
+    <div className="rounded-xl border border-outline-variant/30 bg-surface-container-lowest px-4 py-3 text-[11px]">
+      {/* Spec §8.1 — the 5 required fields */}
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-on-surface-variant">
+        <span className="flex items-center gap-1.5">
+          <span className="font-semibold uppercase tracking-wider text-[9px] text-on-surface-variant/70">Repo</span>
+          <code className="rounded bg-surface-container px-1.5 py-0.5 font-mono text-[10px] text-on-surface" title={repoUrl || 'No repository URL'}>
+            {compactRepo}
+          </code>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="font-semibold uppercase tracking-wider text-[9px] text-on-surface-variant/70">Branch</span>
+          <code className="rounded bg-surface-container px-1.5 py-0.5 font-mono text-[10px] text-on-surface">
+            {branch || '—'}
+          </code>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="font-semibold uppercase tracking-wider text-[9px] text-on-surface-variant/70">SHA</span>
+          <code className="rounded bg-surface-container px-1.5 py-0.5 font-mono text-[10px] text-on-surface">
+            {compactHash}
+          </code>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="font-semibold uppercase tracking-wider text-[9px] text-on-surface-variant/70">Status</span>
+          <b className="text-on-surface">{pipelineStatusLabel}</b>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="font-semibold uppercase tracking-wider text-[9px] text-on-surface-variant/70">Agent</span>
+          {runtime?.currentAgent ? (
+            <span className="flex items-center gap-1">
+              <Loader2 size={10} className="animate-spin text-blue-400" />
+              <b className="text-on-surface">{runtime.currentAgent}</b>
+            </span>
+          ) : <b className="text-on-surface">—</b>}
+        </span>
+        <span className="ml-auto flex items-center gap-3">
+          <span>{completed}/{total} phases · {percent}%</span>
+          <span className={`flex items-center gap-1 ${gateCount > 0 ? 'text-amber-400' : ''}`}>
+            <Clock size={10} />
+            {gateCount} pending
           </span>
-        )}
-        <span className={`flex items-center gap-1 ${gateCount > 0 ? 'text-amber-400' : ''}`}>
-          <Clock size={10} />
-          {gateCount} pending
         </span>
       </div>
+
+      {/* Dashboard cards — spec §8.1 "kèm dashboard trạng thái" */}
+      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <SummaryStat label="Completed" value={`${completed}/${total}`} tone="ok" />
+        <SummaryStat label="Files" value={String(fileCount)} tone="muted" />
+        <SummaryStat label="Errors" value={String(errorCount)} tone={errorCount > 0 ? 'bad' : 'muted'} />
+        <SummaryStat label="Warnings" value={String(warningCount)} tone={warningCount > 0 ? 'warn' : 'muted'} />
+      </div>
+    </div>
+  );
+}
+
+function SummaryStat({ label, value, tone }: { label: string; value: string; tone: 'ok' | 'warn' | 'bad' | 'muted' }) {
+  const toneClass =
+    tone === 'ok' ? 'text-emerald-400'
+    : tone === 'warn' ? 'text-amber-400'
+    : tone === 'bad' ? 'text-red-400'
+    : 'text-on-surface';
+  return (
+    <div className="rounded-md border border-outline-variant/20 bg-surface-container/40 px-2 py-1.5">
+      <div className="text-[8px] font-semibold uppercase tracking-wider text-on-surface-variant/70">{label}</div>
+      <div className={`font-mono text-sm font-bold ${toneClass}`}>{value}</div>
     </div>
   );
 }

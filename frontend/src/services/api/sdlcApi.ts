@@ -88,9 +88,15 @@ export interface PipelineResponse {
   qaResult?: QAResult | null;
   releaseStatus?: 'pending' | 'approved' | 'rejected' | null;
   repoInfo?: {
-    techStack: string[];
-    fileCount: number;
-    components: string[];
+    // T7 (B7) — spec §8.1 Session Summary needs Repository / Branch /
+    // Commit SHA. techStack / components are vestigial (the old stub)
+    // — kept optional for back-compat with stored sessions.
+    repoUrl?: string | null;
+    branch?: string | null;
+    commitSha?: string | null;
+    fileCount?: number;
+    techStack?: string[];
+    components?: string[];
   } | null;
 }
 

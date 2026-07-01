@@ -34,6 +34,39 @@ const SECRET_PATTERNS = [
   /(^|[\\/])\.git-credentials$/i,
 ];
 
+function fsExists(p) {
+  return fs.access(p).then(() => true, () => false);
+}
+
+/**
+ * T7 (B7) — Best-effort snapshot of the session's working repo: current
+ * branch, HEAD short SHA, file count (excluding .git). Used by the
+ * Session Summary panel (spec §8.1 requires Repository / Branch /
+ * Commit SHA). Never throws — returns null if the repo isn't cloned yet
+ * (race during early pipeline start) so the SSE stream can still emit
+ * the snapshot without derailing the caller's response.
+ */
+async function getSessionRepoInfo({ projectId, sessionId } = {}) {
+  if (!projectId || !sessionId) return null;
+  const repoPath = repoPathFor(projectId, sessionId);
+  if (!await fsExists(path.join(repoPath, '.git'))) return null;
+  let branch = null;
+  let commitSha = null;
+  let fileCount = 0;
+  try {
+    const head = (await git(['rev-parse', '--abbrev-ref', 'HEAD'], repoPath)).trim();
+    if (head && head !== 'HEAD') branch = head;
+    const sha = (await git(['rev-parse', '--short', 'HEAD'], repoPath)).trim();
+    if (sha) commitSha = sha;
+    const tracked = (await git(['ls-files'], repoPath)).trim();
+    fileCount = tracked ? tracked.split('\n').filter(Boolean).length : 0;
+  } catch (_err) {
+    // git plumbing hiccup — return what we have rather than breaking the
+    // pipeline status snapshot.
+  }
+  return { repoPath, branch, commitSha, fileCount };
+}
+
 /** Run a git command, rejecting with a readable error envelope on failure. */
 function git(args, cwd, { timeout = 120000 } = {}) {
   return new Promise((resolve, reject) => {
@@ -571,6 +604,7 @@ module.exports = {
   isBlockedPath,
   isWithinRepo,
   repoPathFor,
+  getSessionRepoInfo,
   slugify,
   isHttpUrl,
   validateRepoUrl,
