@@ -12,6 +12,10 @@ import api, { getBaseURL } from './client';
 export type GateType =
   | 'DEV_FILE_GATE'
   | 'PO_CLARIFY'
+  | 'UX_CLARIFY'
+  | 'DEV_CLARIFY'
+  | 'QA_CLARIFY'
+  | 'AGENT_CLARIFY'
   | 'HITL_REVIEW'
   | 'FINAL_RELEASE'
   | 'PO_OUTPUT_REVIEW'
@@ -32,11 +36,22 @@ export interface GateItem {
     path?: string;           // file path
     reason?: string;         // risk reason
     diff?: string;           // unified diff
-    questions?: string[];    // PO clarification questions (max 3)
+    questions?: ClarificationQuestion[];    // agent clarification questions (object form, T2)
     outputSummary?: string | null;   // agent's completed-output summary (output_review gates)
     validationIssues?: Array<{ rule: string; message?: string | null }>;
   };
   createdAt: string;
+}
+
+export interface ClarificationOption {
+  label: string;
+  description?: string;
+}
+
+export interface ClarificationQuestion {
+  question: string;
+  header?: string;
+  options?: ClarificationOption[];
 }
 
 export interface AuditEntry {

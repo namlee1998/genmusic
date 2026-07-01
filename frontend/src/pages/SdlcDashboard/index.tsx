@@ -140,7 +140,11 @@ export default function SdlcDashboard() {
   }, [deepLinkSessionId, activeSessionId, sessions, setActiveSession]);
 
   // Open the questions tab when a clarification gate is the only thing waiting.
-  const clarificationGateId = activeSession?.pendingGates.find((g) => g.type === 'PO_CLARIFY')?.id ?? null;
+  // T2 (B1) — every agent can raise a clarification gate (PO/UX/DEV/QA + ARCH
+  // emits AGENT_CLARIFY). Match all of them so ARCH/UX/DEV/QA questions also
+  // auto-route to the inspector.
+  const CLARIFICATION_TYPES = new Set(['PO_CLARIFY', 'UX_CLARIFY', 'DEV_CLARIFY', 'QA_CLARIFY', 'AGENT_CLARIFY']);
+  const clarificationGateId = activeSession?.pendingGates.find((g) => CLARIFICATION_TYPES.has(g.type))?.id ?? null;
   useEffect(() => {
     if (clarificationGateId) {
       setInspectorTab('questions');

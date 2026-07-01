@@ -35,7 +35,7 @@ Return a single JSON object (AIFA v2.1 agent-io contract) with these EXACT keys:
 - `scope` (string): Markdown bullet list of in-scope items.
 - `out_of_scope` (string): Markdown bullet list of out-of-scope items.
 - `risk_classification` (object): `{ "level": "LOW" | "MEDIUM" | "HIGH", "required_gates": ["schema", "validation", "evidence", "qa", "security"], "rationale": "<short string>" }`. Include `"security"` in `required_gates` if the feature handles credentials, payments, PII, or auth tokens.
-- `clarification_questions` (array of strings): empty if all requirements are clear, otherwise the open questions.
+- `clarification_questions` (array of objects): empty if all requirements are clear, otherwise the open questions. Each item MUST be `{ "question": "<the question to ask>", "header": "<short label, max 12 chars>", "options": [{"label": "<choice>", "description": "<why pick this>"}, ...] }`. Provide 2–4 options per question; the user may type a custom answer.
 
 The output MUST be a single ```json fenced block with all keys above. Do NOT return the artifact as a single Markdown string — downstream agents parse the structured fields.
 

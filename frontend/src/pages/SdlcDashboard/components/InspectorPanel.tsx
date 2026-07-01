@@ -49,9 +49,15 @@ export function InspectorPanel({ onReviewResolved }: InspectorPanelProps) {
     return gates.find((g) => g.id === selectedGateId) ?? null;
   }, [selectedGateId, gates]);
 
+  // T2 (B1) — every agent (PO/UX/DEV/QA + ARCH→AGENT_CLARIFY) can raise a
+  // clarification gate. Treat all of them the same in the inspector.
+  const isClarificationGate = (t?: string) =>
+    t === 'PO_CLARIFY' || t === 'UX_CLARIFY' || t === 'DEV_CLARIFY' || t === 'QA_CLARIFY' || t === 'AGENT_CLARIFY';
+  const clarificationGates = gates.filter((g) => isClarificationGate(g.type));
+
   // Auto-jump to "questions" when a clarification gate lands.
   useEffect(() => {
-    if (activeGate?.type === 'PO_CLARIFY' && tab !== 'questions') {
+    if (activeGate && isClarificationGate(activeGate.type) && tab !== 'questions') {
       setTab('questions');
     }
   }, [activeGate?.id, tab, setTab]);
@@ -71,9 +77,9 @@ export function InspectorPanel({ onReviewResolved }: InspectorPanelProps) {
           >
             {t.icon}
             <span>{t.label}</span>
-            {t.id === 'questions' && gates.filter((g) => g.type === 'PO_CLARIFY').length > 0 && (
+            {t.id === 'questions' && clarificationGates.length > 0 && (
               <span className="ml-1 rounded-full bg-amber-500/30 px-1.5 text-[9px] font-bold text-amber-400">
-                {gates.filter((g) => g.type === 'PO_CLARIFY').length}
+                {clarificationGates.length}
               </span>
             )}
             {t.id === 'review' && gates.filter((g) => g.type.endsWith('_OUTPUT_REVIEW')).length > 0 && (
@@ -206,7 +212,9 @@ function QuestionsTab({
   activeGate: GateItem | null;
   onSelectGate: (id: string) => void;
 }) {
-  const questionGates = gates.filter((g) => g.type === 'PO_CLARIFY');
+  const questionGates = gates.filter((g) =>
+    g.type === 'PO_CLARIFY' || g.type === 'UX_CLARIFY' || g.type === 'DEV_CLARIFY' || g.type === 'QA_CLARIFY' || g.type === 'AGENT_CLARIFY',
+  );
   if (questionGates.length === 0) {
     return <div className="text-[11px] text-on-surface-variant/60">No pending questions. Agents are running autonomously.</div>;
   }
@@ -229,7 +237,7 @@ function QuestionsTab({
           ))}
         </div>
       )}
-      {activeGate && activeGate.type === 'PO_CLARIFY' ? (
+      {activeGate && (activeGate.type === 'PO_CLARIFY' || activeGate.type === 'UX_CLARIFY' || activeGate.type === 'DEV_CLARIFY' || activeGate.type === 'QA_CLARIFY' || activeGate.type === 'AGENT_CLARIFY') ? (
         <ClarificationPanel sessionId={sessionId} gate={activeGate} />
       ) : (
         <div className="text-[11px] text-on-surface-variant/60">Select a question to answer.</div>

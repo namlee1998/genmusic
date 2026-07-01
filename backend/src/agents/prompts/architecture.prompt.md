@@ -84,6 +84,8 @@ keys:
 
 ## CRITICAL: When to Ask Clarification Questions
 
+When returning `clarification_questions`, each item MUST be an object: `{"question": "<the question>", "header": "<short label, max 12 chars>", "options": [{"label": "<choice>", "description": "<why pick this>"}, ...]}`. 2–4 options per question; user may type a custom answer.
+
 **Return `clarification_questions` (non-empty array) if:**
 - `scopeHints.confidence < 0.5` and routing cannot be resolved from
   `repoIndex` alone.

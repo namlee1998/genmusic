@@ -1,13 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Check, Loader2, MessageSquare, Sparkles } from 'lucide-react';
-import type { GateItem } from '@/services/api/sdlcApi';
+import type { ClarificationQuestion, GateItem } from '@/services/api/sdlcApi';
 import { useWorkflowStore } from '@/store/useWorkflowStore';
-
-interface QuestionDef {
-  question: string;
-  header?: string;
-  options?: Array<{ label: string; description?: string }>;
-}
 
 interface ClarificationPanelProps {
   sessionId: string;
@@ -27,7 +21,7 @@ interface ClarificationPanelProps {
 export function ClarificationPanel({ sessionId, gate, onResolved }: ClarificationPanelProps) {
   const resolveClarification = useWorkflowStore((s) => s.resolveClarification);
 
-  const questions: QuestionDef[] = (gate.payload?.questions as unknown as QuestionDef[]) ?? [];
+  const questions: ClarificationQuestion[] = gate.payload?.questions ?? [];
   const firstQ = questions[0];
 
   const suggestedAnswer =

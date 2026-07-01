@@ -34,9 +34,10 @@ Return:
   - All screens/flows mentioned in PRD
   - Basic interactivity (button clicks, form inputs)
 
-- `clarification_questions`: String array of questions if uncertain about design/interaction
+- `clarification_questions`: array of `{question, header, options}` objects (2–4 options per question) if uncertain about design/interaction
   - **REQUIRED if uncertain** - do NOT make assumptions about design
-  - Example: `["Should the form be single-step or multi-step?", "Any specific brand colors?"]`
+  - Each item MUST be `{"question": "<text>", "header": "<short label, max 12 chars>", "options": [{"label": "<choice>", "description": "<why pick this>"}, ...]}`. Header is shown as a chip above the question; each option has a short label plus a one-line rationale.
+  - Example: `[{"question": "Should the form be single-step or multi-step?", "header": "Form layout", "options": [{"label": "Single step", "description": "All fields visible at once, fastest to complete"}, {"label": "Multi-step", "description": "Wizard, better for many fields"}]}]`
   - Return empty array ONLY if you're fully confident
 
 Example:

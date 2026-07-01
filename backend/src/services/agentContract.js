@@ -51,4 +51,57 @@ function assertOutputConforms(role, output) {
   return { ok: missing.length === 0 && empty.length === 0, missing, empty };
 }
 
-module.exports = { AGENT_CONTRACT_VERSION, REQUIRED_OUTPUT_KEYS, assertOutputConforms, hasContent };
+/**
+ * T2 (B1) — normalize `clarification_questions` from agent output to the
+ * object shape consumed by the frontend ClarificationPanel.
+ *
+ * The frontend (and spec §6.1) expect `[{question, header?, options?}, ...]`,
+ * but agents may still return the older `string[]` form, partial objects, or
+ * even `null` while they migrate. This helper is defensive: it always returns
+ * a non-empty array of objects, never throws, and never silently drops content.
+ *
+ * - `string[]` entries become `{question: str}` objects (header/options left
+ *   undefined so ClarificationPanel's suggested-answer fallback uses the
+ *   question text itself).
+ * - Bare strings / numbers / null / undefined are coerced where possible.
+ * - Items without a recognizable question text are dropped with a warning log.
+ */
+function normalizeClarificationQuestions(raw, { logger = console } = {}) {
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+  const out = [];
+  for (const item of raw) {
+    if (item == null) continue;
+    if (typeof item === 'string') {
+      const text = item.trim();
+      if (text) out.push({ question: text });
+      continue;
+    }
+    if (typeof item === 'object') {
+      const question = typeof item.question === 'string' ? item.question.trim() : '';
+      if (!question) {
+        logger.warn?.('clarification_questions: dropping item without question field', { item });
+        continue;
+      }
+      const header = typeof item.header === 'string' && item.header.trim() ? item.header.trim() : undefined;
+      let options;
+      if (Array.isArray(item.options) && item.options.length > 0) {
+        options = item.options
+          .filter((o) => o && typeof o === 'object')
+          .map((o) => ({
+            label: typeof o.label === 'string' ? o.label.trim() : '',
+            description: typeof o.description === 'string' ? o.description.trim() : undefined,
+          }))
+          .filter((o) => o.label);
+        if (options.length === 0) options = undefined;
+      }
+      out.push(
+        options
+          ? (header ? { question, header, options } : { question, options })
+          : (header ? { question, header } : { question })
+      );
+    }
+  }
+  return out;
+}
+
+module.exports = { AGENT_CONTRACT_VERSION, REQUIRED_OUTPUT_KEYS, assertOutputConforms, hasContent, normalizeClarificationQuestions };

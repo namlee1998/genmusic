@@ -33,7 +33,7 @@ const QualityGateService = require('./QualityGateService');
 const fs = require('fs/promises');
 const path = require('path');
 const { ApiError, ERROR_CODES } = require('../middleware/errorHandler');
-const { assertOutputConforms } = require('./agentContract');
+const { assertOutputConforms, normalizeClarificationQuestions } = require('./agentContract');
 const repoService = require('./repoService');
 const gateBridge = require('./gateBridge');
 const claudeCodeRunner = require('../agents/claudeCodeRunner');
@@ -1851,7 +1851,9 @@ class SdlcWorkflowService {
     await FeatureBacklog.updateStatusByTaskId(task.id, 'REVIEW');
 
     // Handle agent clarification questions: if agent has questions, create a gate
-    if (Array.isArray(completedData.clarification_questions) && completedData.clarification_questions.length > 0) {
+    const rawQuestions = completedData.clarification_questions;
+    const normalizedQuestions = normalizeClarificationQuestions(rawQuestions, { logger });
+    if (normalizedQuestions.length > 0) {
       const gateTypeMap = {
         'po-agent': 'PO_CLARIFY',
         'ux-agent': 'UX_CLARIFY',
@@ -1866,7 +1868,7 @@ class SdlcWorkflowService {
         role: task.type,
         kind: 'question',
         payload: {
-          questions: completedData.clarification_questions,
+          questions: normalizedQuestions,
           agent: task.type,
           agentId: task.id,
         },
@@ -1876,7 +1878,7 @@ class SdlcWorkflowService {
       logger.info('agent created clarification gate', {
         taskId: task.id,
         agent: task.type,
-        questionCount: completedData.clarification_questions.length,
+        questionCount: normalizedQuestions.length,
         approvalId,
       });
 
