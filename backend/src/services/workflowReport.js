@@ -38,30 +38,97 @@ function joinedArtifacts(artifacts, phase, types) {
 }
 
 /** Build the final.md markdown from the review packet, audit trail, and evidence. */
-function buildFinalMarkdown({ projectId, packet, audit, evidence, releaseDecision, diff }) {
+function buildFinalMarkdown({ projectId, session, repoContext, packet, audit, evidence, releaseDecision, diff }) {
   const artifacts = packet?.artifacts || [];
   const when = new Date().toISOString();
   let md = `# AIFA Release Report\n\n- Project: \`${projectId}\`\n- Generated: ${when}\n- Decision: **${releaseDecision?.decision || 'APPROVE'}**`;
 
-  md += section('Feature', evidence?.feature ? '```json\n' + JSON.stringify(evidence.feature, null, 2) + '\n```' : null);
-  md += section('Product Requirements (PO)', joinedArtifacts(artifacts, 'po-agent', ['prd', 'acceptance_criteria']));
-  md += section('UX Spec', artifactText(artifacts, 'ux-agent', 'ux_spec'));
-  md += section('Development Evidence', joinedArtifacts(artifacts, 'dev-agent', ['implementation_plan', 'build_result', 'self_test_report']));
-  md += section('Patch / Diff', diff ? '```diff\n' + diff.slice(0, 8000) + '\n```' : artifactText(artifacts, 'dev-agent', 'patch_diff'));
-  md += section('QA Evidence', joinedArtifacts(artifacts, 'qa-agent', ['qa_report', 'test_run_report', 'ac_coverage_matrix']));
+  // T8 (B9) — spec §13 final.md mandates 10 sections. Each section is
+  // present unconditionally (rendered as `_none_` when no data) so the
+  // format is stable for downstream automation / PR templates.
 
-  md += section('Release Evidence', '```json\n' + JSON.stringify(evidence || {}, null, 2) + '\n```');
+  // 1. Repository — URL, base branch, working branch, commit SHA.
+  md += section('Repository', (() => {
+    const live = repoContext || {};
+    const sha = (live.commitHash || '').slice(0, 7) || 'unknown';
+    return [
+      `- Repository URL: \`${live.repoUrl || '_none_'}\``,
+      `- Base branch: \`${live.baseBranch || 'main'}\``,
+      `- Working branch: \`${live.workingBranch || '_unknown_'}\``,
+      `- Commit SHA: \`${sha}\``,
+    ].join('\n');
+  })());
 
-  const events = (audit?.events || []).map((e) => `- \`${e.timestamp}\` **${e.action}** (${e.actor})${e.comment ? ` — ${e.comment}` : ''}`).join('\n');
+  // 2. Feature Request — original user request (NOT the parsed JSON).
+  md += section('Feature Request', evidence?.feature ? String(evidence.feature) : null);
+
+  // 3. ARCH Output — full architecture_brief.
+  md += section('ARCH Output (architecture.md)', joinedArtifacts(artifacts, 'architecture-agent', ['architecture_brief']));
+
+  // 4. PO Output — full product-spec.md (prd + acceptance_criteria).
+  md += section('PO Output (product-spec.md)', joinedArtifacts(artifacts, 'po-agent', ['prd', 'acceptance_criteria']));
+
+  // 5. UX Output — full ux-design.md.
+  md += section('UX Output (ux-design.md)', artifactText(artifacts, 'ux-agent', 'ux_spec'));
+
+  // 6. DEV Output — diff summary + changed-file list. Prefer the
+  // git-captured diff; fall back to the dev-agent.patch_diff artifact
+  // (saved at approve time) when the live repo isn't available.
+  const effectiveDiff = diff || artifactText(artifacts, 'dev-agent', 'patch_diff') || '';
+  const changedFiles = effectiveDiff
+    ? effectiveDiff.split('\n').filter((l) => l.startsWith('diff --git ')).map((l) => l.replace(/^diff --git a\//, '').split(' b/')[0])
+    : [];
+  md += section('DEV Output (diff + file list)', [
+    changedFiles.length ? `Changed files (${changedFiles.length}):\n${changedFiles.map((f) => `  - \`${f}\``).join('\n')}` : null,
+    effectiveDiff ? `\`\`\`diff\n${effectiveDiff.slice(0, 8000)}\n\`\`\`` : null,
+  ].filter(Boolean).join('\n\n') || null);
+
+  // 7. QA Output — full qa-report.md.
+  md += section('QA Output (qa-report.md)', joinedArtifacts(artifacts, 'qa-agent', ['qa_report', 'test_run_report', 'ac_coverage_matrix']));
+
+  // 8. Audit Trail — AgentEvents timeline (sorted ascending by timestamp).
+  const events = (audit?.events || [])
+    .slice()
+    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+    .map((e) => `- \`${e.timestamp}\` **${e.action}** (${e.actor})${e.comment ? ` — ${e.comment}` : ''}`)
+    .join('\n');
   md += section('Audit Trail', events);
 
-  md += section('Release Decision', '```json\n' + JSON.stringify({
-    decision: releaseDecision?.decision,
-    action: releaseDecision?.action,
-    comment: releaseDecision?.comment,
-    reviewer_role: releaseDecision?.payload?.reviewer_role || null,
-    at: releaseDecision?.createdAt || when,
-  }, null, 2) + '\n```');
+  // 9. Human Decisions — clarification Q&A + approve/reject decisions.
+  const decisions = packet?.hitlDecisions || [];
+  const decisionLines = decisions.map((d) => {
+    const when = d.createdAt || d.timestamp || 'unknown';
+    const gate = d.gate || d.kind || 'gate';
+    const decision = d.decision || d.action || 'unknown';
+    const role = d.payload?.reviewer_role || d.actor || 'human';
+    const comment = d.comment || d.payload?.comment || '';
+    return `- \`${when}\` [${gate}] **${decision}** by \`${role}\`${comment ? ` — ${comment}` : ''}`;
+  });
+  md += section('Human Decisions', decisionLines.length ? decisionLines.join('\n') : null);
+
+  // 10. Pipeline Summary — wall-clock duration, commit count, final status.
+  md += section('Pipeline Summary', (() => {
+    const startTs = audit?.events?.length
+      ? new Date(audit.events.map((e) => e.timestamp).filter(Boolean).sort()[0]).getTime()
+      : null;
+    const endTs = releaseDecision?.createdAt
+      ? new Date(releaseDecision.createdAt).getTime()
+      : null;
+    const duration = (startTs && endTs && endTs >= startTs)
+      ? `${Math.round((endTs - startTs) / 1000)}s`
+      : 'unknown';
+    const commits = effectiveDiff ? effectiveDiff.split('\n').filter((l) => l.startsWith('commit ')).length : 0;
+    return [
+      `- Wall-clock duration: ${duration}`,
+      `- Commit count: ${commits}`,
+      `- Final status: **${session?.status || releaseDecision?.decision || 'APPROVE'}**`,
+    ].join('\n');
+  })());
+
+  // Backward-compat: the original "Release Evidence" raw JSON block is
+  // preserved at the end so any downstream consumer that still parses it
+  // keeps working. Marked clearly so it's not confused with the spec sections.
+  md += section('Release Evidence (raw)', '```json\n' + JSON.stringify(evidence || {}, null, 2) + '\n```');
 
   return md + '\n';
 }
@@ -110,7 +177,7 @@ async function writeReleaseBundle({ projectId, session, repoContext, packet, aud
     }
   }
 
-  const finalMd = buildFinalMarkdown({ projectId, packet, audit, evidence, releaseDecision, diff });
+  const finalMd = buildFinalMarkdown({ projectId, session, repoContext, packet, audit, evidence, releaseDecision, diff });
   const finalMdPath = path.join(outputDir, 'final.md');
   await fs.writeFile(finalMdPath, finalMd, 'utf8');
 
