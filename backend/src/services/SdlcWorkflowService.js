@@ -437,6 +437,21 @@ class SdlcWorkflowService {
       // hard `hasInvalid` check throws right after approval and the pipeline
       // can never advance past a flawed-but-approved output.
       await AgentArtifact.setStatusByTaskId(task.id, 'VALID');
+      // T1 (B5/B10) — spec §7.2: Approve must drive Write→Add→Commit→Push before
+      // waking the next agent. add+commit are mandatory; push is best-effort and
+      // never blocks the pipeline (failures are surfaced via runtime_log).
+      await repoService.commitAndPushOnApprove({
+        task,
+        onLog: (message, meta = {}) => {
+          gateBridge.emit(task.id, 'runtime_log', {
+            taskId: task.id,
+            level: meta.level || 'info',
+            source: 'auto_commit',
+            message,
+            meta,
+          });
+        },
+      });
       const approval = await HitlDecision.create({
         id: uuidv4(), taskId: task.id, projectId: task.projectId, workflowRunId: task.projectId,
         gate: gateType, decision: 'APPROVE', action: 'approve',

@@ -431,6 +431,125 @@ function isWithinRepo(repoPath, relPath) {
   return resolved === root || resolved.startsWith(root + path.sep);
 }
 
+/**
+ * T1 (B5/B10) — auto commit + push chain triggered by Output Review approval.
+ *
+ * Spec §7.2: Approve must run Write→Add→Commit→Push→Wake-Next as one atomic step.
+ * - `add` + `commit` are mandatory: a commit records the human's approval.
+ * - `push` is best-effort: no token / auth failure must not undo the commit
+ *   nor block the next agent. Failures are returned in `pushError` and pushed
+ *   to the runtime log via `onLog` so the operator sees them — they are NOT
+ *   silent.
+ *
+ * Commit message format follows spec §7.1: `[<agent>][<run-id>] <description>`.
+ * `runId` is derived from task id (first 8 chars) + outputVersion so each
+ * approved artifact gets a unique, traceable commit.
+ *
+ * Reuses the low-level `git()` wrapper + `repoPathFor()` so AgentOutputPanel's
+ * manual Sync/Commit/Push actions can later call the same helper.
+ *
+ * @param {{ task: object, runId?: string, onLog?: (msg: string, meta?: object) => void }} opts
+ * @returns {Promise<{ committed: boolean, commitHash: string|null, pushed: boolean, pushError: string|null, skipped: boolean, reason: string|null }>}
+ */
+async function commitAndPushOnApprove({ task, runId, onLog } = {}) {
+  const log = typeof onLog === 'function' ? onLog : () => {};
+  const result = { committed: false, commitHash: null, pushed: false, pushError: null, skipped: false, reason: null };
+
+  if (!task || !task.projectId || !task.sessionId) {
+    result.skipped = true;
+    result.reason = 'task missing projectId/sessionId — no workspace to commit';
+    log('auto-commit skipped: no workspace bound to this task', { level: 'warn' });
+    return result;
+  }
+
+  const repoPath = repoPathFor(task.projectId, task.sessionId);
+  const exists = await fs.access(repoPath).then(() => true).catch(() => false);
+  if (!exists) {
+    result.skipped = true;
+    result.reason = `workspace not found at ${repoPath}`;
+    log(`auto-commit skipped: workspace missing (${repoPath})`, { level: 'warn' });
+    return result;
+  }
+
+  // 1. add + commit (mandatory per spec §7.2).
+  try {
+    await git(['add', '-A'], repoPath);
+    const status = (await git(['status', '--porcelain'], repoPath)).trim();
+    if (!status) {
+      result.skipped = true;
+      result.reason = 'working tree clean — nothing new to commit';
+      log('auto-commit skipped: working tree clean', { level: 'info' });
+      return result;
+    }
+
+    const id = runId || `${task.id.slice(0, 8)}+${task.outputVersion || 0}`;
+    const agentTag = String(task.type || 'agent').replace(/[^a-z0-9-]/gi, '');
+    const description = deriveCommitDescription(task);
+    const message = `[${agentTag}][${id}] ${description}`;
+
+    await git(['config', 'user.name', 'AIFA Agent'], repoPath).catch(() => {});
+    await git(['config', 'user.email', 'bot@aifa.io'], repoPath).catch(() => {});
+    await git(['commit', '-m', message], repoPath);
+    result.commitHash = (await git(['rev-parse', 'HEAD'], repoPath)).trim();
+    result.committed = true;
+    log(`auto-commit ok: ${message}`, { level: 'info', commitHash: result.commitHash });
+  } catch (err) {
+    result.reason = `commit failed: ${err.message}`;
+    log(result.reason, { level: 'error' });
+    return result;
+  }
+
+  // 2. push (best-effort). Read GH_TOKEN from env at call time, not module load.
+  const token = process.env.GH_TOKEN;
+  if (!token) {
+    result.pushError = 'GH_TOKEN not set — skipping push (commit retained locally)';
+    log(result.pushError, { level: 'warn' });
+    return result;
+  }
+
+  try {
+    const remoteUrl = (await git(['config', '--get', 'remote.origin.url'], repoPath).catch(() => '') || '').trim();
+    if (!remoteUrl) {
+      result.pushError = 'no remote origin configured — skipping push';
+      log(result.pushError, { level: 'warn' });
+      return result;
+    }
+    if (!remoteUrl.startsWith('https://')) {
+      result.pushError = `unsupported remote scheme (${remoteUrl.split('://')[0]}://) — skipping push`;
+      log(result.pushError, { level: 'warn' });
+      return result;
+    }
+    const authUrl = remoteUrl.replace('https://', `https://${token}@`);
+    const pushOutput = await git(['push', authUrl, 'HEAD'], repoPath);
+    const safeOutput = String(pushOutput || '').replace(new RegExp(token, 'g'), '[HIDDEN_TOKEN]');
+    result.pushed = true;
+    log(`auto-push ok: ${safeOutput.split('\n')[0] || 'pushed'}`, { level: 'info' });
+  } catch (err) {
+    const raw = String(err?.message || 'unknown push error');
+    result.pushError = raw.replace(new RegExp(token, 'g'), '[HIDDEN_TOKEN]');
+    log(`auto-push failed: ${result.pushError}`, { level: 'error' });
+  }
+  return result;
+}
+
+/** Pick a short, descriptive first line for the commit message. */
+function deriveCommitDescription(task) {
+  const out = task.agentOutput;
+  const candidates = [
+    out && typeof out === 'object' && (out.summary || out.title || out.subject),
+    out && typeof out === 'object' && (out.prd || out.ux_spec || out.implementation_plan),
+    typeof out === 'string' ? out : null,
+  ].filter(Boolean);
+  for (const c of candidates) {
+    const first = String(c).split('\n').find((l) => l.trim()) || '';
+    const cleaned = first.replace(/^#+\s*/, '').trim();
+    if (cleaned.length >= 3) {
+      return cleaned.length > 72 ? cleaned.slice(0, 69) + '...' : cleaned;
+    }
+  }
+  return `Approved output for ${task.type}`;
+}
+
 /** T1.3 — remove the per-project workspace when a workflow ends/aborts. */
 async function cleanupWorkspace(projectId) {
   if (!projectId) return false;
@@ -446,6 +565,7 @@ module.exports = {
   prepareUploadedRepo,
   prepareSessionRepo,
   commitAndDiff,
+  commitAndPushOnApprove,
   assertRepoSafe,
   cleanupWorkspace,
   isBlockedPath,
