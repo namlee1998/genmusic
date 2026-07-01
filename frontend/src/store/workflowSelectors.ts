@@ -213,16 +213,6 @@ function timelineFromEvents(events: RuntimeEvent[]): RuntimeTimelineEntry[] {
   });
 }
 
-function timelineFromAudit(audit: api.AuditEntry[]): RuntimeTimelineEntry[] {
-  return audit.slice(-200).map((entry, idx) => ({
-    id: `${entry.timestamp}_${idx}`,
-    timestamp: entry.timestamp,
-    actor: entry.actor ?? 'system',
-    action: entry.action,
-    status: entry.status,
-  }));
-}
-
 export function selectRuntimeExecution(state: WorkflowState, sessionId: string | null): RuntimeExecution | null {
   if (!sessionId) return null;
   const session = state.sessions[sessionId];
@@ -292,11 +282,10 @@ export function selectRuntimeExecution(state: WorkflowState, sessionId: string |
   // Interventions — classify each pending gate.
   const interventions = session.pendingGates.map(classifyIntervention);
 
-  // Events: prefer runtime events when present, fall back to audit log.
-  const events =
-    session.runtimeEvents.length > 0
-      ? timelineFromEvents(session.runtimeEvents)
-      : timelineFromAudit(session.auditLog);
+  // Events: runtime events are the single source of truth per spec §8.2.
+  // The audit log is preserved on the model for backward compat with stored
+  // sessions but is no longer rendered into the timeline.
+  const events = timelineFromEvents(session.runtimeEvents);
 
   // Tool calls (for the Tools tab) — last 50 tool calls.
   const runtimeEvents = session.runtimeEvents.slice(-50);

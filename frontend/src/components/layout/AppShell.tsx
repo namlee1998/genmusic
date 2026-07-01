@@ -6,7 +6,6 @@ import { useApiActions } from '@/hooks/useApiActions';
 import { useAppStore } from '@/store';
 import { NotFoundPage } from '@/pages/NotFound';
 const SdlcDashboard = lazy(() => import('@/pages/SdlcDashboard'));
-const AuditPage = lazy(() => import('@/pages/SdlcDashboard/AuditPage'));
 const OverviewPage = lazy(() => import('@/pages/SdlcDashboard/OverviewPage'));
 import { AppTopBar } from './AppTopBar';
 import { useUiStore } from '@/store/useUiStore';
@@ -46,17 +45,18 @@ export const AppShell: React.FC = () => {
   }, [isFeatureRequestFormOpen, currentProjectId, navigate, closeFeatureRequestForm]);
   const isDefaultRoute = location.pathname === '/sdlc' || location.pathname === '/sdlc/'; // → OverviewPage
   const isBuildRoute = location.pathname === '/sdlc/build' || location.pathname === '/sdlc/build/';
-  const isAuditRoute = location.pathname === '/sdlc/audit' || location.pathname === '/sdlc/audit/';
-  // Removed tabs (Platform Debugger, Agents View) redirect to Build Dashboard
-  // instead of 404'ing old bookmarks/links.
+  // T4 (B3) — per spec §8.2, Audit Trail is gone. Runtime Log is the single
+  // timeline. Old /sdlc/audit URLs redirect to the build dashboard instead of
+  // 404'ing old bookmarks.
+  const isLegacyAuditRoute = location.pathname === '/sdlc/audit' || location.pathname === '/sdlc/audit/';
   const isRemovedTabRoute = location.pathname.startsWith('/sdlc/debug') || location.pathname.startsWith('/sdlc/agents');
   const isUnknownAppRoute = location.pathname.startsWith('/sdlc/')
     && location.pathname !== '/sdlc/' && location.pathname !== '/sdlc'
-    && !isBuildRoute && !isAuditRoute && !isRemovedTabRoute;
+    && !isBuildRoute && !isLegacyAuditRoute && !isRemovedTabRoute;
 
   useEffect(() => {
-    if (isRemovedTabRoute) navigate('/sdlc/build', { replace: true });
-  }, [isRemovedTabRoute, navigate]);
+    if (isRemovedTabRoute || isLegacyAuditRoute) navigate('/sdlc/build', { replace: true });
+  }, [isRemovedTabRoute, isLegacyAuditRoute, navigate]);
 
   const [panelCollapsed, setPanelCollapsed] = useState(() => {
     return localStorage.getItem('project-panel-collapsed') === 'true';
@@ -141,10 +141,6 @@ export const AppShell: React.FC = () => {
             <Suspense fallback={<div className="flex h-full items-center justify-center text-slate-500 text-sm animate-pulse">Loading module...</div>}>
               {isUnknownAppRoute ? (
                 <NotFoundPage mode="panel" />
-              ) : isAuditRoute ? (
-                <div className="flex flex-col h-full bg-background">
-                  <AuditPage />
-                </div>
               ) : isDefaultRoute ? (
                 <div className="flex flex-col h-full bg-background">
                   <OverviewPage />

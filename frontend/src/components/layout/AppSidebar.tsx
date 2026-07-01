@@ -5,7 +5,6 @@ import { useUiStore } from '@/store/useUiStore';
 import { useWorkflowStore } from '@/store/useWorkflowStore';
 import {
   Layers,
-  History,
   Gavel,
   ChevronDown,
   ChevronLeft,
@@ -81,7 +80,8 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
   const isDashboardActive =
     location.pathname === '/sdlc' || location.pathname === '/sdlc/';
   const isBuildActive = location.pathname.startsWith('/sdlc/build');
-  const isAuditActive = location.pathname.startsWith('/sdlc/audit');
+  // T4 (B3): Audit Trail removed per spec §8.2. Sidebar button is gone;
+// old /sdlc/audit URLs redirect to /sdlc/build (handled in AppShell).
 
   return (
     <aside
@@ -339,27 +339,6 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
                 {t('layout.chooseProjectFirst')}
               </span>
             )}
-          </button>
-
-          {/* Audit Logs */}
-          <button
-            onClick={() => activeProjectId && navigate('/sdlc/audit')}
-            disabled={!activeProjectId}
-            title={collapsed ? t('dashboard.audit', 'Audit Trail') : undefined}
-            className={`
-              w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs transition-all relative group
-              ${
-                !activeProjectId
-                  ? 'opacity-40 cursor-not-allowed text-on-surface-variant/50'
-                  : isAuditActive
-                  ? 'bg-primary/10 border-l-[3px] border-primary text-primary font-bold shadow-[inset_0_0_10px_rgba(99,102,241,0.06)]'
-                  : 'text-on-surface-variant hover:bg-surface-variant hover:text-on-surface border-l-[3px] border-transparent'
-              }
-              ${collapsed ? 'justify-center border-l-0' : ''}
-            `}
-          >
-            <History size={16} className={isAuditActive ? 'text-primary' : 'text-on-surface-variant/80'} />
-            {!collapsed && <span>{t('dashboard.audit', 'Audit Trail')}</span>}
           </button>
 
         </nav>

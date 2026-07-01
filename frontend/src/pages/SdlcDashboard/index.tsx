@@ -13,7 +13,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Check, Loader2, Clock, AlertCircle, SkipForward, PlayCircle,
-  User, Palette, Code, ShieldCheck, Bug, Network, FileText,
+  User, Palette, Code, ShieldCheck, Bug, Network,
 } from 'lucide-react';
 import { useUiStore, type InspectorTab } from '@/store/useUiStore';
 import { useWorkflowStore, type ConnectionStatus } from '@/store/useWorkflowStore';
@@ -221,15 +221,8 @@ export default function SdlcDashboard() {
             <SessionPill status={sessionStatus} connection={connection} />
           </div>
           <div className="flex items-center gap-2">
-            {activeSession && (
-              <button
-                onClick={() => navigate('/sdlc/audit')}
-                className="flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-[10px] font-bold text-primary hover:bg-primary/20"
-              >
-                <FileText size={11} />
-                Audit trail
-              </button>
-            )}
+            {/* T4 (B3): Audit Trail button removed per spec §8.2. Runtime Log is
+                the single timeline; the inspector already exposes it. */}
             <button
               onClick={() => {
                 const params = new URLSearchParams(searchParams);
