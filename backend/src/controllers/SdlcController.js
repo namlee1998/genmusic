@@ -8,6 +8,7 @@ const SdlcWorkflowService = require('../services/SdlcWorkflowService');
 const repoService = require('../services/repoService');
 const { validateRepoUrl } = repoService;
 const gateBridge = require('../services/gateBridge');
+const logger = require('../config/logger');
 
 
 // Demo scenarios exposed by the dev-only scenario selector endpoint.
@@ -302,7 +303,12 @@ class SdlcController {
       try {
         initialPipeline = await SdlcWorkflowService.getPipelineResponse(workflowId, req.user);
       } catch (err) {
-        return next(err);
+        // Cannot call next(err) here — headers are already sent on this SSE
+        // response, which would crash with ERR_HTTP_HEADERS_SENT. Convert
+        // to a structured SSE error event and close the stream cleanly.
+        logger.warn?.('streamPipelineStatus: initial snapshot failed', { workflowId, error: err.message });
+        sendEvent('error', { message: err.message, code: err.code || null, statusCode: err.statusCode || 500 });
+        return res.end();
       }
       if (!initialPipeline) {
         sendEvent('error', { message: 'Pipeline not found' });
@@ -328,7 +334,11 @@ class SdlcController {
 
       // T5: subscribe instead of polling. The bridge emits gate_pending /
       // gate_resolved / runtime_log (per task) and we forward them as-is.
-      const unsubscribe = gateBridge.subscribeProject(workflowId, (_taskId, event, data) => {
+      // IMPORTANT: `subscribeProject` keys on projectId, not sessionId.
+      // `workflowId` here IS the sessionId (see /stream/:workflowId), so we
+      // must resolve the projectId from the snapshot and subscribe with that,
+      // otherwise no events ever fan out to this stream.
+      const unsubscribe = gateBridge.subscribeProject(initialPipeline.projectId, (_taskId, event, data) => {
         sendEvent(event, data);
       });
 
@@ -368,7 +378,15 @@ class SdlcController {
         res.end();
       });
     } catch (err) {
-      next(err);
+      // Don't call next(err) if we already committed the SSE response —
+      // it crashes with ERR_HTTP_HEADERS_SENT. Just log and let the
+      // connection close naturally.
+      if (res.headersSent) {
+        logger.warn?.('sse stream: late error after headers sent', { error: err.message });
+        try { res.end(); } catch (_) { /* ignore */ }
+      } else {
+        next(err);
+      }
     }
   }
 
@@ -530,7 +548,15 @@ class SdlcController {
         res.end();
       });
     } catch (err) {
-      next(err);
+      // Don't call next(err) if we already committed the SSE response —
+      // it crashes with ERR_HTTP_HEADERS_SENT. Just log and let the
+      // connection close naturally.
+      if (res.headersSent) {
+        logger.warn?.('sse stream: late error after headers sent', { error: err.message });
+        try { res.end(); } catch (_) { /* ignore */ }
+      } else {
+        next(err);
+      }
     }
   }
 
