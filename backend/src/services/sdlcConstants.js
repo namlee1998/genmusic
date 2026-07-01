@@ -6,6 +6,7 @@ const WORKSPACE_DIR = path.join(__dirname, '../../../workspace/projects');
 
 // ── Agent Gates ──────────────────────────────────────────────────────────────
 const AGENT_GATES = {
+  'architecture-agent': 'ARCHITECTURE_GATE',
   'intent-agent': 'REQUIREMENT_GATE',
   'po-agent': 'REQUIREMENT_GATE',
   'ux-agent': 'UX_GATE',
@@ -14,6 +15,7 @@ const AGENT_GATES = {
 };
 
 const OUTPUT_REVIEW_GATE_TYPE = {
+  'architecture-agent': 'ARCH_OUTPUT_REVIEW',
   'po-agent': 'PO_OUTPUT_REVIEW',
   'ux-agent': 'UX_OUTPUT_REVIEW',
   'dev-agent': 'DEV_OUTPUT_REVIEW',
@@ -21,6 +23,7 @@ const OUTPUT_REVIEW_GATE_TYPE = {
 };
 
 const NEXT_AGENT = {
+  'architecture-agent': 'po-agent',
   'intent-agent': 'po-agent',
   'po-agent': 'ux-agent',
   'ux-agent': 'dev-agent',
@@ -75,10 +78,83 @@ const OUTPUT_CONTRACT_VERSION = 'gate-output.v4';
 const _acList = (o) => (Array.isArray(o.acceptance_criteria) ? o.acceptance_criteria : []);
 const _matrix = (o) => (Array.isArray(o.ac_coverage_matrix) ? o.ac_coverage_matrix : []);
 
-const INTENT_RULES = [
+// AIFA v2.1 §3: the architecture-agent output is validated against the
+// versioned output contract in gateManager.validateGateOutput. The
+// contract iterates rules and calls rule.check(o, task) — so every entry
+// here must expose a `check` function. Earlier revisions put
+// ARCHITECTURE_RULES in the artifact-manifest shape ({key, required})
+// which crashed the validator with "rule.check is not a function". Each
+// rule below asserts the corresponding architecture artifact key is
+// present and non-empty.
+const ARCHITECTURE_RULES = [
   {
-    rule: 'intent_assumptions_present', severity: 'BLOCKER', detail: 'Intent assumptions are empty',
-    check: (o) => hasContent(o.intent_assumptions)
+    rule: 'repository_summary_present',
+    severity: 'BLOCKER',
+    detail: 'repository_summary is missing or empty',
+    check: (o) => hasContent(o.repository_summary),
+  },
+  {
+    rule: 'technology_stack_present',
+    severity: 'BLOCKER',
+    detail: 'technology_stack is missing or empty',
+    check: (o) => hasContent(o.technology_stack),
+  },
+  {
+    rule: 'technical_decisions_present',
+    severity: 'BLOCKER',
+    detail: 'technical_decisions is missing or empty',
+    check: (o) => {
+      const d = o.technical_decisions;
+      if (Array.isArray(d)) return d.length > 0 && d.some((x) => hasContent(x));
+      return hasContent(d);
+    },
+  },
+  {
+    rule: 'constraints_present',
+    severity: 'BLOCKER',
+    detail: 'constraints is missing or empty',
+    check: (o) => {
+      const c = o.constraints;
+      if (Array.isArray(c)) return c.length > 0 && c.some((x) => hasContent(x));
+      return hasContent(c);
+    },
+  },
+  {
+    rule: 'repository_routing_present',
+    severity: 'BLOCKER',
+    detail: 'repository_routing is missing or empty',
+    check: (o) => hasContent(o.repository_routing),
+  },
+  {
+    rule: 'repository_routing_has_target',
+    severity: 'BLOCKER',
+    detail: 'repository_routing.target_module is missing',
+    check: (o) => hasContent(o.repository_routing?.target_module),
+  },
+  {
+    rule: 'repository_routing_has_framework',
+    severity: 'BLOCKER',
+    detail: 'repository_routing.framework is missing',
+    check: (o) => hasContent(o.repository_routing?.framework),
+  },
+  {
+    rule: 'repository_routing_has_language',
+    severity: 'BLOCKER',
+    detail: 'repository_routing.language is missing',
+    check: (o) => hasContent(o.repository_routing?.language),
+  },
+  {
+    rule: 'architecture_brief_present',
+    severity: 'BLOCKER',
+    detail: 'architecture_brief is missing or empty (expected: Markdown string at top-level of agent output)',
+    check: (o) => hasContent(o.architecture_brief),
+    inspect: (o) => {
+      const v = o?.architecture_brief;
+      if (v === undefined) return 'received: undefined (field not produced by agent)';
+      if (v === null) return 'received: null';
+      if (typeof v === 'string') return `received: empty string (length=${v.length})`;
+      return `received: ${typeof v} (non-string value)`;
+    },
   },
 ];
 
@@ -258,7 +334,7 @@ const QA_RULES = [
 
 const OUTPUT_CONTRACTS = {
   version: OUTPUT_CONTRACT_VERSION,
-  'intent-agent': INTENT_RULES,
+  'architecture-agent': ARCHITECTURE_RULES,
   'po-agent': PO_RULES,
   'ux-agent': UX_RULES,
   'dev-agent': DEV_RULES,

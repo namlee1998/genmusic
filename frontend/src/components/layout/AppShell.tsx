@@ -7,10 +7,9 @@ import { useAppStore } from '@/store';
 import { NotFoundPage } from '@/pages/NotFound';
 const SdlcDashboard = lazy(() => import('@/pages/SdlcDashboard'));
 const AuditPage = lazy(() => import('@/pages/SdlcDashboard/AuditPage'));
-const HitlDashboard = lazy(() => import('@/pages/SdlcDashboard/HitlDashboard'));
+const OverviewPage = lazy(() => import('@/pages/SdlcDashboard/OverviewPage'));
 import { AppTopBar } from './AppTopBar';
-import { useSdlcStore } from '@/store/useSdlcStore';
-import * as sdlcApi from '@/services/api/sdlcApi';
+import { useUiStore } from '@/store/useUiStore';
 import { FeatureRequestProjectDialog } from './dialogs/FeatureRequestProjectDialog';
 import { ImportProjectDialog } from './dialogs/ImportProjectDialog';
 
@@ -31,8 +30,8 @@ export const AppShell: React.FC = () => {
   } = useAppStore();
   const location = useLocation();
   const navigate = useNavigate();
-  const isFeatureRequestFormOpen = useSdlcStore((s) => s.isFeatureRequestFormOpen);
-  const setFeatureRequestFormOpen = useSdlcStore((s) => s.setFeatureRequestFormOpen);
+  const isFeatureRequestFormOpen = useUiStore((s) => s.isFeatureRequestFormOpen);
+  const closeFeatureRequestForm = useUiStore((s) => s.closeFeatureRequestForm);
 
   // Handle feature request form navigation when project is already selected.
   // Always (re)navigate with focusRequest=true — even when already on the
@@ -43,9 +42,9 @@ export const AppShell: React.FC = () => {
   useEffect(() => {
     if (!isFeatureRequestFormOpen || !currentProjectId) return;
     navigate('/sdlc/build?focusRequest=true');
-    setFeatureRequestFormOpen(false);
-  }, [isFeatureRequestFormOpen, currentProjectId, navigate, setFeatureRequestFormOpen]);
-  const isDefaultRoute = location.pathname === '/sdlc' || location.pathname === '/sdlc/'; // → HitlDashboard
+    closeFeatureRequestForm();
+  }, [isFeatureRequestFormOpen, currentProjectId, navigate, closeFeatureRequestForm]);
+  const isDefaultRoute = location.pathname === '/sdlc' || location.pathname === '/sdlc/'; // → OverviewPage
   const isBuildRoute = location.pathname === '/sdlc/build' || location.pathname === '/sdlc/build/';
   const isAuditRoute = location.pathname === '/sdlc/audit' || location.pathname === '/sdlc/audit/';
   // Removed tabs (Platform Debugger, Agents View) redirect to Build Dashboard
@@ -77,28 +76,18 @@ export const AppShell: React.FC = () => {
     localStorage.setItem('project-panel-collapsed', String(next));
   }
 
-  async function handleCreateProject(name: string, url: string, files?: File[], onProgress?: (pct: number) => void) {
+  async function handleCreateProject(name: string, url: string) {
     const res = await api.createProject(name);
     upsertProject(res.data);
 
-    let finalRepoUrl = url;
-
-    if (files && files.length > 0 && import.meta.env.VITE_USE_MOCK !== 'true') {
-      try {
-        const uploadRes = await sdlcApi.uploadRepoFolder(res.data.project_id, files, '', onProgress);
-        if (uploadRes && uploadRes.repo_path) {
-          finalRepoUrl = uploadRes.repo_path;
-        }
-      } catch (err) {
-        console.error('Failed to upload repository folder:', err);
-        throw err;
-      }
-    }
-
-    localStorage.setItem(`repoUrl_${res.data.project_id}`, finalRepoUrl);
+    // AIFA v2.1 §4: the workflow entry is a Git Repository URL. Folder
+    // uploads are no longer part of the execution-flow entry — the dialog
+    // collects only the URL, which the workflow uses to start via
+    // POST /run-architecture-agent.
+    localStorage.setItem(`repoUrl_${res.data.project_id}`, url);
     setCurrentProject(res.data.project_id);
     setCreateProjectDialogOpen(false);
-    // errors propagate up to CreateProjectDialog which displays them inline
+    // errors propagate up to ImportProjectDialog which displays them inline
   }
 
   useEffect(() => {
@@ -158,7 +147,7 @@ export const AppShell: React.FC = () => {
                 </div>
               ) : isDefaultRoute ? (
                 <div className="flex flex-col h-full bg-background">
-                  <HitlDashboard />
+                  <OverviewPage />
                 </div>
               ) : isBuildRoute || isRemovedTabRoute ? (
                 <div className="flex flex-col h-full bg-background">
@@ -184,10 +173,10 @@ export const AppShell: React.FC = () => {
       {isFeatureRequestFormOpen && !currentProjectId && (
         <FeatureRequestProjectDialog
           projects={panelProjects}
-          onCancel={() => setFeatureRequestFormOpen(false)}
+          onCancel={() => closeFeatureRequestForm()}
           onSelect={(projectId) => {
             setCurrentProject(projectId);
-            setFeatureRequestFormOpen(false);
+            closeFeatureRequestForm();
             navigate('/sdlc/build?focusRequest=true');
           }}
         />

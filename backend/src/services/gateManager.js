@@ -29,7 +29,14 @@ function validateGateOutput(task, output) {
     if (rule.when && !rule.when(out, task)) continue;
     if (rule.check(out, task)) continue;
     const detail = typeof rule.detail === 'function' ? rule.detail(out, task) : rule.detail;
-    violations.push({ rule: rule.rule, detail, severity: rule.severity, layer: layerOf(rule.rule) });
+    const inspect = typeof rule.inspect === 'function' ? rule.inspect(out, task) : null;
+    violations.push({
+      rule: rule.rule,
+      detail,
+      severity: rule.severity,
+      layer: layerOf(rule.rule),
+      ...(inspect ? { inspect } : {}),
+    });
   }
 
   const blockers = violations.filter((v) => v.severity === 'BLOCKER');

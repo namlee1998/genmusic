@@ -6,6 +6,7 @@
 
 const SdlcWorkflowService = require('../services/SdlcWorkflowService');
 const repoService = require('../services/repoService');
+const { validateRepoUrl } = repoService;
 const gateBridge = require('../services/gateBridge');
 
 
@@ -13,100 +14,71 @@ const gateBridge = require('../services/gateBridge');
 const DEFAULT_MOCK_SCENARIO = 'happy_path';
 
 class SdlcController {
-  // ─── IntentGate ──────────────────────────────────────────────────────────
+  // ─── ArchitectureGate ──────────────────────────────────────────────────────────
 
-  async runIntentAgent(req, res, next) {
+  async runArchitectureAgent(req, res, next) {
     try {
-      const { project_id, feature_request, feedback_prompt, backlog_id } = req.body;
+      const { project_id, feature_request, feedback_prompt, backlog_id, repo_url } = req.body;
       if (!project_id) return res.status(400).json({ status: 'error', message: 'project_id is required' });
       if (!feature_request || !feature_request.title) {
         return res.status(400).json({ status: 'error', message: 'feature_request.title is required' });
       }
+      // AIFA v2.1 §4 Phase 1: validate the Repository URL before any
+      // workspace creation or clone work begins. validateRepoUrl throws
+      // ApiError(400, ...) — let it propagate to the error middleware so
+      // the response shape stays consistent with the rest of the API.
+      validateRepoUrl(repo_url);
 
-      const task = await SdlcWorkflowService.runIntentAgent({
+      const result = await SdlcWorkflowService.runArchitectureAgent({
         projectId: project_id,
         featureRequest: feature_request,
         feedbackPrompt: feedback_prompt || '',
         backlogId: backlog_id || null,
+        repoUrl: repo_url || null,
         user: req.user,
       });
 
-      return res.status(202).json({ task_id: task.id, status: task.status, type: task.type });
+      // AIFA v2.1: return both task_id and session_id so the frontend can
+      // poll /pipeline/:session_id and open /stream/:session_id immediately
+      // without any bridge logic. PipelineSession is created upfront in
+      // runArchitectureAgent — see workflowOrchestrator.runArchitectureAgent.
+      return res.status(202).json({
+        task_id: result.task.id,
+        session_id: result.sessionId,
+        status: result.task.status,
+        type: result.task.type,
+      });
     } catch (err) { next(err); }
   }
 
   // ─── Run Agents ──────────────────────────────────────────────────────────
 
+  /**
+   * PO is no longer reachable as a direct HTTP entry. Per AIFA v2.1 §3 / §7
+   * the canonical chain is ARCH → PO → UX → DEV → QA; PO must follow an
+   * approved Architecture task. The orchestrator starts PO automatically
+   * after the Architecture gate is approved, and rework flows route through
+   * the structured HITL endpoints.
+   */
   async runPOAgent(req, res, next) {
-    try {
-      let { project_id, source_task_id, feature_request, feedback_prompt, backlog_id, repo_url, repo_path, branch, request } = req.body;
-      console.log('>>> runPOAgent DUMP <<<');
-      console.log('req.body.repo_url:', req.body.repo_url);
-      console.log('req.body.repo_path:', req.body.repo_path);
-      
-      // Auto-map `request` to `feature_request` to conform with API Contract if missing
-      if (request && !feature_request) {
-        feature_request = { title: request, description: request };
-      }
-
-      if (!source_task_id && (!project_id || !feature_request?.title)) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Provide source_task_id for legacy flow or project_id with feature_request.title for the v4 PO-first flow',
-        });
-      }
-
-      const task = await SdlcWorkflowService.runPOAgent({
-        projectId: project_id,
-        sourceTaskId: source_task_id,
-        featureRequest: feature_request,
-        feedbackPrompt: feedback_prompt || '',
-        backlogId: backlog_id || null,
-        // T1.4: repo-aware, user-initiated workflow start.
-        repoUrl: repo_url || null,
-        repoPath: repo_path || null,
-        branch: branch || 'main',
-        request: request || feature_request?.title || '',
-        user: req.user,
-      });
-
-      return res.status(202).json({
-        workflowId: task.sessionId,
-        task_id: task.id,
-        status: task.status,
-        type: task.type
-      });
-    } catch (err) { next(err); }
+    return res.status(410).json({
+      status: 'error',
+      code: 'PO_AGENT_ENTRY_REMOVED',
+      message: 'PO Agent is no longer a direct workflow entry. Per AIFA v2.1 §3/§7 the canonical chain starts with Architecture. Call POST /api/v1/sdlc/run-architecture-agent with repo_url, then approve the Architecture gate to auto-advance to PO.',
+    });
   }
 
   /**
-   * Upload an entire local folder (from anywhere on the user's machine) as the
-   * workflow repo. The browser cannot send an absolute path, so it streams the
-   * files; we write them into the project workspace and git-init a fresh repo.
-   * Returns the server-side `repo_path` to pass to run-po-agent.
+   * Folder upload is no longer accepted as a workflow entry. Per AIFA v2.1 §4
+   * repositories are never uploaded — the Git repository is the only source of
+   * project information. Workflows must be started from a Repository URL.
    */
   async uploadRepo(req, res, next) {
-    try {
-      const { project_id, request } = req.body;
-      if (!project_id) return res.status(400).json({ status: 'error', message: 'project_id is required' });
-      const files = req.files || [];
-
-      // `paths` carries each file's relative path (webkitRelativePath), aligned
-      // by index with req.files (multer preserves field order).
-      const rawPaths = req.body.paths;
-      const paths = Array.isArray(rawPaths) ? rawPaths : (rawPaths ? [rawPaths] : []);
-      const entries = files.map((f, i) => ({ relativePath: paths[i] || f.originalname, buffer: f.buffer }));
-
-      const result = await repoService.prepareUploadedRepo({
-        projectId: project_id,
-        files: entries,
-        request: request || '',
-      });
-      return res.status(201).json({
-        status: 'success',
-        data: { repo_path: result.repoPath, base_branch: result.baseBranch, file_count: result.fileCount },
-      });
-    } catch (err) { next(err); }
+    return res.status(410).json({
+      status: 'error',
+      code: 'UPLOAD_REPO_REMOVED',
+      message: 'Folder upload is no longer accepted. Per AIFA v2.1 §4 the workflow entry is a Repository URL — call POST /api/v1/sdlc/run-architecture-agent with repo_url.',
+    });
   }
 
   async runUXAgent(req, res, next) {

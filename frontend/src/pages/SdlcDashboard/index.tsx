@@ -1,21 +1,37 @@
+/**
+ * Agent Tasks page (formerly "Agent Gate"). Three-column layout:
+ *  - LEFT:   SessionRail (session browser)
+ *  - CENTER: 5 agent columns (ARCH/PO/UX/DEV/QA) with task lists
+ *  - RIGHT:  InspectorPanel (Runtime Log / Tool Calls / Human Questions / …)
+ *
+ * Workflow data source: useWorkflowStore (SSE-driven). UI source: useUiStore.
+ * No polling, no mirrors. Click an agent column → opens Output Review in the
+ * right inspector; pending PO_CLARIFY gates auto-switch the inspector to the
+ * Human Questions tab via selectRuntimeExecution + ClarificationPanel.
+ */
 import { useEffect, useMemo, useState } from 'react';
-import { useSdlcStore } from '@/store/useSdlcStore';
-import { useShallow } from 'zustand/react/shallow';
-import { useAppStore } from '@/store/useAppStore';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Check, Loader2, Clock, AlertCircle, SkipForward, PlayCircle,
-  User, Palette, Code, ShieldCheck, Bug, Plus, CheckCircle2, RotateCcw, FolderOpen,
-  GitPullRequest, UploadCloud, DownloadCloud, Save, FileText, Network
+  User, Palette, Code, ShieldCheck, Bug, Network, FileText,
 } from 'lucide-react';
+import { useUiStore, type InspectorTab } from '@/store/useUiStore';
+import { useWorkflowStore, type ConnectionStatus } from '@/store/useWorkflowStore';
+import { selectRuntimeExecution } from '@/store/workflowSelectors';
+import type { AgentKey } from '@/models/SessionState';
+import { AGENT_KEYS } from '@/models/SessionState';
 import EmptyProjectState from './components/EmptyProjectState';
 import FeatureRequestChatbox from './components/FeatureRequestChatbox';
-import SessionCard from './components/SessionCard';
-import AgentOutputPanel from './components/AgentOutputPanel';
-import { Badge } from '@/components/ui/Badge';
+import { SessionRail } from './components/SessionRail';
+import { InspectorPanel } from './components/InspectorPanel';
+import { useAppStore } from '@/store/useAppStore';
 
-const AGENT_TO_ROLE: Record<'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA', string> = {
-  ARCH: 'architecture-agent', PO: 'po-agent', UX: 'ux-agent', DEV: 'dev-agent', QA: 'qa-agent',
+const AGENT_META: Record<AgentKey, { title: string; desc: string; icon: React.ReactNode }> = {
+  ARCH: { title: 'Architecture (ARCH)', desc: 'System Design & Routing', icon: <Network size={18} className="text-cyan-400" /> },
+  PO:   { title: 'Product Owner (PO)', desc: 'Requirements & Risk', icon: <User size={18} className="text-indigo-400" /> },
+  UX:   { title: 'UI/UX Designer (UX)', desc: 'User Flows & Mockups', icon: <Palette size={18} className="text-pink-400" /> },
+  DEV:  { title: 'Developer (DEV)', desc: 'Code & Build', icon: <Code size={18} className="text-emerald-400" /> },
+  QA:   { title: 'Quality Assurance (QA)', desc: 'Validation', icon: <ShieldCheck size={18} className="text-amber-400" /> },
 };
 
 interface TaskItem {
@@ -25,530 +41,382 @@ interface TaskItem {
   status: 'pending' | 'running' | 'gate_pending' | 'completed' | 'skipped' | 'failed';
 }
 
-const AGENT_META = {
-  ARCH: { title: 'Architecture (ARCH)', desc: 'System Design & Routing', icon: <Network size={18} className="text-cyan-400" /> },
-  PO: { title: 'Product Owner (PO)', desc: 'Requirements & Risk Analysis', icon: <User size={18} className="text-indigo-400" /> },
-  UX: { title: 'UI/UX Designer (UX)', desc: 'User Flows & Wireframes', icon: <Palette size={18} className="text-pink-400" /> },
-  DEV: { title: 'Developer (DEV)', desc: 'Code & Build Execution', icon: <Code size={18} className="text-emerald-400" /> },
-  QA: { title: 'Quality Assurance (QA)', desc: 'Validation & Compliance', icon: <ShieldCheck size={18} className="text-amber-400" /> },
-};
-
-const getBadgeVariant = (status: string): "default" | "success" | "warning" | "danger" | "info" | "outline" => {
-  switch (status) {
-    case 'running': return 'info';
-    case 'gate_pending': return 'warning';
-    case 'completed': return 'success';
-    case 'failed': return 'danger';
-    default: return 'default';
-  }
-};
-
-const TASK_ICON: Record<string, React.ReactNode> = {
+const TASK_ICON: Record<TaskItem['status'], React.ReactNode> = {
   completed: <Check size={14} className="text-emerald-500" />,
   running: <Loader2 size={14} className="animate-spin text-blue-500" />,
   gate_pending: <Clock size={14} className="text-amber-500" />,
   failed: <AlertCircle size={14} className="text-error" />,
   skipped: <SkipForward size={14} className="text-on-surface-variant/60" />,
+  pending: <PlayCircle size={14} className="text-on-surface-variant" />,
 };
 
-const translateError = (err: string | null): string | null => {
-  if (!err) return null;
-  const errStr = typeof err === 'string' ? err : (err as any).message || String(err);
-  
-  if (errStr.includes('project_id with feature_request.title')) return 'Vui lòng chọn một Dự án trước khi gửi yêu cầu tính năng mới.';
-  if (errStr.includes('Failed to start SDLC')) return 'Có lỗi xảy ra khi khởi động Agent Pipeline. Vui lòng thử lại.';
-  if (errStr.includes('Failed to check status')) return 'Không thể cập nhật trạng thái từ hệ thống. Đang kết nối lại...';
-  if (errStr.includes('Failed to resolve risk')) return 'Không thể phản hồi yêu cầu phê duyệt cổng bảo mật.';
-  if (errStr.includes('Failed to submit final release')) return 'Không thể gửi quyết định phê duyệt tính năng.';
-  if (errStr.includes('Network Error') || errStr.includes('Failed to fetch')) return 'Lỗi mạng: Không thể kết nối đến máy chủ Backend.';
-  if (errStr.includes('this._routeSkipsUx is not a function')) return 'Lỗi hệ thống: Cấu hình luồng UX bị lỗi (Đã được khắc phục).';
-  
-  return errStr;
+const TASK_LIST: Record<AgentKey, Array<{ id: string; title: string; description: string }>> = {
+  ARCH: [
+    { id: 'arch-1', title: 'Detect Architecture', description: 'Read repo tree, config files & detect tech stack.' },
+    { id: 'arch-2', title: 'Generate Architecture_Brief.md', description: 'Output routing, modules & constraints.' },
+  ],
+  PO: [{ id: 'po-1', title: 'Generate PRD', description: 'Create product requirements document.' }],
+  UX: [{ id: 'ux-1', title: 'Create HTML Mockup', description: 'Design interactive HTML interface.' }],
+  DEV: [
+    { id: 'dev-1', title: 'Generate Code Diff', description: 'Create and review code changes.' },
+    { id: 'dev-2', title: 'Execute Build', description: 'Run compiler, linter, and tests.' },
+  ],
+  QA: [{ id: 'qa-1', title: 'Test & Verify', description: 'Create and auto-execute test cases.' }],
 };
+
+const STATUS_DOT_COLOR: Record<TaskItem['status'], string> = {
+  pending: 'border-outline-variant/10 bg-transparent',
+  running: 'border-blue-500/30 bg-blue-500/5',
+  gate_pending: 'border-amber-500/30 bg-amber-500/5',
+  completed: 'border-emerald-500/15 bg-emerald-500/5',
+  failed: 'border-red-500/30 bg-red-500/5',
+  skipped: 'border-dashed border-outline-variant/10 opacity-50',
+};
+
+const COLUMN_BORDER: Record<TaskItem['status'] | 'pending', string> = {
+  pending: 'border-outline-variant/20',
+  running: 'border-blue-500/30',
+  gate_pending: 'border-amber-500/30',
+  completed: 'border-emerald-500/20',
+  skipped: 'border-dashed border-outline-variant/20',
+  failed: 'border-red-500/30',
+};
+
+const TRANSLATED_ERROR: Array<[RegExp, string]> = [
+  [/project_id with feature_request\.title/, 'Please select a Project before submitting a new feature request.'],
+  [/Failed to start SDLC/, 'Could not start the agent pipeline. Please retry.'],
+  [/Failed to check status/, 'Could not refresh status from the server. Reconnecting…'],
+  [/Failed to resolve risk/, 'Could not respond to the security gate.'],
+  [/Failed to submit final release/, 'Could not submit the release decision.'],
+  [/Network Error|Failed to fetch/, 'Network error: cannot reach the backend.'],
+];
+
+function translateError(err: string | null): string | null {
+  if (!err) return null;
+  for (const [re, msg] of TRANSLATED_ERROR) {
+    if (re.test(err)) return msg;
+  }
+  return err;
+}
 
 export default function SdlcDashboard() {
-  const {
-    sessions, activeSessionId, getActiveSession, getAllSessions, setActiveSession, cleanupSession,
-    cleanupConnections, pollStatus, startPipeline
-  } = useSdlcStore(
-    useShallow((state) => ({
-      sessions: state.sessions,
-      activeSessionId: state.activeSessionId,
-      getActiveSession: state.getActiveSession,
-      getAllSessions: state.getAllSessions,
-      setActiveSession: state.setActiveSession,
-      cleanupSession: state.cleanupSession,
-      cleanupConnections: state.cleanupConnections,
-      pollStatus: state.pollStatus,
-      startPipeline: state.startPipeline,
-    }))
-  );
-
-  const activeSession = getActiveSession();
-  const allSessions = getAllSessions();
-  const status = activeSession?.status || 'idle';
-  const error = activeSession?.error || null;
-  const pipelinePhases = useMemo(
-    () => activeSession?.pipelinePhases ?? [],
-    // eslint-disable-next-line react-hooks/preserve-manual-memoization
-    [activeSession?.pipelinePhases]
-  );
-
   const currentProjectId = useAppStore((s) => s.currentProjectId);
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  const focusRequest = searchParams.get('focusRequest') === 'true';
-  const highlightGate = searchParams.get('highlightGate');
-  const deepLinkSessionId = searchParams.get('sessionId');
-  const deepLinkAgentKey = searchParams.get('agentKey') as 'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA' | null;
 
-  const [openAgentPanel, setOpenAgentPanel] = useState<'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA' | null>(() =>
-    deepLinkAgentKey && ['ARCH', 'PO', 'UX', 'DEV', 'QA'].includes(deepLinkAgentKey) ? deepLinkAgentKey : null
+  const sessionsMap = useWorkflowStore((s) => s.sessions);
+  const connection = useWorkflowStore((s) => {
+    const conns = Object.values(s.sseConnections) as ConnectionStatus[];
+    if (conns.length === 0) return 'idle' as ConnectionStatus;
+    if (conns.some((c) => c === 'error')) return 'error' as ConnectionStatus;
+    if (conns.every((c) => c === 'connected')) return 'connected' as ConnectionStatus;
+    if (conns.some((c) => c === 'connecting')) return 'connecting' as ConnectionStatus;
+    return 'idle' as ConnectionStatus;
+  });
+  const activeSessionId = useUiStore((s) => s.activeSessionId);
+  const setActiveSession = useUiStore((s) => s.setActiveSession);
+  const setInspectorTab = useUiStore((s) => s.setInspectorTab);
+  const setSelectedGateId = useUiStore((s) => s.setSelectedGateId);
+
+  const sessions = useMemo(() => Object.values(sessionsMap), [sessionsMap]);
+
+  // Project RuntimeExecution outside the Zustand selector — the selector
+  // allocates a fresh object per call and would otherwise create an
+  // infinite-render loop.
+  const runtime = useMemo(
+    () => (activeSessionId ? selectRuntimeExecution({ sessions: sessionsMap } as never, activeSessionId) : null),
+    [sessionsMap, activeSessionId],
   );
+  const activeSession = activeSessionId ? sessionsMap[activeSessionId] ?? null : null;
 
-  // Jump to the session a HITL gate came from (e.g. navigated from the
-  // Intervention Center's "Review" action) before auto-opening its panel.
+  const focusRequest = searchParams.get('focusRequest') === 'true';
+  const deepLinkSessionId = searchParams.get('sessionId');
+
+  // Deep-link: when navigated from elsewhere with ?sessionId=…, switch into it.
   useEffect(() => {
-    if (deepLinkSessionId && deepLinkSessionId !== activeSessionId && sessions[deepLinkSessionId]) {
+    if (deepLinkSessionId && deepLinkSessionId !== activeSessionId && sessions.find((s) => s.sessionId === deepLinkSessionId)) {
       setActiveSession(deepLinkSessionId);
     }
   }, [deepLinkSessionId, activeSessionId, sessions, setActiveSession]);
 
+  // Open the questions tab when a clarification gate is the only thing waiting.
+  const clarificationGateId = activeSession?.pendingGates.find((g) => g.type === 'PO_CLARIFY')?.id ?? null;
   useEffect(() => {
-    if (deepLinkAgentKey && ['ARCH', 'PO', 'UX', 'DEV', 'QA'].includes(deepLinkAgentKey)) {
-      const params = new URLSearchParams(searchParams);
-      params.delete('agentKey');
-      params.delete('sessionId');
-      setSearchParams(params, { replace: true });
+    if (clarificationGateId) {
+      setInspectorTab('questions');
+      setSelectedGateId(clarificationGateId);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deepLinkAgentKey]);
+  }, [clarificationGateId, setInspectorTab, setSelectedGateId]);
 
-  const pendingGateForAgent = (agent: 'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA') =>
-    activeSession?.pendingGates.find((g) => g.role === AGENT_TO_ROLE[agent]) || null;
-
-  useEffect(() => {
-    return () => cleanupConnections();
-  }, [cleanupConnections]);
-
-  useEffect(() => {
-    if (activeSessionId && status !== 'idle' && status !== 'failed' && status !== 'completed') {
-      void pollStatus(activeSessionId);
-    }
-  }, [activeSessionId, status, pollStatus]);
-
-  // Highlight gate when navigated from Intervention Center
-  useEffect(() => {
-    if (!highlightGate) return;
-    const timer = setTimeout(() => {
-      // Map gate type to agent column via data attributes
-      const el = document.querySelector(`[data-agent]`);
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        el.classList.add('ring-2', 'ring-indigo-500/50', 'rounded-xl');
-        setTimeout(() => el.classList.remove('ring-2', 'ring-indigo-500/50', 'rounded-xl'), 2500);
-      }
-      // Clear the param so refresh doesn't re-trigger
-      const params = new URLSearchParams(searchParams);
-      params.delete('highlightGate');
-      setSearchParams(params, { replace: true });
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [highlightGate, searchParams, setSearchParams]);
-
-  const taskStatuses = ['pending', 'running', 'gate_pending', 'completed', 'skipped', 'failed'] as const;
-  const statusCounts = useMemo(() => {
-    const counts = { pending: 0, running: 0, gate_pending: 0, completed: 0, skipped: 0, failed: 0 };
-    pipelinePhases.forEach(p => { if (p.status in counts) counts[p.status as keyof typeof counts]++; });
-    return counts;
-  }, [pipelinePhases]);
-
-  // Derive phase status from pipelinePhases
-  const phaseStatus = (agent: 'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA') =>
-    pipelinePhases.find(p => p.agent === agent)?.status ?? 'pending';
-
-  const phaseDuration = (agent: 'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA') =>
-    pipelinePhases.find(p => p.agent === agent)?.duration;
-
-  const getTaskStatus = (agent: 'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA', idx: number): TaskItem['status'] => {
-    const ps = phaseStatus(agent);
-    if (ps === 'skipped') return 'skipped';
-    if (ps === 'failed') return 'failed';
-    if (ps === 'pending') return 'pending';
-    if (ps === 'running') return idx === 1 ? 'running' : 'pending';
-    if (ps === 'gate_pending') return 'gate_pending';
-    if (ps === 'completed') return 'completed';
-    return 'pending';
-  };
-
-  const tasksFor = (agent: 'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA'): TaskItem[] => {
-    const lists: Record<string, TaskItem[]> = {
-      ARCH: [
-        { id: 'arch-1', title: 'Detect Architecture', description: 'Read repo tree, config files & detect tech stack.', status: getTaskStatus('ARCH', 1) },
-        { id: 'arch-2', title: 'Generate Architecture_Brief.md', description: 'Output routing, modules & constraints.', status: getTaskStatus('ARCH', 2) },
-      ],
-      PO: [
-        { id: 'po-1', title: 'Generate PRD', description: 'Create product requirements document.', status: getTaskStatus('PO', 1) },
-      ],
-      UX: [
-        { id: 'ux-1', title: 'Create HTML Mockup', description: 'Design interactive HTML interface.', status: getTaskStatus('UX', 1) },
-      ],
-      DEV: [
-        { id: 'dev-1', title: 'Generate Code Diff', description: 'Create and review code changes.', status: getTaskStatus('DEV', 1) },
-        { id: 'dev-2', title: 'Execute Build', description: 'Run compiler, linter, and tests.', status: getTaskStatus('DEV', 2) },
-      ],
-      QA: [
-        { id: 'qa-1', title: 'Test & Verify', description: 'Create and auto-execute test cases.', status: getTaskStatus('QA', 1) },
-      ],
+  // ── Task status derivation per agent column ──
+  const tasksForAgent = (agent: AgentKey, phaseStatus: string): TaskItem[] => {
+    const map: Record<TaskItem['status'], TaskItem['status']> = {
+      pending: 'pending',
+      running: 'running',
+      gate_pending: 'gate_pending',
+      completed: 'completed',
+      skipped: 'skipped',
+      failed: 'failed',
     };
-    return lists[agent];
+    const list = TASK_LIST[agent];
+    return list.map((t, idx) => {
+      let status: TaskItem['status'] = 'pending';
+      if (phaseStatus === 'pending') status = 'pending';
+      else if (phaseStatus === 'running') status = idx === 0 ? 'running' : 'pending';
+      else if (phaseStatus === 'gate_pending') status = 'gate_pending';
+      else if (phaseStatus === 'completed') status = 'completed';
+      else if (phaseStatus === 'skipped') status = 'skipped';
+      else if (phaseStatus === 'failed') status = 'failed';
+      return { ...t, status: map[status] ?? 'pending' };
+    });
   };
+
+  const phaseStatusFor = (agent: AgentKey): string => {
+    if (!runtime) return 'pending';
+    return runtime.phases.find((p) => p.agent === agent)?.status ?? 'pending';
+  };
+
+  const onColumnClick = (agent: AgentKey) => {
+    const reviewGate = activeSession?.pendingGates.find((g) => g.type === `${agent}_OUTPUT_REVIEW`);
+    if (reviewGate) {
+      setSelectedGateId(reviewGate.id);
+      setInspectorTab('review');
+      return;
+    }
+    // No pending review gate — show the agent's artifact preview if completed.
+    setInspectorTab('artifact');
+  };
+
+  const translatedError = translateError(activeSession?.error ?? null);
+  const sessionStatus = activeSession?.status ?? 'idle';
 
   if (!currentProjectId) {
     return (
-      <main className="flex flex-col gap-0 p-0 h-full min-h-0 overflow-y-auto bg-background text-on-surface font-sans antialiased"
-        style={{ padding: '24px 32px' }}>
+      <main className="flex h-full min-h-0 flex-col overflow-y-auto bg-background p-6 text-on-surface">
         <EmptyProjectState />
       </main>
     );
   }
 
   return (
-    <main className="flex flex-col gap-0 p-0 h-full min-h-0 overflow-y-auto bg-background text-on-surface font-sans antialiased"
-      style={{ padding: '24px 32px' }}>
-      {error && (
-        <div className="mx-[18px] mb-4 p-3 bg-error/10 border border-error/25 rounded-lg text-error text-[13px] flex items-center gap-2">
-          <Bug size={14} /> {translateError(error)}
-        </div>
-      )}
+    <div className="flex h-full min-h-0 w-full">
+      {/* ─────────────────────────── LEFT RAIL ─────────────────────────── */}
+      <SessionRail onNewSession={() => {
+        const params = new URLSearchParams(searchParams);
+        params.set('focusRequest', 'true');
+        setSearchParams(params);
+      }} />
 
-      <div className="flex flex-col gap-5">
-        {focusRequest && <FeatureRequestChatbox onClose={() => {
-        searchParams.delete('focusRequest');
-        setSearchParams(searchParams);
-      }} />}
+      {/* ─────────────────────────── CENTER ─────────────────────────── */}
+      <main className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-background text-on-surface">
+        {/* header */}
+        <header className="flex items-center justify-between border-b border-outline-variant/20 px-6 py-3">
+          <div className="flex items-center gap-3">
+            <h1 className="text-sm font-bold uppercase tracking-[0.14em] text-on-surface">Agent Tasks</h1>
+            <SessionPill status={sessionStatus} connection={connection} />
+          </div>
+          <div className="flex items-center gap-2">
+            {activeSession && (
+              <button
+                onClick={() => navigate('/sdlc/audit')}
+                className="flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-[10px] font-bold text-primary hover:bg-primary/20"
+              >
+                <FileText size={11} />
+                Audit trail
+              </button>
+            )}
+            <button
+              onClick={() => {
+                const params = new URLSearchParams(searchParams);
+                params.set('focusRequest', 'true');
+                setSearchParams(params);
+              }}
+              className="rounded-md bg-primary px-3 py-1 text-[11px] font-bold text-on-primary hover:bg-primary/90"
+            >
+              New session
+            </button>
+          </div>
+        </header>
 
-        {/* Session Grid */}
-        {Object.keys(sessions).length > 0 && (
-          <div className="mx-[18px] space-y-2">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-on-surface">Active Sessions ({allSessions.length})</h2>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              {allSessions.map(session => (
-                <SessionCard
-                  key={session.sessionId}
-                  session={session}
-                  isActive={session.sessionId === activeSessionId}
-                  onSelect={setActiveSession}
-                  onClose={cleanupSession}
-                />
-              ))}
-              {allSessions.length < 4 && (
-                <div className="border-2 border-dashed border-outline-variant/40 rounded-lg p-4 flex items-center justify-center text-center hover:bg-surface-container/30 transition-colors cursor-pointer"
-                  onClick={() => {
-                    const params = new URLSearchParams(searchParams);
-                    params.set('focusRequest', 'true');
-                    setSearchParams(params);
-                  }}>
-                  <div className="flex flex-col items-center gap-2">
-                    <Plus size={20} className="text-on-surface-variant" />
-                    <span className="text-xs text-on-surface-variant font-medium">New Session</span>
-                  </div>
-                </div>
-              )}
-            </div>
+        {translatedError && (
+          <div className="mx-6 mb-3 mt-3 flex items-center gap-2 rounded-lg border border-error/25 bg-error/10 p-3 text-[12px] text-error">
+            <Bug size={13} />
+            {translatedError}
           </div>
         )}
 
-        {/* Header */}
-        <div className="mx-[18px] flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <h1 className="text-xl font-bold text-on-surface tracking-tight">Build Dashboard</h1>
-            <p className="text-[11.5px] text-on-surface-variant mt-0.5">Real-time agent task status and pipeline progress</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge variant={getBadgeVariant(status || 'idle')} className="px-2.5 py-1 text-[10px]">
-              {(status || 'idle').replace('_', ' ').toUpperCase()}
-            </Badge>
-            {status === 'awaiting_approval' && (
-              <button
-                onClick={() => {
-                  const blocked = (['PO', 'UX', 'DEV', 'QA'] as const).find((a) => phaseStatus(a) === 'gate_pending');
-                  if (blocked) setOpenAgentPanel(blocked);
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-400 hover:bg-amber-500/30 transition-colors text-xs font-semibold"
-              >
-                <CheckCircle2 size={14} />
-                View & Approve
-              </button>
-            )}
-          </div>
+        {focusRequest && <FeatureRequestChatbox onClose={() => {
+          const params = new URLSearchParams(searchParams);
+          params.delete('focusRequest');
+          setSearchParams(params);
+        }} />}
 
-          {/* Feature Request Boxes - Horizontal Layout */}
-          {allSessions.length > 0 && (
-            <div className="mx-[18px] mb-4">
-              <div className="flex gap-3 overflow-x-auto pb-2">
-                {/* Existing feature request boxes */}
-                {allSessions.map((session) => {
-                  const completedPhases = (session.pipelinePhases || []).filter(p => p.status === 'completed').length;
-                  const progressPercent = (completedPhases / 5) * 100;
-                  
+        {/* center workspace */}
+        <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
+          {!activeSession && sessions.length === 0 && <NoSessionEmptyState onNew={() => {
+            const params = new URLSearchParams(searchParams);
+            params.set('focusRequest', 'true');
+            setSearchParams(params);
+          }} />}
+
+          {sessions.length > 0 && !activeSession && (
+            <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-outline-variant/40 py-16 text-center">
+              <Loader2 size={28} className="text-primary/60" />
+              <p className="text-sm font-semibold text-on-surface">Pick a session from the left rail</p>
+              <p className="text-[11px] text-on-surface-variant/70">Or start a new feature request.</p>
+            </div>
+          )}
+
+          {activeSession && (
+            <>
+              <SessionSummaryBar session={activeSession} runtime={runtime} />
+
+              {/* 5 agent columns */}
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-5">
+                {AGENT_KEYS.map((agent) => {
+                  const ps = phaseStatusFor(agent);
+                  const tasks = tasksForAgent(agent, ps);
+                  const meta = AGENT_META[agent];
+                  const phase = activeSession.pipelinePhases.find((p) => p.agent === agent);
+                  const canOpenPanel = ps === 'completed' || ps === 'gate_pending' || ps === 'failed';
+                  const borderClass = COLUMN_BORDER[ps as keyof typeof COLUMN_BORDER] ?? COLUMN_BORDER.pending;
+
                   return (
                     <div
-                      key={session.sessionId}
-                      className="flex-shrink-0 w-72 rounded-xl border border-outline-variant/20 bg-surface-container/60 p-4 cursor-pointer hover:border-primary/20 transition-all"
-                      onClick={() => setActiveSession(session.sessionId)}
+                      key={agent}
+                      onClick={() => canOpenPanel && onColumnClick(agent)}
+                      className={`flex flex-col gap-2.5 rounded-xl border bg-surface-container/60 p-4 transition-all ${borderClass} ${canOpenPanel ? 'cursor-pointer hover:border-white/30' : ''}`}
                     >
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-sm font-semibold text-on-surface truncate flex-1 mr-2" title={session.featureRequest || 'Untitled Session'}>
-                          {session.featureRequest || 'Untitled Session'}
-                        </h3>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            // Mở thẳng thư mục cha chứa tất cả project
-                            const path = `/home/dotrongminh/Documents/VFS/team6_End-to-End-Autonomous-Software-Factory-Multi-AI-Agent-Team-/workspace/projects`;
-                            window.open(`vscode://file${path}`, '_self');
-                          }}
-                          className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded bg-surface-container-highest/50 text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-colors"
-                          title="Open generated code in VSCode"
-                        >
-                          <FolderOpen size={12} />
-                        </button>
+                      <div className="flex items-start justify-between gap-2 border-b border-outline-variant/20 pb-3">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-container-high/60">
+                            {meta.icon}
+                          </div>
+                          <div className="min-w-0">
+                            <h3 className="truncate text-[11px] font-bold uppercase tracking-wider text-on-surface">{agent}</h3>
+                            <p className="truncate text-[9px] text-on-surface-variant">{meta.desc}</p>
+                          </div>
+                        </div>
+                        <PhaseChip status={ps} />
                       </div>
 
-                      <div className="flex items-center justify-between mb-2">
-                        <Badge variant={
-                          session.status === 'failed' ? 'danger' :
-                          session.status === 'completed' ? 'success' :
-                          session.status === 'running' ? 'info' :
-                          session.status === 'awaiting_approval' ? 'warning' : 'outline'
-                        } className="text-[9px] px-1.5 py-0.5">
-                          {session.status?.replace('_', ' ').toUpperCase()}
-                        </Badge>
-                        {session.status === 'failed' && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const repoUrl = localStorage.getItem(`repoUrl_${currentProjectId}`) || '';
-                              if (repoUrl && session.featureRequest && currentProjectId) {
-                                startPipeline(currentProjectId, repoUrl, session.featureRequest);
-                              }
-                            }}
-                            className="flex items-center gap-1 px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-[9px] font-semibold"
-                          >
-                            <RotateCcw size={10} />
-                            Retry
-                          </button>
-                        )}
-                      </div>
-                      
-                      <div className="mb-3">
-                        <div className="w-full bg-surface-container-high/40 rounded-full h-1.5">
-                          <div
-                            className="bg-primary h-1.5 rounded-full transition-all duration-300"
-                            style={{ width: `${progressPercent}%` }}
-                          />
-                        </div>
-                        <p className="text-[10px] text-on-surface-variant mt-1 font-medium">
-                          {completedPhases}/5 phases completed
-                        </p>
-                      </div>
-                      
-                      <div className="grid grid-cols-5 gap-1">
-                        {(session.pipelinePhases || []).map((phase, idx) => {
-                          const isActive = phase.status === 'running' || phase.status === 'gate_pending';
-                          const isCompleted = phase.status === 'completed';
-                          const isFailed = phase.status === 'failed';
-                          const isSkipped = phase.status === 'skipped';
-                          
-                          return (
-                            <div
-                              key={idx}
-                              className={`flex flex-col items-center gap-0.5 p-1 rounded ${isActive ? 'bg-blue-500/20' : isCompleted ? 'bg-emerald-500/20' : isFailed ? 'bg-red-500/20' : isSkipped ? 'bg-outline-variant/20 opacity-50' : ''}
-                            `}
-                            >
-                              <div className={`w-5 h-5 rounded flex items-center justify-center text-[9px] font-semibold
-                                ${isActive ? 'bg-blue-500 text-white' : isCompleted ? 'bg-emerald-500 text-white' : isFailed ? 'bg-red-500 text-white' : isSkipped ? 'bg-on-surface-variant/30 text-on-surface-variant' : 'bg-surface-container-high/60 text-on-surface-variant'}
-                              `}
-                              >
-                                {phase.agent}
-                              </div>
-                              <span className={`text-[8px] ${isActive ? 'text-blue-400' : isCompleted ? 'text-emerald-400' : isFailed ? 'text-red-400' : isSkipped ? 'text-on-surface-variant/60' : 'text-on-surface-variant'}
-                              `}
-                              >
-                                {phase.status === 'running' ? 'RUN' : phase.status === 'gate_pending' ? 'GATE' : phase.status === 'completed' ? 'OK' : phase.status === 'failed' ? 'FAIL' : phase.status === 'skipped' ? 'SKIP' : 'PEND'}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* Handoff / Report Button */}
-                      {session.status === 'completed' && (
-                        <div className="mt-3 pt-3 border-t border-outline-variant/10">
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); navigate('/sdlc/audit'); }}
-                            className="w-full flex justify-center items-center gap-2 py-2 rounded-lg bg-primary text-on-primary hover:bg-primary/90 transition-colors text-[11px] font-bold shadow-sm" title="Generate Overall Report">
-                            <FileText size={14} />
-                            Báo cáo tổng thể (Release Notes)
-                          </button>
-                        </div>
+                      {phase?.duration && (
+                        <div className="font-mono text-[9px] font-semibold text-primary">⏱ {phase.duration}</div>
                       )}
 
-                      {/* Git Action Buttons */}
-                      <div className="flex gap-1.5 mt-3 pt-3 border-t border-outline-variant/10">
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); alert('Syncing with remote repository...'); }}
-                          className="flex-1 flex justify-center items-center gap-1 py-1 rounded bg-surface-container-highest/50 text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-colors text-[9px] font-medium" title="Sync & Pull Latest">
-                          <DownloadCloud size={10} /> Sync
-                        </button>
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); alert('Committing local changes...'); }}
-                          className="flex-1 flex justify-center items-center gap-1 py-1 rounded bg-surface-container-highest/50 text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-colors text-[9px] font-medium" title="Commit Local Changes">
-                          <Save size={10} /> Commit
-                        </button>
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); alert('Pushing branch to remote...'); }}
-                          className="flex-1 flex justify-center items-center gap-1 py-1 rounded bg-surface-container-highest/50 text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-colors text-[9px] font-medium" title="Push Branch">
-                          <UploadCloud size={10} /> Push
-                        </button>
-                        {session.status === 'completed' && (
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); alert('Creating Pull Request on GitHub/GitLab...'); }}
-                            className="flex-1 flex justify-center items-center gap-1 py-1 rounded bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 transition-colors text-[9px] font-bold" title="Create Pull Request">
-                            <GitPullRequest size={10} /> PR
-                          </button>
-                        )}
+                      <div className="flex flex-col gap-1.5">
+                        {tasks.map((task) => (
+                          <div
+                            key={task.id}
+                            className={`flex items-start gap-2 rounded-lg border p-2 ${STATUS_DOT_COLOR[task.status]}`}
+                          >
+                            <span className="mt-0.5 shrink-0">{TASK_ICON[task.status]}</span>
+                            <div className="min-w-0 flex-1">
+                              <span className="block truncate text-[11px] font-semibold text-on-surface">{task.title}</span>
+                              <p className="mt-0.5 text-[9.5px] leading-relaxed text-on-surface-variant">
+                                {task.status === 'skipped' ? 'Skipped for this execution path.' : task.description}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   );
                 })}
-                
-                {/* Add Feature Request box */}
-                <div
-                  className="flex-shrink-0 w-72 rounded-xl border-2 border-dashed border-outline-variant/40 bg-surface-container/20 p-4 cursor-pointer hover:border-primary/30 hover:bg-surface-container/40 transition-all"
-                  onClick={() => {
-                    const params = new URLSearchParams(searchParams);
-                    params.set('focusRequest', 'true');
-                    setSearchParams(params);
-                  }}
-                >
-                  <div className="flex flex-col items-center justify-center h-full gap-2">
-                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                      <Plus size={20} className="text-primary" />
-                    </div>
-                    <span className="text-xs font-medium text-on-surface-variant">Request a new feature</span>
-                    <span className="text-[10px] text-on-surface-variant/60">Click to add</span>
-                  </div>
-                </div>
               </div>
-            </div>
+            </>
           )}
         </div>
+      </main>
 
-        {/* Status counters */}
-        <div className="mx-[18px] grid grid-cols-3 sm:grid-cols-6 gap-3">
-          {taskStatuses.map(s => {
-            const count = statusCounts[s] || 0;
-            const dotColor = {
-              pending: 'bg-outline', running: 'bg-blue-500', gate_pending: 'bg-amber-500',
-              completed: 'bg-emerald-500', skipped: 'bg-outline/50', failed: 'bg-red-500',
-            }[s];
-            return (
-              <div key={s} className="flex items-center gap-2 p-2.5 rounded-lg bg-surface-container/40 border border-outline-variant/20">
-                <span className={`w-2 h-2 rounded-full ${dotColor}`} />
-                <span className="text-[10px] text-on-surface-variant capitalize font-medium">{s.replace('_', ' ')}</span>
-                <span className="text-xs font-bold text-on-surface ml-auto">{count}</span>
-              </div>
-            );
-          })}
-        </div>
+      {/* ─────────────────────────── RIGHT INSPECTOR ─────────────────────────── */}
+      {activeSession && <InspectorPanel />}
+    </div>
+  );
+}
 
-        {/* Agent Task Grid */}
-        <div className="mx-[18px] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          {(['ARCH', 'PO', 'UX', 'DEV', 'QA'] as const).map(agent => {
-            const ps = phaseStatus(agent);
-            const tasks = tasksFor(agent);
-            const meta = AGENT_META[agent];
-            const duration = phaseDuration(agent);
+// ── Subcomponents ──
 
-            const isCompletedOrFailed = ps === 'completed' || ps === 'failed' || ps === 'gate_pending';
-            const canOpenPanel = isCompletedOrFailed && tasks.length > 0;
+function SessionPill({ status, connection }: { status: string; connection: ConnectionStatus }) {
+  const color =
+    status === 'completed' ? 'bg-emerald-500/15 text-emerald-400'
+    : status === 'failed' ? 'bg-red-500/15 text-red-400'
+    : status === 'awaiting_approval' ? 'bg-amber-500/15 text-amber-400'
+    : status === 'running' ? 'bg-blue-500/15 text-blue-300'
+    : 'bg-surface-container text-on-surface-variant/70';
+  const connColor =
+    connection === 'connected' ? 'bg-emerald-500'
+    : connection === 'connecting' ? 'bg-blue-500 animate-pulse'
+    : connection === 'error' ? 'bg-red-500'
+    : 'bg-on-surface-variant/30';
+  return (
+    <div className="flex items-center gap-2">
+      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${color}`}>{status.replace('_', ' ')}</span>
+      <span className="flex items-center gap-1 text-[10px] text-on-surface-variant/70">
+        <span className={`h-1.5 w-1.5 rounded-full ${connColor}`} />
+        {connection}
+      </span>
+    </div>
+  );
+}
 
-            const columnBorder = {
-              pending: 'border-outline-variant/20', running: 'border-blue-500/30',
-              gate_pending: 'border-amber-500/30', completed: 'border-emerald-500/20',
-              skipped: 'border-dashed border-outline-variant/20', failed: 'border-red-500/30',
-            }[ps] || 'border-outline-variant/20';
-
-            return (
-              <div
-                key={agent}
-                data-agent={agent}
-                onClick={() => canOpenPanel && setOpenAgentPanel(agent)}
-                className={`flex flex-col gap-3 p-4 rounded-xl bg-surface-container/60 border transition-all ${columnBorder} ${canOpenPanel ? 'cursor-pointer hover:border-white/20' : ''}`}
-              >
-                {/* Agent header */}
-                <div className="flex items-center gap-2.5 pb-3 border-b border-outline-variant/20">
-                  <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-surface-container-high/60">
-                    {meta.icon}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-xs font-bold text-on-surface truncate">{meta.title}</h3>
-                    <p className="text-[9px] text-on-surface-variant">{meta.desc}</p>
-                  </div>
-                  <Badge variant={getBadgeVariant(ps)} className="text-[8px] px-1.5 py-0.5 shrink-0">
-                    {ps.replace('_', ' ')}
-                  </Badge>
-                </div>
-
-                {/* Duration */}
-                {duration && (
-                  <div className="text-[9px] text-primary font-mono font-semibold -mt-1">
-                    {duration}
-                  </div>
-                )}
-
-                {/* Task list */}
-                <div className="flex flex-col gap-2">
-                  {tasks.map(task => (
-                    <div key={task.id} className={`flex items-start gap-2.5 p-2.5 rounded-lg border transition-all ${
-                      task.status === 'completed' ? 'border-emerald-500/15 bg-emerald-500/5' :
-                      task.status === 'running' ? 'border-blue-500/30 bg-blue-500/5' :
-                      task.status === 'gate_pending' ? 'border-amber-500/30 bg-amber-500/5' :
-                      task.status === 'failed' ? 'border-red-500/30 bg-red-500/5' :
-                      task.status === 'skipped' ? 'border-dashed border-outline-variant/10 opacity-50' :
-                      'border-outline-variant/10 bg-transparent'
-                    }`}>
-                      <span className="mt-0.5 shrink-0">{TASK_ICON[task.status] || <PlayCircle size={14} className="text-on-surface-variant" />}</span>
-                      <div className="flex-1 min-w-0">
-                        <span className="text-[11px] font-semibold text-on-surface block truncate">{task.title}</span>
-                        <p className="text-[9.5px] text-on-surface-variant leading-relaxed mt-0.5">
-                          {task.status === 'skipped' ? 'Skipped for this execution path.' : task.description}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+function SessionSummaryBar({
+  session,
+  runtime,
+}: {
+  session: NonNullable<ReturnType<typeof useWorkflowStore.getState>['sessions'][string]>;
+  runtime: ReturnType<typeof selectRuntimeExecution>;
+}) {
+  const completed = session.pipelinePhases.filter((p) => p.status === 'completed').length;
+  const percent = Math.round((completed / 5) * 100);
+  const gateCount = session.pendingGates.length;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-outline-variant/30 bg-surface-container-lowest px-4 py-2.5 text-[11px]">
+      <div className="flex items-center gap-2 text-on-surface">
+        <span className="font-bold">「{session.featureRequest || 'Untitled'}」</span>
+        <code className="rounded bg-surface-container px-1.5 py-0.5 font-mono text-[10px] text-on-surface-variant">{session.sessionId.slice(0, 8)}</code>
       </div>
+      <div className="flex items-center gap-3 text-on-surface-variant">
+        <span>{completed}/5 phases · {percent}%</span>
+        {runtime?.currentAgent && (
+          <span className="flex items-center gap-1">
+            <Loader2 size={10} className="animate-spin text-blue-400" />
+            <b className="text-on-surface">{runtime.currentAgent}</b>
+          </span>
+        )}
+        <span className={`flex items-center gap-1 ${gateCount > 0 ? 'text-amber-400' : ''}`}>
+          <Clock size={10} />
+          {gateCount} pending
+        </span>
+      </div>
+    </div>
+  );
+}
 
-      {openAgentPanel && activeSession && tasksFor(openAgentPanel).length > 0 && (
-        <AgentOutputPanel
-          agent={openAgentPanel}
-          gate={pendingGateForAgent(openAgentPanel) || undefined}
-          taskId={pipelinePhases.find(p => p.agent === openAgentPanel)?.taskId || tasksFor(openAgentPanel)[0].id}
-          sessionId={activeSessionId!}
-          phaseStatus={phaseStatus(openAgentPanel) as any}
-          onClose={() => setOpenAgentPanel(null)}
-          onResolved={() => activeSessionId && void pollStatus(activeSessionId)}
-        />
-      )}
-    </main>
+function PhaseChip({ status }: { status: string }) {
+  const cfg =
+    status === 'completed' ? 'bg-emerald-500/20 text-emerald-400'
+    : status === 'running' ? 'bg-blue-500/20 text-blue-300'
+    : status === 'gate_pending' ? 'bg-amber-500/20 text-amber-400'
+    : status === 'failed' ? 'bg-red-500/20 text-red-400'
+    : status === 'skipped' ? 'bg-outline-variant/30 text-on-surface-variant'
+    : 'bg-surface-container text-on-surface-variant/70';
+  return (
+    <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider ${cfg}`}>
+      {status.replace('_', ' ')}
+    </span>
+  );
+}
+
+function NoSessionEmptyState({ onNew }: { onNew: () => void }) {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-outline-variant/40 py-16 text-center">
+      <Network size={28} className="text-on-surface-variant/40" />
+      <p className="text-sm font-semibold text-on-surface">Start your first workflow</p>
+      <p className="text-[11px] text-on-surface-variant/70">Submit a feature request to begin.</p>
+      <button onClick={onNew} className="mt-2 rounded-md bg-primary px-3 py-1.5 text-[11px] font-bold text-on-primary hover:bg-primary/90">
+        New session
+      </button>
+    </div>
   );
 }

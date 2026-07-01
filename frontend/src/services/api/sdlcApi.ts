@@ -19,7 +19,6 @@ export type GateType =
   | 'DEV_OUTPUT_REVIEW'
   | 'QA_OUTPUT_REVIEW'
   | 'AGENT_OUTPUT_REVIEW';
-export type RouteType = 'UI' | 'BACKEND' | 'ANALYSIS' | 'FULLSTACK';
 export type GateAction = 'approve' | 'reject';
 
 export interface GateItem {
@@ -49,7 +48,7 @@ export interface AuditEntry {
 
 export interface PhaseStatus {
   agent: 'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA';
-  status: 'pending' | 'running' | 'gate_pending' | 'completed' | 'failed' | 'skipped';
+  status: 'pending' | 'running' | 'gate_pending' | 'awaiting_review' | 'completed' | 'failed' | 'skipped';
   taskId?: string;
   duration?: string;
   awaitingReview?: boolean;
@@ -68,7 +67,6 @@ export interface QAResult {
 export interface PipelineResponse {
   workflowId: string;
   status: string;
-  routeType: RouteType;
   pipelinePhases: PhaseStatus[];
   pendingGates: GateItem[];
   auditLog: AuditEntry[];
@@ -85,16 +83,43 @@ export interface PipelineResponse {
 
 const BASE = '/sdlc';
 
-const startPipelineReal = (projectId: string, repoUrl: string, request: string): Promise<{ workflowId: string; status: string }> =>
-  api.post(`${BASE}/run-po-agent`, {
+// AIFA v2.1 §4: the workflow entry is the Architecture Agent. Workflows
+// are never started from a PO-first path or from an uploaded folder — only
+// from a Git Repository URL. The backend creates the PipelineSession
+// upfront in runArchitectureAgent and returns both task_id and session_id
+// in the same response. The frontend uses session_id as the workflow
+// identifier — there is no bridge, no task_id → session_id polling.
+const startPipelineReal = (
+  projectId: string,
+  repoUrl: string,
+  _request: string,
+): Promise<{ sessionId: string; taskId: string; workflowId: string; status: string; type: string }> =>
+  api.post(`${BASE}/run-architecture-agent`, {
     project_id: projectId,
     feature_request: {
-      title: request,
-      description: request
+      title: _request,
+      description: _request,
     },
     repo_url: repoUrl,
-    request
-  }).then((r) => r.data);
+  }).then((r) => {
+    const data = r.data || {};
+    const sessionId = data.session_id as string | undefined;
+    const taskId = data.task_id as string | undefined;
+    if (!sessionId) {
+      throw new Error('Backend did not return session_id');
+    }
+    if (!taskId) {
+      throw new Error('Backend did not return task_id');
+    }
+    // workflowId is the sessionId — they are 1:1 in AIFA v2.1.
+    return {
+      sessionId,
+      taskId,
+      workflowId: sessionId,
+      status: data.status,
+      type: data.type,
+    };
+  });
 
 export interface SdlcError {
   message: string;
@@ -209,7 +234,11 @@ const subscribeWorkflowSSEReal = (
 
 // ── Real API wrappers (no mock) ───────────────────────────────────────────
 
-export const startPipeline = (projectId: string, repoUrl: string, request: string): Promise<{ workflowId: string; status: string }> =>
+export const startPipeline = (
+  projectId: string,
+  repoUrl: string,
+  request: string,
+): Promise<{ sessionId: string; taskId: string; workflowId: string; status: string; type: string }> =>
   startPipelineReal(projectId, repoUrl, request);
 
 export const getPipelineStatus = (workflowId: string): Promise<PipelineResponse> =>
@@ -221,14 +250,57 @@ export const resolveGate = (gateId: string, action: 'approve' | 'reject', commen
 export const releaseDecision = (projectId: string, action: 'approve' | 'reject'): Promise<{ success: boolean; branch?: string; finalMd?: string }> =>
   releaseDecisionReal(projectId, action);
 
-export const subscribeWorkflowSSE = (
+export interface PipelineSseEventMap {
+  progress: {
+    status?: string;
+    pipelinePhases?: PhaseStatus[];
+    auditLog?: AuditEntry[];
+    qaResult?: QAResult | null;
+    releaseStatus?: 'pending' | 'approved' | 'rejected' | null;
+    repoInfo?: PipelineResponse['repoInfo'];
+  };
+  'agent_event': {
+    type: 'agent_start' | 'agent_tool_call' | 'agent_tool_result' | 'agent_complete' | 'file_change' | 'token_usage' | 'gate_triggered' | 'clarification_needed' | 'error';
+    agent?: 'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA';
+    role?: string;
+    tool?: string;
+    filePath?: string;
+    action?: string;
+    details?: Record<string, unknown>;
+    error?: string;
+  };
+  gate_pending: { gate: GateItem };
+  gate_resolved: { gateId: string; decision?: 'approve' | 'reject' | 'answer'; comment?: string };
+  completed: { qaResult?: QAResult | null };
+  error: { message: string };
+}
+
+export type PipelineSseEventName = keyof PipelineSseEventMap;
+export type PipelineSseData<K extends PipelineSseEventName> = PipelineSseEventMap[K] & Record<string, unknown>;
+
+export function subscribeWorkflowSSE<K extends PipelineSseEventName = PipelineSseEventName>(
+  workflowId: string,
+  handlers: {
+    onMessage?: (event: K, data: PipelineSseData<K>) => void;
+    onError?: (error: unknown) => void;
+  }
+): AbortController;
+export function subscribeWorkflowSSE(
   workflowId: string,
   handlers: {
     onMessage?: (event: string, data: Record<string, unknown>) => void;
     onError?: (error: unknown) => void;
   }
-): AbortController =>
-  subscribeWorkflowSSEReal(workflowId, handlers);
+): AbortController;
+export function subscribeWorkflowSSE(
+  workflowId: string,
+  handlers: {
+    onMessage?: (event: string, data: Record<string, unknown>) => void;
+    onError?: (error: unknown) => void;
+  }
+): AbortController {
+  return subscribeWorkflowSSEReal(workflowId, handlers);
+}
 
 // Re-export legacy functions from sdlcLegacy
 export {
@@ -322,54 +394,7 @@ export const submitReleaseDecision = (
   body: { decision_id: string; decision: 'APPROVE' | 'REJECT'; comment?: string },
 ) => api.post(`${BASE}/projects/${projectId}/release-decision`, body).then((r) => r.data);
 
-// ── Repo-aware workflow start and live onGate approvals ────────────────────
-
-/**
- * Start a repo-aware, PO-first workflow (applies the 429 cap).
- * Pass `repoUrl` to clone a remote repo, or `repoPath` to use an already-cloned
- * local folder ("Open folder" flow). Both are optional — omit for a repo-less run.
- */
-export const runWorkflow = (
-  projectId: string,
-  request: string,
-  repoUrl?: string,
-  branch = 'main',
-  repoPath?: string,
-) => api.post(`${BASE}/run-po-agent`, {
-  project_id: projectId,
-  feature_request: { title: request, description: request, priority: 'High' },
-  request,
-  repo_url: repoUrl || undefined,
-  repo_path: repoPath || undefined,
-  branch,
-}).then((r) => r.data);
-
-/**
- * Upload a whole local folder (chosen anywhere on the user's machine) as the
- * workflow repo. Browsers can't expose an absolute path, so we stream the files
- * with their relative paths; the backend writes them into the project workspace
- * and git-inits a repo, returning the server-side `repo_path`.
- */
-export const uploadRepoFolder = (
-  projectId: string,
-  files: Array<File & { relativePath?: string }>,
-  request = '',
-  onProgress?: (pct: number) => void,
-) => {
-  const form = new FormData();
-  form.append('project_id', projectId);
-  if (request) form.append('request', request);
-  for (const f of files) {
-    form.append('files', f);
-    form.append('paths', f.relativePath || (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name);
-  }
-  return api.post(`${BASE}/upload-repo`, form, {
-    timeout: 10 * 60 * 1000,
-    onUploadProgress: (e) => {
-      if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100));
-    },
-  }).then((r) => r.data.data as { repo_path: string; base_branch: string; file_count: number });
-};
+// ── Live onGate approvals ──────────────────────────────────────────────────
 
 export interface PendingGate {
   approvalId: string;
@@ -393,7 +418,7 @@ export interface PendingGate {
 
 export const resolveApproval = (
   approvalId: string,
-  body: { action?: 'approve' | 'reject'; comment?: string; answers?: string[] | Record<string, string> },
+  body: { action?: 'approve' | 'reject' | 'answer'; comment?: string; answers?: string[] | Record<string, string> },
 ) => api.post(`${BASE}/approvals/${approvalId}`, body).then((r) => r.data.data);
 
 /**
@@ -582,3 +607,22 @@ export const updateSystemSettings = (keys: Record<string, string>): Promise<{ st
   api.post(`${BASE}/dev/settings/env`, { keys }).then((r) => r.data);
 
 export const updateEnvSettings = updateSystemSettings;
+
+// ── Sessions list ─────────────────────────────────────────────────────────
+// Previously used by the store to bridge from a freshly-created architecture
+// task_id to the sessionId created later when PO auto-advances. AIFA v2.1
+// now returns session_id directly from POST /run-architecture-agent, so this
+// bridge helper is no longer needed. The list endpoint is still available
+// on the backend if any UI surface needs an explicit session listing.
+export interface ProjectSession {
+  sessionId: string;
+  projectId: string;
+  title: string | null;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const listProjectSessions = (projectId: string): Promise<ProjectSession[]> =>
+  api.get(`${BASE}/projects/${projectId}/sessions`).then((r) => r.data.data);
+

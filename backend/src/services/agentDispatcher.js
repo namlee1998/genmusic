@@ -22,7 +22,7 @@ const logger = require('../config/logger');
  * and returns the agent output WITHOUT touching the DB.
  */
 async function buildMockOutput(task, context, deps = {}) {
-  const { applyMockScenarioFn = () => {}, classifyRouteFn, classifyFeatureRequestFn, firstContextValueFn } = deps;
+  const { classifyFeatureRequestFn, firstContextValueFn } = deps;
   const mockDir = path.join(__dirname, '../../../mock-data', task.type);
   const files = await fs.readdir(mockDir).catch(() => []);
 
@@ -54,12 +54,41 @@ async function buildMockOutput(task, context, deps = {}) {
   }
 
   const roleDefaults = {
-    'intent-agent': {
-      intent_assumptions: [
-        `# Intent assumptions for ${context.featureRequest?.title || 'requested feature'}`,
+    'architecture-agent': {
+      repository_summary: { overview: 'Mock repository summary generated for contract validation.', entrypoints: [], notes: '' },
+      technology_stack: { language: 'unknown', framework: 'unknown', package_manager: 'unknown', runtime: 'unknown' },
+      technical_decisions: ['Mock decision generated for contract validation.'],
+      constraints: ['Mock constraint generated for contract validation.'],
+      repository_routing: (() => {
+        const scopeHints = context.scopeHints || null;
+        const targetFolders = Array.isArray(scopeHints?.targetFolders) && scopeHints.targetFolders.length
+          ? scopeHints.targetFolders
+          : ['src/'];
+        const primary = targetFolders[0];
+        return {
+          target_module: primary,
+          framework: 'unknown',
+          language: scopeHints?.languageHint || 'unknown',
+          search_scope: targetFolders.join(','),
+          ignore: Array.isArray(scopeHints?.ignoreGlobs) && scopeHints.ignoreGlobs.length
+            ? scopeHints.ignoreGlobs.slice(0, 8)
+            : ['node_modules/', 'dist/', 'build/'],
+          confidence: typeof scopeHints?.confidence === 'number' ? scopeHints.confidence : 0.5,
+        };
+      })(),
+      architecture_brief: [
+        '# Mock Architecture Brief',
         '',
-        '- Scope and acceptance criteria should remain reviewable.',
-        '- Clarifying questions should be minimized for the happy path.',
+        'Generated for contract validation. Routing is provisional; downstream agents should re-validate against the live repository tree before planning.',
+        '',
+        '## Module routing',
+        '- Target module: `src/`',
+        '- Framework: unknown (fallback)',
+        '- Language: unknown (fallback)',
+        '',
+        '## Constraints',
+        '- Preserve existing behavior outside the requested scope.',
+        '- Validate routing decisions at the architecture review gate.',
       ].join('\n'),
     },
     'po-agent': {
@@ -74,6 +103,11 @@ async function buildMockOutput(task, context, deps = {}) {
       acceptance_criteria: ['AC-1: Happy path is supported', 'AC-2: Validation is testable'],
       scope: '- Include the requested user flow.',
       out_of_scope: '- Exclude unrelated product changes.',
+      risk_classification: {
+        level: 'MEDIUM',
+        required_gates: ['schema', 'validation', 'evidence', 'qa'],
+        rationale: 'Mock risk classification generated for contract validation.',
+      },
     },
     'ux-agent': {
       ux_spec: '# UX Spec\n\nMock UX spec generated for contract validation.',
@@ -110,34 +144,38 @@ async function buildMockOutput(task, context, deps = {}) {
     }
   });
 
-  if (['intent-agent', 'po-agent'].includes(task.type) && context.featureRequest) {
+  if (['architecture-agent', 'po-agent'].includes(task.type) && context.featureRequest) {
     completedData.feature_request = context.featureRequest;
   }
-  if (task.type === 'intent-agent' && !hasContent(completedData.intent_assumptions)) {
+  if (task.type === 'architecture-agent' && !hasContent(completedData.architecture_brief)) {
     const feature = context.featureRequest || {};
-    completedData.intent_assumptions = [
-      `# Intent assumptions: ${feature.title || 'Requested feature'}`,
+    completedData.architecture_brief = [
+      `# Architecture brief: ${feature.title || 'Requested feature'}`,
       '',
-      feature.description || 'The requested feature must be clarified before implementation.',
+      feature.description || 'The requested feature must be analyzed against the repository before planning.',
       '',
       '- Preserve existing behavior outside the requested scope.',
-      '- Validate assumptions at the PO review gate.',
+      '- Validate routing decisions at the architecture review gate.',
     ].join('\n');
     completedData.clarifying_questions = completedData.clarifying_questions || [];
   }
 
-  if (task.type === 'po-agent' && classifyRouteFn) {
-    completedData.route_classification = classifyRouteFn(context.featureRequest || {});
-    if (context.po_clarification) {
-      const c = context.po_clarification;
-      completedData.assumptions = [
-        ...(Array.isArray(completedData.assumptions) ? completedData.assumptions : []),
-        c.defaulted
-          ? `Assumption (no answer given, default used): ${c.answer}`
-          : `Clarified with reviewer: ${c.answer}`,
-      ];
-      completedData.prd = `${completedData.prd || ''}\n\n## Clarification\n- ${c.defaulted ? 'Default assumption' : 'Reviewer answer'}: ${c.answer}`;
-    }
+  if (task.type === 'architecture-agent' && context.scopeHints) {
+    completedData.observability = {
+      ...(completedData.observability || {}),
+      scopeHints: context.scopeHints,
+    };
+  }
+
+  if (task.type === 'po-agent' && context.po_clarification) {
+    const c = context.po_clarification;
+    completedData.assumptions = [
+      ...(Array.isArray(completedData.assumptions) ? completedData.assumptions : []),
+      c.defaulted
+        ? `Assumption (no answer given, default used): ${c.answer}`
+        : `Clarified with reviewer: ${c.answer}`,
+    ];
+    completedData.prd = `${completedData.prd || ''}\n\n## Clarification\n- ${c.defaulted ? 'Default assumption' : 'Reviewer answer'}: ${c.answer}`;
   }
 
   const feedbackPrompt = context.feedbackPrompt?.trim();
@@ -146,7 +184,7 @@ async function buildMockOutput(task, context, deps = {}) {
     ? classifyFeatureRequestFn(context.featureRequest)
     : (inheritedRisk || { level: 'LOW', tags: [], required_gates: ['schema', 'validation', 'evidence', 'qa'], classifier: 'mock-rule-based.v1' });
 
-  if (task.type !== 'intent-agent') {
+  if (task.type !== 'architecture-agent') {
     completedData.risk_classification = riskClassification;
     completedData.workflow_policy = {
       auto_approve_threshold: 0.8,
@@ -202,8 +240,6 @@ async function buildMockOutput(task, context, deps = {}) {
     };
   }
 
-  // Deterministic happy_path mock shaping
-  if (applyMockScenarioFn) applyMockScenarioFn(task, completedData, feedbackPrompt);
   return completedData;
 }
 
@@ -360,7 +396,7 @@ async function runAgent(task, context, userId = null, deps = {}) {
           return;
         }
         if (!completedData) throw new Error('Agent returned no data');
-        if (['intent-agent', 'po-agent'].includes(task.type) && context.featureRequest) {
+        if (['architecture-agent', 'po-agent'].includes(task.type) && context.featureRequest) {
           completedData.feature_request = context.featureRequest;
         }
         const conformance = assertOutputConforms(task.type, completedData);
@@ -394,7 +430,10 @@ async function runAgent(task, context, userId = null, deps = {}) {
 // =============================================================================
 
 async function markTaskFailed(task, error) {
-  const current = await Task.findById(task.id);
+  const current = await Task.findById(task.id).catch((e) => {
+    logger.warn('markTaskFailed: Task.findById failed', { taskId: task.id, error: e.message });
+    return null;
+  });
   if (current?.status === 'completed' && current?.versionStatus === 'committed') {
     logger.error('ignored failure after task was already completed and committed', {
       taskId: task.id, phase: task.type, code: error.code || null, error: error.message,
@@ -406,6 +445,21 @@ async function markTaskFailed(task, error) {
     logger.warn('markTaskFailed: task already terminal, skipping failed transition', {
       taskId: task.id, currentState: current.executionStatus, error: error.message,
     });
+    return;
+  }
+  if (!current) {
+    // The row was deleted between Task assignment and the failure path
+    // (project cleanup, retry, etc.). Nothing to update; release the worker
+    // lock so the next attempt can run.
+    logger.warn('markTaskFailed: task row missing, skipping DB update', {
+      taskId: task.id, phase: task.type, error: error.message,
+    });
+    try {
+      await taskLifecycle.transitionIfPresent(task.id, 'failed', {
+        actor: task.type, reason: error.message,
+      });
+    } catch (_) { /* best-effort */ }
+    await taskWorker.endRun(task.id).catch(() => {});
     return;
   }
 
@@ -429,10 +483,17 @@ async function markTaskFailed(task, error) {
     taskId: task.id, phase: task.type, code: error.code || null,
     recoverable: error.recoverable ?? null, error: error.message,
   });
-  await Task.update(task.id, {
+  const updated = await Task.update(task.id, {
     status: 'failed', error: errMsg, observability: failureObservability,
     lockedBy: null, heartbeatAt: null,
   });
+  if (!updated) {
+    // Race: row vanished between findById and update. Don't proceed to the
+    // lifecycle transitions — they'd fail too. Release the worker lock.
+    logger.warn('markTaskFailed: row disappeared during update, releasing lock', { taskId: task.id });
+    await taskWorker.endRun(task.id).catch(() => {});
+    return;
+  }
   await taskLifecycle.transition(task.id, 'failed', {
     actor: task.type, reason: errMsg,
     payload: { code: error.code || null, recoverable: error.recoverable ?? null, subtype: error.subtype || null, numTurns: error.numTurns ?? null, stopReason: error.stopReason || null, exitCode: error.exitCode ?? null },

@@ -9,27 +9,73 @@ const { Task, AgentArtifact, PipelineSession } = require('../models');
 const FeatureBacklog = require('../models/FeatureBacklog');
 const gateBridge = require('./gateBridge');
 const repoService = require('./repoService');
+const repoIndexService = require('./repoIndexService');
+const { resolveScope } = require('./scopeResolver');
 const { ApiError } = require('../middleware/errorHandler');
 const { NEXT_AGENT, AGENT_GATES, MAX_RETRY_PER_STEP } = require('./sdlcConstants');
+const { REQUIRED_OUTPUT_KEYS, hasContent } = require('./agentContract');
 const logger = require('../config/logger');
+
+// AIFA v2.1 §3 / §15: every agent follows exactly one predecessor. The
+// required output keys for each role live in agentContract.REQUIRED_OUTPUT_KEYS
+// — this map is the single source of truth for both the contract check and
+// the upstream-artifact guard. The key (PREDECESSOR_ROLE) is the immediate
+// upstream agent; ARCH is the entry point and has no predecessor.
+const PREDECESSOR_ROLE = {
+  'po-agent': 'architecture-agent',
+  'ux-agent': 'po-agent',
+  'dev-agent': 'ux-agent',
+  'qa-agent': 'dev-agent',
+};
 
 const MAX_PARALLEL_WORKFLOWS = () => Math.max(1, Number(process.env.MAX_PARALLEL_WORKFLOWS) || 4);
 
 // =============================================================================
-// runIntentAgent
+// runArchitectureAgent
 // =============================================================================
 
-async function runIntentAgent(params, deps) {
-  const { projectId, featureRequest, feedbackPrompt = '', backlogId = null, user } = params;
+async function runArchitectureAgent(params, deps) {
+  const { projectId, featureRequest, feedbackPrompt = '', backlogId = null, repoUrl = null, user } = params;
   if (user) {
     await deps.MembershipService.requireProjectRole(user.id, projectId, ['owner', 'admin', 'editor']);
   }
 
+  // AIFA v2.1 §4 Phase 1: validate the Repository URL BEFORE Task.create()
+  // and BEFORE any workspace work. If the URL is missing or invalid we fail
+  // fast with HTTP 400 — no task row is created and no workspace is touched.
+  // Rework paths may legitimately pass no repoUrl (the workspace already
+  // exists), so only validate when one is provided.
+  if (repoUrl) {
+    deps.repoService.validateRepoUrl(repoUrl);
+  }
+
   const inputHash = deps.contentHash({ featureRequest, feedbackPrompt });
+
+  // AIFA v2.1: create the PipelineSession BEFORE the Architecture task so
+  // the response can return both identifiers in a single round-trip and
+  // /pipeline/:session_id, /workflow-status and /stream/:session_id work
+  // immediately. PO auto-advance reuses this session via sessionId.
+  const active = await PipelineSession.countActive();
+  if (active >= MAX_PARALLEL_WORKFLOWS()) {
+    throw new ApiError(
+      429,
+      `Too many active workflows (${active}/${MAX_PARALLEL_WORKFLOWS()}). ` +
+      `Try again when one finishes.`,
+      'TOO_MANY_WORKFLOWS',
+      'ARCH_RUNNING',
+    );
+  }
+  const session = await PipelineSession.create({
+    id: uuidv4(),
+    projectId,
+    title: (featureRequest?.title || '').slice(0, 200) || null,
+  });
+
   const task = await Task.create({
     id: uuidv4(),
     projectId,
-    type: 'intent-agent',
+    sessionId: session.id,
+    type: 'architecture-agent',
     status: 'pending',
     inputContentHash: inputHash,
     versionStatus: 'draft',
@@ -44,12 +90,122 @@ async function runIntentAgent(params, deps) {
     }
   }
 
+  let repoContext = null;
+  if (repoUrl) {
+    if (deps.repoService?.isHttpUrl(repoUrl) && deps.repoService?.cloneRepo) {
+      const cloned = await deps.repoService.cloneRepo({
+        projectId,
+        sessionId: session.id,
+        repoUrl,
+      });
+      repoContext = { ...cloned, repoUrl, request: featureRequest?.title || '' };
+    } else if (deps.repoService?.useLocalRepo) {
+      const opened = await deps.repoService.useLocalRepo({
+        repoPath: repoUrl,
+        projectId,
+        request: featureRequest?.title || '',
+      });
+      repoContext = { ...opened, repoUrl: null, request: featureRequest?.title || '' };
+    }
+  }
+
+  // AIFA v2.1 token-economy: the backend owns repository discovery. Build a
+  // shallow directory index (no source file contents) and resolve a scope
+  // (targetFolders + languageHint + confidence) BEFORE the agent starts.
+  // The Architecture Agent then receives repoIndex + scopeHints as data and
+  // is constrained by the prompt to only LS paths in scopeHints.targetFolders.
+  let repoIndex = { root: null, entries: [], manifests: [], revision: null, maxDepth: 0, builtAt: 0 };
+  if (repoContext?.repoPath) {
+    try {
+      repoIndex = await repoIndexService.buildRepoIndex(repoContext.repoPath, { maxDepth: 2 });
+      logger.info('[SDLC] ARCH repoIndex built', {
+        taskId: task.id,
+        sessionId: session.id,
+        entryCount: repoIndex.entries.length,
+        manifestCount: (repoIndex.manifests || []).length,
+        revision: repoIndex.revision,
+      });
+    } catch (e) {
+      logger.warn('[SDLC] ARCH repoIndex build failed, falling back to empty', {
+        taskId: task.id,
+        error: e.message,
+      });
+    }
+  }
+  const scopeHints = resolveScope({ repoIndex, featureRequest });
+  logger.info('[SDLC] ARCH scope resolved', {
+    taskId: task.id,
+    languageHint: scopeHints.languageHint,
+    targetFolders: scopeHints.targetFolders,
+    confidence: scopeHints.confidence,
+    reason: scopeHints.reason,
+  });
+
   deps.runAgent(task, {
     featureRequest,
     feedbackPrompt,
-  }, user?.id).catch((err) => console.error('[SDLC] Intent Agent failed:', err));
+    scopeHints,
+    repoIndex,
+    ...(repoContext ? { repoContext } : {}),
+  }, user?.id).catch((err) => console.error('[SDLC] Architecture Agent failed:', err));
 
-  return task;
+  return { task, sessionId: session.id };
+}
+
+// =============================================================================
+// requireUpstreamArtifact — AIFA v2.1 §3 / §15 upstream-artifact guard
+// =============================================================================
+// Every non-entry agent may only start when its immediate predecessor has
+// produced a non-empty canonical artifact. The set of "must-have" keys for
+// each role is taken from agentContract.REQUIRED_OUTPUT_KEYS (single source
+// of truth), and emptiness is decided by the same hasContent() helper the
+// contract uses, so the guard stays in lock-step with the I/O contract.
+// DEV is strictly downstream of UX — the PO→DEV legacy path is removed.
+async function requireUpstreamArtifact(sourceTask, agentType) {
+  const predecessor = PREDECESSOR_ROLE[agentType];
+  if (!predecessor) return; // ARCH entry — no predecessor to check
+
+  if (!sourceTask) {
+    throw new ApiError(
+      400,
+      `Source task is required to start ${agentType}.`,
+      'UPSTREAM_ARTIFACT_MISSING',
+      agentType.toUpperCase().replace('-AGENT', '_RUNNING'),
+    );
+  }
+  if (sourceTask.type !== predecessor) {
+    throw new ApiError(
+      400,
+      `${agentType} requires predecessor ${predecessor}, got ${sourceTask.type}.`,
+      'UPSTREAM_ARTIFACT_MISSING',
+      agentType.toUpperCase().replace('-AGENT', '_RUNNING'),
+    );
+  }
+
+  const requiredKeys = REQUIRED_OUTPUT_KEYS[predecessor] || [];
+  for (const key of requiredKeys) {
+    const rows = await AgentArtifact.findByTaskIdAndType(sourceTask.id, key);
+    // An artifact is "present and non-empty" when at least one persisted row
+    // hasContent() — the same predicate agentContract uses to validate an
+    // agent's own output. This avoids hard-coding how each artifact carries
+    // its payload (contentText for strings, contentJson for structured data).
+    const hasNonEmpty = rows.some((row) => {
+      const payload = row.contentJson !== null && row.contentJson !== undefined
+        ? row.contentJson
+        : row.contentText;
+      return hasContent(payload);
+    });
+    if (!hasNonEmpty) {
+      throw new ApiError(
+        400,
+        `Missing upstream artifact: '${key}'. The ${predecessor} task ` +
+          `${sourceTask.id} must produce a non-empty '${key}' artifact ` +
+          `before ${agentType} can start.`,
+        'UPSTREAM_ARTIFACT_MISSING',
+        agentType.toUpperCase().replace('-AGENT', '_RUNNING'),
+      );
+    }
+  }
 }
 
 // =============================================================================
@@ -64,8 +220,9 @@ async function runPOAgent(params, deps) {
     sessionId = null, user,
   } = params;
   const sourceTask = sourceTaskId
-    ? await deps.requireApprovedTask(sourceTaskId, 'intent-agent', user)
+    ? await deps.requireApprovedTask(sourceTaskId, 'architecture-agent', user)
     : null;
+  await requireUpstreamArtifact(sourceTask, 'po-agent');
   const effectiveProjectId = projectId || sourceTask?.projectId;
   if (!effectiveProjectId) throw new ApiError(400, 'projectId is required');
   if (user) {
@@ -148,11 +305,13 @@ async function runPOAgent(params, deps) {
     }
   }
 
+  const architecture_brief = sourceArtifacts.find((a) => a.artifactType === 'architecture_brief')?.contentText || null;
+
   const context = await deps.buildContextFromArtifacts(sourceArtifacts, {
     feedbackPrompt,
+    architecture_brief,
     ...(previousDraft ? { previousDraft } : {}),
     ...(featureRequest ? { featureRequest } : {}),
-    ...(repoContext ? { repoContext } : {}),
   });
 
   deps.runAgent(task, context, user?.id).catch((err) => console.error('[SDLC] PO Agent failed:', err));
@@ -167,6 +326,7 @@ async function runPOAgent(params, deps) {
 async function runUXAgent(params, deps) {
   const { projectId, sourceTaskId, feedbackPrompt = '', previousDraft = null, user } = params;
   const sourceTask = await deps.requireApprovedTask(sourceTaskId, 'po-agent', user);
+  await requireUpstreamArtifact(sourceTask, 'ux-agent');
 
   const sourceArtifacts = await AgentArtifact.findByTaskId(sourceTask.id);
   const inputHash = deps.contentHash({
@@ -197,15 +357,15 @@ async function runUXAgent(params, deps) {
 
 async function runDEVAgent(params, deps) {
   const { projectId, sourceTaskId, feedbackPrompt = '', previousDraft = null, user } = params;
-  const sourceTask = await deps.requireApprovedTask(sourceTaskId, ['ux-agent', 'po-agent'], user);
+  // AIFA v2.1 §3 / §15: DEV's predecessor is strictly UX. The PO→DEV
+  // legacy path is removed; PO→UX→DEV is the only legal route.
+  const sourceTask = await deps.requireApprovedTask(sourceTaskId, 'ux-agent', user);
+  await requireUpstreamArtifact(sourceTask, 'dev-agent');
   const effectiveProjectId = projectId || sourceTask.projectId;
-  const fromPoDirectly = sourceTask.type === 'po-agent';
 
-  const poTask = fromPoDirectly
-    ? sourceTask
-    : await Task.findLatestBySession(sourceTask.sessionId, 'po-agent', 'completed', 'committed');
+  const poTask = await Task.findLatestBySession(sourceTask.sessionId, 'po-agent', 'completed', 'committed');
   const [uxArtifacts, poArtifacts] = await Promise.all([
-    fromPoDirectly ? Promise.resolve([]) : AgentArtifact.findByTaskId(sourceTask.id),
+    AgentArtifact.findByTaskId(sourceTask.id),
     poTask ? AgentArtifact.findByTaskId(poTask.id) : Promise.resolve([]),
   ]);
 
@@ -225,7 +385,14 @@ async function runDEVAgent(params, deps) {
     versionStatus: 'draft',
   });
 
-  const context = await deps.buildContextFromArtifacts([...poArtifacts, ...uxArtifacts], { feedbackPrompt, ...(previousDraft ? { previousDraft } : {}) });
+  const architecture_brief = [...poArtifacts, ...uxArtifacts]
+    .find((a) => a.artifactType === 'architecture_brief')?.contentText || null;
+
+  const context = await deps.buildContextFromArtifacts([...poArtifacts, ...uxArtifacts], {
+    feedbackPrompt,
+    architecture_brief,
+    ...(previousDraft ? { previousDraft } : {}),
+  });
   deps.runAgent(task, context, user?.id).catch((err) => console.error('[SDLC] DEV Agent failed:', err));
 
   return task;
@@ -238,6 +405,7 @@ async function runDEVAgent(params, deps) {
 async function runQAAgent(params, deps) {
   const { projectId, sourceTaskId, feedbackPrompt = '', previousDraft = null, user } = params;
   const sourceTask = await deps.requireApprovedTask(sourceTaskId, 'dev-agent', user);
+  await requireUpstreamArtifact(sourceTask, 'qa-agent');
   const sessionTasks = await Task.findBySessionId(sourceTask.sessionId);
 
   if (gateBridge.listPending({ taskId: sourceTask.id }).length > 0) {
@@ -300,12 +468,31 @@ async function startNextAgentIfAvailable(task, userId, deps) {
   if (deps.getPendingQuestionGate(task.projectId, scopeTaskIds)) return null;
   if (gateBridge.listPending({ taskId: task.id }).length > 0) return null;
 
+  // AIFA v2.1 §3 / §15: auto-advance must respect the upstream-artifact
+  // guard. If the just-committed predecessor did not produce a non-empty
+  // canonical artifact, we refuse to launch the next agent silently.
+  try {
+    await requireUpstreamArtifact(task, nextAgent);
+  } catch (err) {
+    logger.warn('[SDLC] auto-advance blocked: upstream artifact missing', {
+      taskId: task.id,
+      nextAgent,
+      code: err.code,
+      message: err.message,
+    });
+    return null;
+  }
+
   const existing = tasks.find((candidate) => candidate.type === nextAgent && candidate.sourceRunId === task.id);
   if (existing) return existing;
 
   const args = {
     projectId: task.projectId,
     sourceTaskId: task.id,
+    // AIFA v2.1: when auto-advancing from ARCH to PO, pass the sessionId
+    // created up-front by runArchitectureAgent so PO reuses it instead of
+    // creating a duplicate PipelineSession and re-cloning the repo.
+    ...(nextAgent === 'po-agent' && task.sessionId ? { sessionId: task.sessionId } : {}),
     user: userId ? { id: userId } : null,
   };
 
@@ -317,10 +504,12 @@ async function startNextAgentIfAvailable(task, userId, deps) {
 }
 
 module.exports = {
-  runIntentAgent,
+  runArchitectureAgent,
   runPOAgent,
   runUXAgent,
   runDEVAgent,
   runQAAgent,
   startNextAgentIfAvailable,
+  requireUpstreamArtifact,
+  PREDECESSOR_ROLE,
 };

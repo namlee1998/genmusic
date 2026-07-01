@@ -35,6 +35,7 @@ const DEFAULT_MAX_TURNS = Number.isFinite(configuredMaxTurns) && configuredMaxTu
   ? Math.floor(configuredMaxTurns)
   : 200;
 const ROLE_MAX_TURNS = {
+  'architecture-agent': 25,
   'po-agent': 30,
   'ux-agent': 35,
   'dev-agent': 200,
@@ -45,8 +46,14 @@ function maxTurnsForRole(role) {
   if (Number.isFinite(roleEnv) && roleEnv > 0) return Math.min(DEFAULT_MAX_TURNS, Math.floor(roleEnv));
   return Math.min(DEFAULT_MAX_TURNS, ROLE_MAX_TURNS[role] || DEFAULT_MAX_TURNS);
 }
+function timeoutMsForRole(role, fallback) {
+  const roleEnv = Number(process.env[`CLAUDE_CODE_${stageKey(role).toUpperCase()}_TIMEOUT_MS`]);
+  if (Number.isFinite(roleEnv) && roleEnv > 0) return Math.floor(roleEnv);
+  return fallback;
+}
 const ALLOWED_TOOLS = ['Read', 'Glob', 'Grep', 'LS', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash'];
 const ROLE_LABEL = {
+  'architecture-agent': 'Architecture',
   'po-agent': 'Product Owner',
   'ux-agent': 'UX Designer',
   'dev-agent': 'Developer',
@@ -78,13 +85,15 @@ function safeJson(value, max = 24000) {
 
 function compactContext(role, context = {}) {
   const allowed = {
-    'po-agent': ['featureRequest', 'feedbackPrompt', 'repoContext'],
+    'architecture-agent': ['featureRequest', 'feedbackPrompt', 'repoContext', 'repoIndex', 'scopeHints'],
+    'po-agent': ['featureRequest', 'feedbackPrompt'],
     'ux-agent': ['prd', 'user_stories', 'acceptance_criteria', 'risk_classification', 'feedbackPrompt'],
     'dev-agent': [
       'prd', 'acceptance_criteria', 'risk_classification', 'ux_spec',
       'user_flow', 'wireframe_spec', 'component_inventory',
       'screens', 'color_palette', 'typography',
       'feedbackPrompt', 'repoContext',
+      'architecture_brief',
     ],
     'qa-agent': [
       'acceptance_criteria', 'risk_classification', 'ux_spec', 'implementation_plan',
@@ -168,7 +177,7 @@ function extractBalancedJsonObjects(text) {
 // rows with `covered`) are intentionally left to the prompt — we never fabricate
 // evidence objects from prose.
 const STRING_LIST_KEYS = {
-  'intent-agent': ['acceptance_criteria', 'user_stories'],
+  'architecture-agent': ['repository_summary', 'technology_stack', 'technical_decisions', 'constraints', 'repository_routing'],
   'po-agent': ['acceptance_criteria', 'user_stories'],
   'ux-agent': ['screens', 'component_inventory'],
   'dev-agent': ['changed_files', 'linked_ac_ids'],
@@ -403,9 +412,12 @@ async function runAgent({
   context = {},
   onGate,
   onProgress,
-  timeoutMs = DEFAULT_TIMEOUT_MS,
+  timeoutMs,
 }) {
   const { query } = await loadSdk();
+  // Per-role timeout: ARCH (read-only) gets a tighter ceiling than the global
+  // default; other roles fall back to the global default.
+  const effectiveTimeoutMs = Number.isFinite(timeoutMs) ? timeoutMs : timeoutMsForRole(role, DEFAULT_TIMEOUT_MS);
   const cwd = repoPath || process.cwd();
   const prompt = await buildPrompt({ role, repoPath, context });
 
@@ -442,11 +454,11 @@ async function runAgent({
 
     let timer;
     const armTimer = () => {
-      const deadline = startedAt + timeoutMs + extraBudgetMs;
+      const deadline = startedAt + effectiveTimeoutMs + extraBudgetMs;
       timer = setTimeout(() => {
         // Still paused on a human gate, or the deadline was pushed out → re-check
         // later instead of killing a run that is legitimately waiting/working.
-        if (gateDepth > 0 || Date.now() < startedAt + timeoutMs + extraBudgetMs) { armTimer(); return; }
+        if (gateDepth > 0 || Date.now() < startedAt + effectiveTimeoutMs + extraBudgetMs) { armTimer(); return; }
         try { q.interrupt?.(); } catch (_) { /* noop */ }
       }, Math.max(1000, deadline - Date.now()));
       if (typeof timer.unref === 'function') timer.unref();
@@ -572,6 +584,7 @@ module.exports = {
   normalizeOutput,
   _internal: {
     adaptGateInput, makeCanUseTool, isRetryableToolUseError, DEFAULT_MAX_TURNS,
-    ROLE_MAX_TURNS, maxTurnsForRole, compactContext, extractBalancedJsonObjects, repairRawOutput,
+    ROLE_MAX_TURNS, maxTurnsForRole, timeoutMsForRole,
+    compactContext, extractBalancedJsonObjects, repairRawOutput,
   },
 };

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { useHitlStore } from '@/store/useHitlStore';
-import { useSdlcStore } from '@/store/useSdlcStore';
+import { useUiStore } from '@/store/useUiStore';
+import { useWorkflowStore } from '@/store/useWorkflowStore';
 import {
   Layers,
   History,
@@ -60,8 +60,16 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const { interventions } = useHitlStore();
-  const setFeatureRequestFormOpen = useSdlcStore((s) => s.setFeatureRequestFormOpen);
+  const openFeatureRequestForm = useUiStore((s) => s.openFeatureRequestForm);
+  // HITL badge — sum of pendingGates across every session, derived from the
+  // single workflow store. No polling, no separate intervention store.
+  const pendingApprovalCount = useWorkflowStore((s) => {
+    let total = 0;
+    for (const id of Object.keys(s.sessions)) {
+      total += s.sessions[id].pendingGates.length;
+    }
+    return total;
+  });
 
   const activeProject = projects.find((p) => p.id === activeProjectId);
 
@@ -237,7 +245,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
       <div className={`p-3 shrink-0 ${collapsed ? 'text-center' : ''}`}>
         {collapsed ? (
           <button
-            onClick={() => setFeatureRequestFormOpen(true)}
+            onClick={() => openFeatureRequestForm()}
             title={t('layout.newFeatureRequest')}
             className="w-10 h-10 rounded-xl bg-primary hover:bg-primary/95 text-on-primary flex items-center justify-center transition-all shadow-[0_0_10px_rgba(99,102,241,0.2)] hover:scale-105 mx-auto"
           >
@@ -245,7 +253,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
           </button>
         ) : (
           <button
-            onClick={() => setFeatureRequestFormOpen(true)}
+            onClick={() => openFeatureRequestForm()}
             className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-primary hover:bg-primary/95 text-on-primary text-xs font-bold transition-all shadow-[0_0_12px_rgba(99,102,241,0.2)] hover:scale-[1.01]"
           >
             <Rocket size={14} className="animate-bounce" />
@@ -281,14 +289,14 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
         >
           <Gavel size={16} className={isDashboardActive ? 'text-primary' : 'text-amber-500'} />
           {!collapsed && <span className="flex-1 text-left">Dashboard</span>}
-          {interventions.length > 0 && (
+          {pendingApprovalCount > 0 && (
             <span
               className={`
                 bg-error text-white text-[9px] font-bold rounded-full px-1.5 py-0.5 leading-none shrink-0
                 ${collapsed ? 'absolute top-1 right-1.5 animate-pulse min-w-[12px] h-3 flex items-center justify-center p-0 text-[8px]' : ''}
               `}
             >
-              {interventions.length}
+              {pendingApprovalCount}
             </span>
           )}
         </button>

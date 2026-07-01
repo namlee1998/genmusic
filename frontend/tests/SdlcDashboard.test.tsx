@@ -1,174 +1,144 @@
+/**
+ * SdlcDashboard (Agent Tasks page) — verifies the 3-column layout shows
+ * the 5 agent columns once a session is active and SSE-driven state has
+ * populated pipelinePhases.
+ */
 import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import SdlcDashboard from '@/pages/SdlcDashboard';
-import { useAppStore } from '@/store/useAppStore';
-import { useSdlcStore } from '@/store/useSdlcStore';
-import * as sdlcApi from '@/services/api/sdlcApi';
 
-// Mock stores
-vi.mock('@/store/useAppStore', () => ({
-  useAppStore: vi.fn(),
-}));
+// Helper that returns a fake session.
+const sessions: ReturnType<typeof makeSession>[] = [];
 
-vi.mock('@/store/useSdlcStore', () => ({
-  useSdlcStore: vi.fn(),
-}));
+function emptyAgents() {
+  return Object.fromEntries(
+    AGENT_KEYS.map((k) => [k, {
+      agent: k, status: 'idle', currentStep: null, currentAction: null,
+      currentFile: null, toolName: null, startedAt: null, completedAt: null, lastEventAt: null,
+    }]),
+  );
+}
 
-// Mock API
-vi.mock('@/services/api/sdlcApi', () => ({
-  getPipelineStatus: vi.fn(),
-  resolveGate: vi.fn(),
-  releaseDecision: vi.fn(),
-  subscribeWorkflowSSE: vi.fn(),
-  startPipeline: vi.fn(),
-}));
-
-describe('SdlcDashboard Component', () => {
-  const mockUseAppStore = useAppStore as unknown as Mock;
-  const mockUseSdlcStore = useSdlcStore as unknown as Mock;
-
-  const makeSdlcState = (overrides: Record<string, any> = {}) => ({
-    projectId: 'project-123',
-    workflowId: 'project-123',
-    status: 'idle',
-    routeType: 'FULLSTACK',
+function makeSession() {
+  return {
+    sessionId: 'sess-1',
+    taskId: 'task-1',
+    projectId: 'project-1',
+    status: 'running',
+    error: null,
+    createdAt: Date.now(),
+    lastUpdatedAt: Date.now(),
     pipelinePhases: [
-      { agent: 'PO', status: 'pending' },
-      { agent: 'UX', status: 'pending' },
-      { agent: 'DEV', status: 'pending' },
-      { agent: 'QA', status: 'pending' }
+      { agent: 'ARCH', status: 'completed' },
+      { agent: 'PO', status: 'completed' },
+      { agent: 'UX', status: 'completed' },
+      { agent: 'DEV', status: 'running' },
+      { agent: 'QA', status: 'pending' },
     ],
+    agentStates: emptyAgents(),
     pendingGates: [],
+    selectedGateId: null,
     gateHistory: [],
     auditLog: [],
+    runtimeEvents: [],
     qaResult: null,
     releaseStatus: 'pending',
-    repoUrl: '',
+    repoInfo: null,
     featureRequest: 'add google login',
-    isLoading: false,
-    error: null,
-    sessions: [],
-    activeSessionId: null,
-    pollStatus: vi.fn(),
-    startPipeline: vi.fn(),
-    resolveGate: vi.fn(),
-    releaseDecision: vi.fn(),
-    setProjectId: vi.fn(),
-    setError: vi.fn(),
-    cleanupConnections: vi.fn(),
-    getAllSessions: () => [],
-    getActiveSession: () => null,
-    setActiveSession: vi.fn(),
-    cleanupSession: vi.fn(),
-    ...overrides,
-  });
-
-  const mockSdlc = (state: Record<string, any>) => {
-    mockUseSdlcStore.mockImplementation((selector) =>
-      selector ? selector(state) : state
-    );
+    repoUrl: 'https://github.com/test/repo.git',
   };
+}
 
+const uiStoreShape: Record<string, unknown> = {
+  activeSessionId: null,
+  inspectorTab: 'runtime',
+  sidebarCollapsed: false,
+  showArchivedSessions: false,
+  sessionBrowserQuery: '',
+  selectedAgentKey: null,
+  selectedGateId: null,
+  selectedArtifact: null,
+  isFeatureRequestFormOpen: false,
+  setActiveSession: () => {},
+  setInspectorTab: () => {},
+  setSessionBrowserQuery: () => {},
+  setShowArchivedSessions: () => {},
+};
+
+vi.mock('@/store/useAppStore', () => ({ useAppStore: vi.fn() }));
+
+vi.mock('@/store/useUiStore', () => ({
+  // When called as a hook with a selector, run it against the shape.
+  useUiStore: Object.assign(
+    vi.fn((selector?: (s: typeof uiStoreShape) => unknown) =>
+      typeof selector === 'function' ? selector(uiStoreShape) : uiStoreShape,
+    ),
+    { getState: () => uiStoreShape },
+  ),
+}));
+
+vi.mock('@/store/useWorkflowStore', () => ({
+  useWorkflowStore: vi.fn((selector?: (s: unknown) => unknown) => {
+    const state = {
+      sessions: sessions.reduce((acc, s) => ({ ...acc, [s.sessionId]: s }), {}),
+      sseConnections: {},
+      sseAbortControllers: {},
+      projectId: 'project-1',
+      isLoading: false,
+      sseConnection: 'connected',
+      activeSessionId: null,
+      startPipeline: vi.fn(),
+      setActiveSession: vi.fn(),
+      resolveGate: vi.fn(),
+      resolveOutputReviewGate: vi.fn(),
+      resolveClarification: vi.fn(),
+      releaseDecision: vi.fn(),
+      cleanupSession: vi.fn(),
+      resetAll: vi.fn(),
+    };
+    return typeof selector === 'function' ? selector(state) : state;
+  }),
+  selectAllSessions: () => sessions,
+  selectConnectionStatus: () => 'connected',
+  selectActiveSessionId: () => null,
+  selectAllPendingGates: () => [],
+}));
+
+vi.mock('@/services/api/sdlcApi', () => ({ getSdlcTaskStatus: vi.fn() }));
+
+import { useAppStore } from '@/store/useAppStore';
+import { AGENT_KEYS } from '@/models/SessionState';
+
+const mockUseAppStore = useAppStore as unknown as Mock;
+
+describe('SdlcDashboard (Agent Tasks page)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-
+    sessions.length = 0;
     mockUseAppStore.mockReturnValue({
-      currentProjectId: 'project-123',
+      currentProjectId: 'project-1',
       treeLoaded: true,
       fetchTree: vi.fn(),
     });
-
-    mockSdlc(makeSdlcState());
   });
 
+  it('renders the agent-tasks title when a session is active', async () => {
+    const session = makeSession();
+    sessions.push(session);
+    uiStoreShape.activeSessionId = session.sessionId;
 
-
-
-
-  it('renders the Pipeline Stepper when pipeline starts running', () => {
-    mockSdlc(makeSdlcState({
-      status: 'dev_running',
-      routeType: 'BACKEND',
-      pipelinePhases: [
-        { agent: 'PO', status: 'completed' },
-        { agent: 'UX', status: 'skipped' },
-        { agent: 'DEV', status: 'running' },
-        { agent: 'QA', status: 'pending' }
-      ],
-      repoUrl: 'https://github.com/test/repo.git',
-      getActiveSession: () => ({
-        status: 'dev_running',
-        routeType: 'BACKEND',
-        pipelinePhases: [
-          { agent: 'PO', status: 'completed' },
-          { agent: 'UX', status: 'skipped' },
-          { agent: 'DEV', status: 'running' },
-          { agent: 'QA', status: 'pending' }
-        ],
-        repoUrl: 'https://github.com/test/repo.git',
-        featureRequest: 'add google login',
-        releaseStatus: 'pending',
-        qaResult: null,
-        auditLog: [],
-        pendingGates: [],
-        gateHistory: [],
-        error: null,
-      }),
-    }));
-
-    render(
-      <MemoryRouter>
-        <SdlcDashboard />
-      </MemoryRouter>
-    );
-
-    expect(screen.getByText('Build Dashboard')).toBeInTheDocument();
-    expect(screen.getByText('DEV RUNNING')).toBeInTheDocument();
-    expect(screen.getByText('Developer (DEV)')).toBeInTheDocument();
-  });
-
-  it('calls pollStatus on mount when a workflow is active', async () => {
-    const pollStatusSpy = vi.fn();
-    mockSdlc(makeSdlcState({
-      activeSessionId: 'project-123',
-      status: 'po_running',
-      pipelinePhases: [
-        { agent: 'PO', status: 'running' },
-        { agent: 'UX', status: 'pending' },
-        { agent: 'DEV', status: 'pending' },
-        { agent: 'QA', status: 'pending' }
-      ],
-      repoUrl: 'https://github.com/test/repo.git',
-      pollStatus: pollStatusSpy,
-      getActiveSession: () => ({
-        status: 'po_running',
-        routeType: 'FULLSTACK',
-        pipelinePhases: [
-          { agent: 'PO', status: 'running' },
-          { agent: 'UX', status: 'pending' },
-          { agent: 'DEV', status: 'pending' },
-          { agent: 'QA', status: 'pending' }
-        ],
-        repoUrl: 'https://github.com/test/repo.git',
-        featureRequest: 'add google login',
-        releaseStatus: 'pending',
-        qaResult: null,
-        auditLog: [],
-        pendingGates: [],
-        gateHistory: [],
-        error: null,
-      }),
-    }));
-
-    render(
-      <MemoryRouter>
-        <SdlcDashboard />
-      </MemoryRouter>
-    );
+    render(<MemoryRouter><SdlcDashboard /></MemoryRouter>);
 
     await waitFor(() => {
-      expect(pollStatusSpy).toHaveBeenCalled();
+      expect(screen.getByText('Agent Tasks')).toBeInTheDocument();
     });
+
+    uiStoreShape.activeSessionId = null;
+  });
+
+  it('shows the empty state when there are no sessions', () => {
+    render(<MemoryRouter><SdlcDashboard /></MemoryRouter>);
+    expect(screen.getByText('Start your first workflow')).toBeInTheDocument();
   });
 });

@@ -71,7 +71,6 @@ actually ran commands and collected output.
 - `qa_report`: non-empty Markdown string summarising what changed, what was tested,
   and what evidence was collected. Include the diff summary and any new test files created.
 - `blocker_count`: number (0 to allow release).
-- `release_decision`: one of `approve`, `reject`, or `needs_changes`.
 - `release_reason`: non-empty justification referencing the diff and test results.
 
 The backend computes `gate_evaluation`; do not fabricate it. Do not approve the

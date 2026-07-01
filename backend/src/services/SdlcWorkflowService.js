@@ -49,7 +49,7 @@ const releaseManager = require('./releaseManager');
 const agentDispatcher = require('./agentDispatcher');
 const workflowOrchestrator = require('./workflowOrchestrator');
 const {
-  resolveMockScenario, applyScenarioNarrative, classifyRoute,
+  resolveMockScenario, applyScenarioNarrative,
   classifyFeatureRequest, firstContextValue, normalizeStructuredFeedback,
   validateStructuredFeedback, applyJsonPatch, applyMockScenario,
 } = workflowHelpers;
@@ -82,15 +82,16 @@ class SdlcWorkflowService {
   // =========================================================================
 
   /**
-   * Start an Intent Agent run — generates AI assumptions from raw request.
+   * Start an Architecture Agent run — generates architecture brief from raw request + repo.
    */
-  async runIntentAgent({ projectId, featureRequest, feedbackPrompt = '', backlogId = null, user }) {
+  async runArchitectureAgent({ projectId, featureRequest, feedbackPrompt = '', backlogId = null, repoUrl = null, user }) {
     const deps = {
       MembershipService,
       contentHash,
+      repoService,
       runAgent: (t, ctx, uid) => this._runAgent(t, ctx, uid),
     };
-    return workflowOrchestrator.runIntentAgent({ projectId, featureRequest, feedbackPrompt, backlogId, user }, deps);
+    return workflowOrchestrator.runArchitectureAgent({ projectId, featureRequest, feedbackPrompt, backlogId, repoUrl, user }, deps);
   }
 
   /**
@@ -556,9 +557,9 @@ class SdlcWorkflowService {
     if (!rejectedTask) throw new ApiError(404, 'Source task not found');
     if (user) await MembershipService.requireProjectRole(user.id, rejectedTask.projectId, ['owner', 'admin', 'editor']);
 
-    if (rejectedTask.type === 'intent-agent') {
+    if (rejectedTask.type === 'architecture-agent') {
       const featureRequest = await this._getFeatureRequestFromIntentTask(rejectedTask);
-      return this.runIntentAgent({
+      return this.runArchitectureAgent({
         projectId: rejectedTask.projectId,
         featureRequest,
         feedbackPrompt,
@@ -631,7 +632,7 @@ class SdlcWorkflowService {
       hitlDecisions = hitlDecisions.filter((d) => taskIds.has(d.taskId));
     }
 
-    const sdlcTasks = tasks.filter((t) => ['intent-agent', 'po-agent', 'ux-agent', 'dev-agent', 'qa-agent'].includes(t.type));
+    const sdlcTasks = tasks.filter((t) => ['architecture-agent', 'po-agent', 'ux-agent', 'dev-agent', 'qa-agent'].includes(t.type));
     const handoffArtifacts = (
       await Promise.all(sdlcTasks.map((task) => AgentArtifact.findByTaskIdAndType(task.id, 'a2a_handoff')))
     ).flat();
@@ -824,9 +825,9 @@ class SdlcWorkflowService {
       ? JSON.stringify(previousArtifacts.reduce((acc, a) => { acc[a.artifactType] = a.contentJson || a.contentText; return acc; }, {}))
       : undefined;
 
-    if (rejectedTask.type === 'intent-agent') {
+    if (rejectedTask.type === 'architecture-agent') {
       const featureRequest = await this._getFeatureRequestFromIntentTask(rejectedTask);
-      return this.runIntentAgent({ projectId: rejectedTask.projectId, featureRequest, feedbackPrompt, user });
+      return this.runArchitectureAgent({ projectId: rejectedTask.projectId, featureRequest, feedbackPrompt, user });
     }
     if (rejectedTask.type === 'po-agent') {
       const featureRequest = await this._getFeatureRequestFromTask(rejectedTask);
@@ -967,12 +968,14 @@ class SdlcWorkflowService {
     }
 
     const tasks = await Task.findBySessionId(sessionId);
-    // intent-agent precedes session creation, so it never carries a sessionId —
-    // recover it (if any) via the PO task's own sourceRunId instead of scanning
-    // the whole project (which would risk picking up another session's intent).
-    const poTaskForIntent = tasks.find((t) => t.type === 'po-agent');
-    const intentTask = poTaskForIntent?.sourceRunId ? await Task.findById(poTaskForIntent.sourceRunId) : null;
-    const { poTask, uxTask, devTask, qaTask } = this._selectCurrentTaskChain(tasks);
+    // Architecture agent runs before the session is created and is the entry
+    // point of the pipeline. Resolve it via the chain helper (which scans
+    // tasks by type) instead of relying on the PO task's sourceRunId — that
+    // path returns null for the first session in a project (no PO yet), and
+    // `deriveCurrentPhase` then collapses to BACKLOG even though ARCH
+    // completed successfully. Same root cause as the "fresh session stuck on
+    // backlog" bug observed via the SSE stream.
+    const { architectureTask, poTask, uxTask, devTask, qaTask } = this._selectCurrentTaskChain(tasks);
 
     const taskIds = new Set(tasks.map((t) => t.id));
     const hitlDecisions = (await HitlDecision.findByProjectId(projectId)).filter((d) => taskIds.has(d.taskId));
@@ -1001,7 +1004,7 @@ class SdlcWorkflowService {
 
     // T1/T6: surface which completed tasks have INVALID artifacts so the UI can
     // badge the worker card and explain why the phase did not advance.
-    const phaseTasks = [intentTask, poTask, uxTask, devTask, qaTask].filter(Boolean);
+    const phaseTasks = [architectureTask, poTask, uxTask, devTask, qaTask].filter(Boolean);
     const invalidByTaskId = {};
     await Promise.all(phaseTasks.map(async (t) => {
       if (t.status !== 'completed') { invalidByTaskId[t.id] = false; return; }
@@ -1060,7 +1063,7 @@ class SdlcWorkflowService {
         message: `${pendingQuestion.role} is waiting for a human answer`,
       } : { locked: false },
       phases: {
-        intent: mapPhase(intentTask),
+        architecture: mapPhase(architectureTask),
         po: mapPhase(poTask),
         ux: mapPhase(uxTask),
         dev: mapPhase(devTask),
@@ -1085,7 +1088,7 @@ class SdlcWorkflowService {
         evidence: releaseEvidence,
         approvalBlocked: releaseEvidence.open_blockers.some((blocker) => GATE_CONFIG.RELEASE_BLOCKING_SEVERITIES.includes(blocker.severity)),
       },
-      currentPhase: this._deriveCurrentPhase(poTask, uxTask, devTask, qaTask, decisionsByTaskId, releaseDecision),
+      currentPhase: this._deriveCurrentPhase(architectureTask, poTask, uxTask, devTask, qaTask, decisionsByTaskId, releaseDecision),
     };
   }
 
@@ -1104,7 +1107,6 @@ class SdlcWorkflowService {
     const tasks = await Task.findBySessionId(sessionId);
     const taskIds = new Set(tasks.map((t) => t.id));
     const { poTask, qaTask } = this._selectCurrentTaskChain(tasks);
-    const skipsUx = this._poRouteSkipsUx(poTask);
 
     // Determine overall status
     let overallStatus = 'idle';
@@ -1132,8 +1134,9 @@ class SdlcWorkflowService {
     };
 
     const pipelinePhases = [
+      toPhaseStatus('Architecture', legacyStatus.phases.architecture, false),
       toPhaseStatus('PO', legacyStatus.phases.po, false),
-      toPhaseStatus('UX', legacyStatus.phases.ux, skipsUx),
+      toPhaseStatus('UX', legacyStatus.phases.ux, false),
       toPhaseStatus('DEV', legacyStatus.phases.dev, false),
       toPhaseStatus('QA', legacyStatus.phases.qa, false),
     ];
@@ -1176,7 +1179,6 @@ class SdlcWorkflowService {
       workflowId: sessionId,
       projectId,
       status: overallStatus,
-      routeType: skipsUx ? 'BACKEND' : 'FULLSTACK',
       pipelinePhases,
       pendingGates,
       auditLog,
@@ -1315,16 +1317,11 @@ class SdlcWorkflowService {
   }
 
   /**
-   * T4.1/T4.2 — the agent that follows a task, honouring the PO route. When the
-   * PO route has no UI, PO hands off straight to DEV (UX is skipped).
+   * The agent that follows a task. Per AIFA v2.1 the chain is fixed
+   * ARCH → PO → UX → DEV → QA; no UX skip is permitted.
    */
   _nextAgentFor(task) {
     return workflowHelpers.nextAgentFor(task);
-  }
-
-  /** True when this project's PO route skips the UX phase. */
-  _poRouteSkipsUx(poTask) {
-    return workflowHelpers.poRouteSkipsUx(poTask);
   }
 
   async getTaskEvents(taskId, { afterSequence = null, limit = 200 } = {}, user) {
@@ -1339,8 +1336,8 @@ class SdlcWorkflowService {
     return workflowHelpers.selectCurrentTaskChain(tasks);
   }
 
-  _deriveCurrentPhase(poTask, uxTask, devTask, qaTask, decisionsByTaskId, releaseDecision = null) {
-    return workflowHelpers.deriveCurrentPhase(poTask, uxTask, devTask, qaTask, decisionsByTaskId, releaseDecision);
+  _deriveCurrentPhase(architectureTask, poTask, uxTask, devTask, qaTask, decisionsByTaskId, releaseDecision = null) {
+    return workflowHelpers.deriveCurrentPhase(architectureTask, poTask, uxTask, devTask, qaTask, decisionsByTaskId, releaseDecision);
   }
 
 
@@ -1349,7 +1346,7 @@ class SdlcWorkflowService {
    * Read from the PipelineSession row — NOT scanned project-wide — so two
    * sessions on the same project never pick up each other's working copy.
    * Falls back to the legacy PO-task-observability lookup (pre-session data /
-   * the intent-agent path that doesn't always create a session).
+   * the architecture-agent path that doesn't always create a session).
    */
   async _getRepoContext(projectId, sessionId = null) {
     if (sessionId) {
@@ -1487,8 +1484,6 @@ class SdlcWorkflowService {
   async _buildMockOutput(task, context) {
     // Delegate to agentDispatcher
     const deps = {
-      applyMockScenarioFn: (t, c, f) => applyMockScenario(t, c, f),
-      classifyRouteFn: (fr) => classifyRoute(fr),
       classifyFeatureRequestFn: (fr) => classifyFeatureRequest(fr),
       firstContextValueFn: (ctx, key) => firstContextValue(ctx, key),
     };
@@ -1644,9 +1639,10 @@ class SdlcWorkflowService {
   async _saveAgentData(task, completedData, userId) {
     // Save each artifact returned by the agent
     const artifactRows = [];
-    const artifactTypes = ['feature_request', 'scenario_brief', 'intent_assumptions', 'clarifying_questions',
+    const artifactTypes = ['feature_request', 'architecture_brief', 'repository_summary', 'technology_stack',
+      'technical_decisions', 'constraints', 'repository_routing', 'clarifying_questions',
       'prd', 'user_stories', 'acceptance_criteria', 'scope', 'out_of_scope', 'mcp_activity',
-      'route_classification', 'assumptions',
+      'assumptions',
       'ux_spec', 'user_flow', 'wireframe_spec', 'component_inventory', 'screens',
       'architecture_ledger_update', 'implementation_plan', 'mock_code_diff', 'changed_files',
       'patch_diff', 'patch_format', 'linked_ac_ids', 'build_result', 'self_test_report',
@@ -1654,7 +1650,7 @@ class SdlcWorkflowService {
       'risk_classification', 'workflow_policy', 'security_notes', 'security_gate',
       'test_cases', 'qa_report', 'ac_coverage_matrix', 'pass_count', 'fail_count',
       'blocker_count', 'release_recommendation',
-      'test_run_report', 'regression_risks', 'security_findings', 'release_decision', 'release_reason',
+      'test_run_report', 'regression_risks', 'security_findings', 'release_reason',
       'coverage_summary', 'dev_evidence_ref',
       'confidence_score',
       'rework_response',
@@ -1733,6 +1729,25 @@ class SdlcWorkflowService {
       }
     }
 
+    // -------------------------------------------------------------------------
+    // QA spec compliance (AIFA v2.1 §10): QA must NOT perform release approval.
+    // Strip `release_decision` from QA output and normalize the gate
+    // recommendation into the spec's PASS / PASS_WITH_RISK / FAIL enum so the
+    // Final Human Decision Gate (the 6th gate) is the sole authority on release.
+    // -------------------------------------------------------------------------
+    if (task.type === 'qa-agent') {
+      if (completedData.release_decision !== undefined) {
+        delete completedData.release_decision;
+      }
+      const REC_MAP = { approve: 'PASS', needs_changes: 'PASS_WITH_RISK', reject: 'FAIL' };
+      if (completedData.gate_evaluation?.recommendation) {
+        const rec = String(completedData.gate_evaluation.recommendation).toLowerCase();
+        if (REC_MAP[rec]) {
+          completedData.gate_evaluation.recommendation = REC_MAP[rec];
+        }
+      }
+    }
+
     for (const artType of artifactTypes) {
       if (completedData[artType] !== undefined && completedData[artType] !== null) {
         const content = completedData[artType];
@@ -1761,7 +1776,32 @@ class SdlcWorkflowService {
     }
 
     if (artifactRows.length > 0) {
-      await AgentArtifact.bulkUpsert(artifactRows);
+      // Guard against the task being deleted between agent completion and
+      // artifact persistence (project cleanup, retry racing, etc.). Without
+      // this check, AgentArtifact.create throws P2003 (FK violation) and the
+      // caller marks the task as failed even though the failure is purely
+      // cleanup-side.
+      const liveTask = await Task.findById(task.id).catch(() => null);
+      if (!liveTask) {
+        logger.warn('_saveAgentData: task vanished before bulkUpsert, skipping artifact persistence', {
+          taskId: task.id, agentType: task.type, artifactCount: artifactRows.length,
+        });
+        return { artifactCount: 0, agentType: task.type, skipped: 'task_not_found' };
+      }
+      try {
+        await AgentArtifact.bulkUpsert(artifactRows);
+      } catch (err) {
+        // Race: task was deleted after the guard above but before bulkUpsert
+        // committed. P2003 = foreign-key violation. Log and degrade gracefully
+        // so we don't double-mark the task as failed.
+        if (err?.code === 'P2003') {
+          logger.warn('_saveAgentData: P2003 on bulkUpsert (task deleted mid-flight), skipping', {
+            taskId: task.id, agentType: task.type, error: err.message,
+          });
+          return { artifactCount: 0, agentType: task.type, skipped: 'task_deleted_mid_flight' };
+        }
+        throw err;
+      }
     }
 
     // Build enriched result — include gate info for QA tasks
@@ -1778,13 +1818,7 @@ class SdlcWorkflowService {
     }
 
     const outputHash = contentHash(artifactRows.map((a) => a.contentHash));
-    // T4.1 — keep the PO route on the PO task observability (alongside any repo
-    // context) so the state machine can decide whether to run UX.
-    let observability = completedData.observability || {};
-    if (task.type === 'po-agent') {
-      const existing = (await Task.findById(task.id))?.observability || {};
-      observability = { ...existing, ...observability, route: completedData.route_classification || null };
-    }
+    const observability = completedData.observability || {};
     await Task.update(task.id, {
       status: 'completed',
       output_content_hash: outputHash,
@@ -1848,7 +1882,11 @@ class SdlcWorkflowService {
       logger.warn('agent output INVALID — opening output review gate with validation issues', {
         taskId: task.id,
         phase: task.type,
-        blockers: blockers.map((b) => b.rule),
+        blockers: blockers.map((b) => ({
+          rule: b.rule,
+          detail: b.detail,
+          ...(b.inspect ? { inspect: b.inspect } : {}),
+        })),
       });
     }
 
@@ -1865,7 +1903,11 @@ class SdlcWorkflowService {
           agent: task.type,
           summary: completedData.summary || null,
           artifacts: artifactRows.map((a) => a.artifactType),
-          validationIssues: blockers.map((b) => ({ rule: b.rule, message: b.message || b.detail || null })),
+          validationIssues: blockers.map((b) => ({
+            rule: b.rule,
+            message: b.message || b.detail || null,
+            ...(b.inspect ? { inspect: b.inspect } : {}),
+          })),
         },
       });
       logger.info('agent created output review gate', {

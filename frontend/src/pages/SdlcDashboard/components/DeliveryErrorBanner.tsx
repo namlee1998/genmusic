@@ -1,8 +1,14 @@
 import { AlertTriangle, X } from 'lucide-react';
-import type { SdlcError } from '@/store/useSdlcStore';
+
+export interface DeliveryErrorDetail {
+  message: string;
+  code?: string;
+  phase?: string;
+  requestId?: string;
+}
 
 interface Props {
-  error: SdlcError | string | null;
+  error: DeliveryErrorDetail | string | null;
   onDismiss?: () => void;
 }
 
@@ -13,7 +19,7 @@ interface Props {
  */
 export default function DeliveryErrorBanner({ error, onDismiss }: Props) {
   if (!error) return null;
-  const detail = typeof error === 'string' ? { message: error } : error;
+  const detail: DeliveryErrorDetail = typeof error === 'string' ? { message: error } : error;
   return (
     <div className="delivery-error delivery-error--rich" role="alert">
       <AlertTriangle size={15} className="delivery-error__icon" />

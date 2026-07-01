@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { useAppStore } from '@/store/useAppStore';
-import { useSdlcStore } from '@/store/useSdlcStore';
+import { useWorkflowStore } from '@/store/useWorkflowStore';
 import { Play, Sparkles, Loader2 } from 'lucide-react';
 
 export default function FeatureRequestChatbox({ onClose }: { onClose?: () => void }) {
@@ -12,7 +12,8 @@ export default function FeatureRequestChatbox({ onClose }: { onClose?: () => voi
   const projects = useAppStore((s) => s.projects) || [];
   const currentProject = projects.find((p) => p && p.project_id === currentProjectId);
 
-  const { startPipeline, isLoading = false } = useSdlcStore() || {};
+  const startPipeline = useWorkflowStore((s) => s.startPipeline);
+  const isLoading = useWorkflowStore((s) => s.isLoading);
 
   const [requestText, setRequestText] = useState('');
   const [techStack, setTechStack] = useState('Auto');

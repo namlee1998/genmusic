@@ -14,7 +14,7 @@
 const AGENT_CONTRACT_VERSION = 'agent-io.v3';
 
 const REQUIRED_OUTPUT_KEYS = {
-  'intent-agent': ['intent_assumptions'],
+  'architecture-agent': ['repository_summary', 'technology_stack', 'technical_decisions', 'constraints', 'repository_routing', 'architecture_brief'],
   'po-agent': ['prd', 'user_stories', 'acceptance_criteria', 'scope', 'out_of_scope', 'risk_classification'],
   'ux-agent': ['ux_spec', 'user_flow', 'wireframe_spec', 'screens', 'component_inventory'],
   'dev-agent': [

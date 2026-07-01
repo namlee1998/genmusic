@@ -16,13 +16,28 @@ async function buildContextFromArtifacts(artifacts, extras = {}) {
   const context = { ...extras };
   const resolved = await Promise.all(artifacts.map((art) => resolveArtifactContent(art)));
   artifacts.forEach((art, i) => {
-    if (!context[art.artifactType]) context[art.artifactType] = [];
     const content = resolved[i].contentText ?? resolved[i].contentJson ?? '';
-    context[art.artifactType].push({
-      key: art.artifactKey,
-      title: art.title,
-      content,
-    });
+    const existing = context[art.artifactType];
+    if (existing === undefined || existing === null) {
+      context[art.artifactType] = [{
+        key: art.artifactKey,
+        title: art.title,
+        content,
+      }];
+    } else if (Array.isArray(existing)) {
+      existing.push({
+        key: art.artifactKey,
+        title: art.title,
+        content,
+      });
+    } else {
+      // Pre-seeded scalar (e.g. architecture_brief from extras) — wrap the
+      // pre-seeded value as the first entry, then append this artifact.
+      context[art.artifactType] = [
+        { key: `${art.artifactType}:extras`, title: null, content: existing },
+        { key: art.artifactKey, title: art.title, content },
+      ];
+    }
   });
   return context;
 }

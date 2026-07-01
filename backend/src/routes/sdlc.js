@@ -17,8 +17,8 @@ const repoUpload = multer({
   limits: { fileSize: 100 * 1024 * 1024, files: 8000 },
 });
 
-// ── IntentGate ─────────────────────────────────────────────────────────────
-router.post('/run-intent-agent', SdlcController.runIntentAgent.bind(SdlcController));
+// ── ArchitectureGate ─────────────────────────────────────────────────────────────
+router.post('/run-architecture-agent', SdlcController.runArchitectureAgent.bind(SdlcController));
 
 // ── Repo folder upload (T1.4 "Open folder") ───────────────────────────────
 // POST /api/v1/sdlc/upload-repo  (multipart: files[] + paths[] + project_id)

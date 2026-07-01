@@ -205,22 +205,11 @@ function applyJsonPatch(source, operations = []) {
 // =============================================================================
 
 /**
- * T4.1/T4.2 — the agent that follows a task, honouring the PO route. When the
- * PO route has no UI, PO hands off straight to DEV (UX is skipped).
+ * The agent that follows a task. Per AIFA v2.1 the chain is fixed
+ * ARCH → PO → UX → DEV → QA; no UX skip is permitted.
  */
 function nextAgentFor(task) {
-  if (task?.type === 'po-agent') {
-    const route = task.observability?.route || task.agentOutput?.route_classification || null;
-    if (route && route.has_ui === false) return 'dev-agent';
-    return 'ux-agent';
-  }
   return NEXT_AGENT[task?.type];
-}
-
-/** True when this project's PO route skips the UX phase. */
-function poRouteSkipsUx(poTask) {
-  const route = poTask?.observability?.route || poTask?.agentOutput?.route_classification || null;
-  return !!(route && route.has_ui === false);
 }
 
 /**
@@ -229,13 +218,12 @@ function poRouteSkipsUx(poTask) {
  */
 function selectCurrentTaskChain(tasks = []) {
   const latest = (type) => tasks.find((task) => task.type === type) || null;
-  const intentTask = latest('intent-agent');
+  const architectureTask = latest('architecture-agent');
   const poTask = latest('po-agent');
-  const skipUx = poRouteSkipsUx(poTask);
-  const uxTask = poTask && !skipUx
+  const uxTask = poTask
     ? tasks.find((task) => task.type === 'ux-agent' && task.sourceRunId === poTask.id) || null
     : null;
-  const devSourceId = skipUx ? poTask?.id : uxTask?.id;
+  const devSourceId = uxTask?.id;
   const devTask = devSourceId
     ? tasks.find((task) => task.type === 'dev-agent' && task.sourceRunId === devSourceId) || null
     : null;
@@ -243,21 +231,26 @@ function selectCurrentTaskChain(tasks = []) {
     ? tasks.find((task) => task.type === 'qa-agent' && task.sourceRunId === devTask.id) || null
     : null;
 
-  return { intentTask, poTask, uxTask, devTask, qaTask };
+  return { architectureTask, poTask, uxTask, devTask, qaTask };
 }
 
-function deriveCurrentPhase(poTask, uxTask, devTask, qaTask, decisionsByTaskId, releaseDecision = null) {
+function deriveCurrentPhase(architectureTask, poTask, uxTask, devTask, qaTask, decisionsByTaskId, releaseDecision = null) {
+  if (!architectureTask && !poTask) return 'BACKLOG';
+  // Architecture (Phase §6): the architecture-agent approval is now a hard gate
+  // before PO can start. The two left-standing predecessors (poTask or no chain
+  // yet) collapse to BACKLOG because Architecture hasn't even been kicked off.
+  if (architectureTask) {
+    if (architectureTask.status === 'pending' || architectureTask.status === 'processing') return 'ARCHITECTURE_RUNNING';
+    if (architectureTask.status === 'failed') return 'ARCHITECTURE_FAILED';
+    if (!decisionsByTaskId[architectureTask?.id] || decisionsByTaskId[architectureTask?.id]?.decision !== 'APPROVE') return 'ARCHITECTURE_REVIEW';
+  }
   if (!poTask) return 'BACKLOG';
-  if (!poTask || poTask.status === 'pending' || poTask.status === 'processing') return 'PO_RUNNING';
+  if (poTask.status === 'pending' || poTask.status === 'processing') return 'PO_RUNNING';
   if (poTask.status === 'failed') return 'PO_FAILED';
   if (!decisionsByTaskId[poTask?.id] || decisionsByTaskId[poTask?.id]?.decision !== 'APPROVE') return 'PO_REVIEW';
-  // T4.2 — skip the UX checks entirely when the route has no UI.
-  const skipUx = poRouteSkipsUx(poTask);
-  if (!skipUx) {
-    if (!uxTask || uxTask.status === 'pending' || uxTask.status === 'processing') return 'UX_RUNNING';
-    if (uxTask.status === 'failed') return 'UX_FAILED';
-    if (!decisionsByTaskId[uxTask?.id] || decisionsByTaskId[uxTask?.id]?.decision !== 'APPROVE') return 'UX_REVIEW';
-  }
+  if (!uxTask || uxTask.status === 'pending' || uxTask.status === 'processing') return 'UX_RUNNING';
+  if (uxTask.status === 'failed') return 'UX_FAILED';
+  if (!decisionsByTaskId[uxTask?.id] || decisionsByTaskId[uxTask?.id]?.decision !== 'APPROVE') return 'UX_REVIEW';
   if (!devTask || devTask.status === 'pending' || devTask.status === 'processing') return 'DEV_RUNNING';
   if (devTask.status === 'failed') return 'DEV_FAILED';
   if (!decisionsByTaskId[devTask?.id] || decisionsByTaskId[devTask?.id]?.decision !== 'APPROVE') return 'DEV_REVIEW';
@@ -376,7 +369,6 @@ module.exports = {
   applyScenarioNarrative,
   // Classification
   classifyFeatureRequest,
-  classifyRoute,
   firstContextValue,
   // Structured feedback
   normalizeStructuredFeedback,
@@ -386,7 +378,6 @@ module.exports = {
   applyJsonPatch,
   // Workflow progression
   nextAgentFor,
-  poRouteSkipsUx,
   selectCurrentTaskChain,
   deriveCurrentPhase,
   // Feature request retrieval

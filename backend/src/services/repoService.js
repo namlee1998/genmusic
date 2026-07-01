@@ -65,6 +65,107 @@ function isHttpUrl(url) {
 }
 
 /**
+ * AIFA v2.1 §4 Phase 1 — Validate Repository URL. The workflow entry is a
+ * Repository URL; folder uploads and other entry paths are not allowed.
+ * Accepted shapes:
+ *   - http(s)://host/path (with or without trailing .git)
+ *   - git://host/path
+ *   - ssh://[user@]host[:port]/path
+ *   - user@host:path  (SSH scp-like form)
+ * Rejects empty strings, file://, ftp://, plain filesystem paths, and any
+ * URL missing a host component. Throws ApiError(400) so callers can map it
+ * to a clean HTTP 400 response.
+ */
+function validateRepoUrl(url) {
+  const trimmed = String(url || '').trim();
+  if (!trimmed) {
+    throw new ApiError(
+      400,
+      'repo_url is required (AIFA v2.1 §4: the workflow entry is a Repository URL).',
+      'INVALID_REPO_URL',
+      'ARCH_RUNNING',
+    );
+  }
+
+  // Explicit reject of protocols that are not Git remotes.
+  if (/^(file|ftps?|rsync|git\+ssh):\/\//i.test(trimmed)) {
+    throw new ApiError(
+      400,
+      `repo_url protocol not supported: ${trimmed.split('://')[0]}://. Use http(s), git://, ssh://, or user@host:path.`,
+      'INVALID_REPO_URL',
+      'ARCH_RUNNING',
+    );
+  }
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    let parsed;
+    try {
+      parsed = new URL(trimmed);
+    } catch {
+      throw new ApiError(
+        400,
+        'repo_url is not a valid http(s) URL.',
+        'INVALID_REPO_URL',
+        'ARCH_RUNNING',
+      );
+    }
+    if (!parsed.hostname) {
+      throw new ApiError(
+        400,
+        'repo_url is missing a host component.',
+        'INVALID_REPO_URL',
+        'ARCH_RUNNING',
+      );
+    }
+    if (!parsed.pathname || parsed.pathname === '/' || parsed.pathname.length < 2) {
+      throw new ApiError(
+        400,
+        'repo_url must include a repository path (e.g. https://host/owner/repo.git).',
+        'INVALID_REPO_URL',
+        'ARCH_RUNNING',
+      );
+    }
+    return trimmed;
+  }
+
+  if (/^git:\/\//i.test(trimmed)) {
+    if (!/^git:\/\/[^\s/]+\/[^\s]+/i.test(trimmed)) {
+      throw new ApiError(
+        400,
+        'repo_url must be a valid git:// URL with host and path (e.g. git://host/owner/repo.git).',
+        'INVALID_REPO_URL',
+        'ARCH_RUNNING',
+      );
+    }
+    return trimmed;
+  }
+
+  if (/^ssh:\/\//i.test(trimmed)) {
+    if (!/^ssh:\/\/(?:[\w.-]+@)?[^\s/]+(?::\d+)?\/[^\s]+/i.test(trimmed)) {
+      throw new ApiError(
+        400,
+        'repo_url must be a valid ssh:// URL with host and path (e.g. ssh://git@host/owner/repo.git).',
+        'INVALID_REPO_URL',
+        'ARCH_RUNNING',
+      );
+    }
+    return trimmed;
+  }
+
+  // SSH scp-like form: user@host:path
+  if (/^[\w.-]+@[\w.-]+:[^\s]+/.test(trimmed)) {
+    return trimmed;
+  }
+
+  throw new ApiError(
+    400,
+    'repo_url must be a valid Git URL (http, https, git://, ssh://, or user@host:path).',
+    'INVALID_REPO_URL',
+    'ARCH_RUNNING',
+  );
+}
+
+/**
  * Canonical upload path when called with just `projectId`; the isolated,
  * per-session working copy when `sessionId` is also given. Sessions never
  * write into the canonical path, so concurrent sessions (and the original
@@ -352,6 +453,7 @@ module.exports = {
   repoPathFor,
   slugify,
   isHttpUrl,
+  validateRepoUrl,
   WORKSPACE_DIR,
   SECRET_PATTERNS,
   git,

@@ -11,7 +11,15 @@ const EXPECTED_VERSION = 'gate-output.v4';
 
 // Frozen expectation of rule name → severity per role.
 const EXPECTED = {
-  'intent-agent': { intent_assumptions_present: 'BLOCKER' },
+  'architecture-agent': {
+    repository_summary_present: 'BLOCKER', technology_stack_present: 'BLOCKER',
+    technical_decisions_present: 'BLOCKER', constraints_present: 'BLOCKER',
+    repository_routing_present: 'BLOCKER',
+    repository_routing_has_target: 'BLOCKER',
+    repository_routing_has_framework: 'BLOCKER',
+    repository_routing_has_language: 'BLOCKER',
+    architecture_brief_present: 'BLOCKER',
+  },
   'po-agent': {
     prd_present: 'BLOCKER', user_stories_present: 'BLOCKER', ac_present: 'BLOCKER',
     ac_testable: 'BLOCKER', ac_measurable: 'WARNING', scope_present: 'BLOCKER',
@@ -24,14 +32,15 @@ const EXPECTED = {
   'dev-agent': {
     implementation_plan_present: 'BLOCKER', patch_present: 'BLOCKER', changed_files_present: 'BLOCKER',
     patch_format: 'WARNING', build_ok: 'BLOCKER',
-    sandbox_tests: 'BLOCKER', self_test_report: 'BLOCKER', linked_ac: 'BLOCKER',
+    build_tests: 'BLOCKER', self_test_report: 'BLOCKER', linked_ac: 'BLOCKER',
     risk_assessment_present: 'BLOCKER', risk_classification_present: 'BLOCKER',
     security_notes: 'BLOCKER', security_gate: 'BLOCKER',
   },
   'qa-agent': {
     test_cases_present: 'BLOCKER', coverage_present: 'BLOCKER', coverage_complete: 'BLOCKER', tests_executed: 'BLOCKER',
     test_count_consistent: 'BLOCKER', test_evidence_present: 'BLOCKER', tests_passed: 'BLOCKER',
-    no_blockers: 'BLOCKER', qa_report_present: 'BLOCKER', release_decision_present: 'BLOCKER', release_reason: 'BLOCKER',
+    no_blockers: 'BLOCKER', qa_report_present: 'BLOCKER',
+    release_decision_present: 'BLOCKER', release_reason: 'BLOCKER',
     quality_gate_pass: 'BLOCKER',
   },
 };

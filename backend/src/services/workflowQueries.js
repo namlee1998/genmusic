@@ -120,7 +120,7 @@ async function getFinalReviewPacket(sessionId, user) {
   }
 
   const poTask = await Task.findLatestBySession(sessionId, 'po-agent', 'completed', 'committed');
-  const intentTask = poTask?.sourceRunId ? await Task.findById(poTask.sourceRunId) : null;
+  const architectureTask = poTask?.sourceRunId ? await Task.findById(poTask.sourceRunId) : null;
   const [uxTask, devTask, qaTask] = await Promise.all([
     Task.findLatestBySession(sessionId, 'ux-agent', 'completed', 'committed'),
     Task.findLatestBySession(sessionId, 'dev-agent', 'completed', 'committed'),
@@ -129,7 +129,7 @@ async function getFinalReviewPacket(sessionId, user) {
 
   const allArtifacts = (
     await Promise.all([
-      intentTask ? AgentArtifact.findByTaskId(intentTask.id) : Promise.resolve([]),
+      architectureTask ? AgentArtifact.findByTaskId(architectureTask.id) : Promise.resolve([]),
       poTask ? AgentArtifact.findByTaskId(poTask.id) : Promise.resolve([]),
       uxTask ? AgentArtifact.findByTaskId(uxTask.id) : Promise.resolve([]),
       devTask ? AgentArtifact.findByTaskId(devTask.id) : Promise.resolve([]),
@@ -142,7 +142,7 @@ async function getFinalReviewPacket(sessionId, user) {
 
   return {
     phases: {
-      intent: intentTask ? { taskId: intentTask.id, status: intentTask.status, versionStatus: intentTask.versionStatus } : null,
+      architecture: architectureTask ? { taskId: architectureTask.id, status: architectureTask.status, versionStatus: architectureTask.versionStatus } : null,
       po: poTask ? { taskId: poTask.id, status: poTask.status, versionStatus: poTask.versionStatus } : null,
       ux: uxTask ? { taskId: uxTask.id, status: uxTask.status, versionStatus: uxTask.versionStatus } : null,
       dev: devTask ? { taskId: devTask.id, status: devTask.status, versionStatus: devTask.versionStatus } : null,
@@ -163,7 +163,7 @@ async function getWorkflowMetrics(projectId, user) {
     Task.findByProjectId(projectId),
     HitlDecision.findByProjectId(projectId),
   ]);
-  const sdlcTasks = tasks.filter((t) => ['intent-agent', 'po-agent', 'ux-agent', 'dev-agent', 'qa-agent'].includes(t.type));
+  const sdlcTasks = tasks.filter((t) => ['architecture-agent', 'po-agent', 'ux-agent', 'dev-agent', 'qa-agent'].includes(t.type));
   const taskById = Object.fromEntries(sdlcTasks.map((t) => [t.id, t]));
   const gateDecisions = hitlDecisions.filter((d) => d.gate !== FINAL_GATE);
 

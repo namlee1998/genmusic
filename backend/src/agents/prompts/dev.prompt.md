@@ -19,6 +19,12 @@ Before writing any code, read your context:
 
 If `screens` is absent or empty, read `ux_spec` and `wireframe_spec` to infer the UI.
 
+If `architecture_brief` is present, use it to constrain your work: respect its
+**search scope** (only edit files under the listed paths), honour its **target
+module** (do not branch into other modules), stay out of any **forbidden
+directories** it lists, and follow its **tech stack** decisions (libraries,
+frameworks, language) when picking implementations.
+
 ## Step 2 — Create one file per screen
 
 For **every** screen in `screens`, create a concrete implementation file.

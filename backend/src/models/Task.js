@@ -92,10 +92,14 @@ class TaskModel {
     };
     Object.keys(mapped).forEach(k => mapped[k] === undefined && delete mapped[k]);
 
-    const record = await prisma.task.update({
+    // Use updateMany so a missing row doesn't throw P2025 — the caller
+    // typically races with cleanup paths and would otherwise blow up.
+    const result = await prisma.task.updateMany({
       where: { id },
-      data: mapped
+      data: mapped,
     });
+    if (result.count === 0) return null;
+    const record = await prisma.task.findUnique({ where: { id } });
     return this._map(record);
   }
 
