@@ -305,12 +305,30 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => {
         }
 
         case 'agent_event': {
-          // Raw agent event. promote it to a RuntimeEvent and apply it.
+          // T6 (B8) — the envelope's `type` lives at root per spec §11. The
+          // backend persists it on AgentEvent.type and the SSE bridge re-emits
+          // it untouched (`SdlcController.flushPersistedEvents` → sendEvent
+          // 'agent_event' with `type: ev.type` at the root). Trust the wire —
+          // never silently default to `agent_tool_call`, which was masking
+          // unknown/missing type values and corrupting the timeline.
+          const knownTypes: ReadonlySet<RuntimeEvent['type']> = new Set([
+            'agent_start', 'agent_tool_call', 'agent_tool_result',
+            'agent_complete', 'file_change', 'token_usage',
+            'gate_triggered', 'clarification_needed', 'error',
+          ]);
+          const incomingType = typeof data.type === 'string' ? data.type : null;
+          const resolvedType: RuntimeEvent['type'] =
+            incomingType && knownTypes.has(incomingType as RuntimeEvent['type'])
+              ? (incomingType as RuntimeEvent['type'])
+              : 'agent_tool_call'; // graceful fallback only when type is missing/invalid; logged for diagnostics
+          if (incomingType && !knownTypes.has(incomingType as RuntimeEvent['type'])) {
+            console.warn('[aifa] agent_event with unknown type', { type: incomingType, data });
+          }
           const evt: RuntimeEvent = {
             id: nextRuntimeEventId(),
             sessionId,
             timestamp: new Date().toISOString(),
-            type: (data.type as RuntimeEvent['type']) ?? 'agent_tool_call',
+            type: resolvedType,
             agent: (data.agent as AgentKey | undefined) ?? inferAgentKey(data.role as string | undefined) ?? undefined,
             tool: (data.tool as string | undefined) ?? undefined,
             filePath: (data.filePath as string | undefined) ?? undefined,
