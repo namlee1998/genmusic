@@ -288,77 +288,80 @@ class SdlcController {
       const cursorRaw = req.headers['last-event-id'] ?? req.query.after_sequence ?? 0;
       let lastSeq = Number.isFinite(Number(cursorRaw)) ? Number(cursorRaw) : 0;
 
+      // T5 (B6) — push, not poll. We:
+      //   1) emit the initial snapshot once on connect so the client has the
+      //      current pipeline status without waiting for a poll tick;
+      //   2) subscribe to gateBridge.subscribeProject(workflowId) so every
+      //      gate / runtime event under the project fans out to this stream
+      //      with zero latency;
+      //   3) poll a SLOW background tick (10s, was 2s) ONLY to detect terminal
+      //      states the workflow doesn't otherwise broadcast (qa_complete,
+      //      failed) — these are infrequent so the latency trade-off is fine.
+
+      let initialPipeline;
+      try {
+        initialPipeline = await SdlcWorkflowService.getPipelineResponse(workflowId, req.user);
+      } catch (err) {
+        return next(err);
+      }
+      if (!initialPipeline) {
+        sendEvent('error', { message: 'Pipeline not found' });
+        return res.end();
+      }
+
       sendEvent('progress', {
         step: 'connected',
         resumedFrom: lastSeq,
         log: 'Connected to SDLC pipeline stream...',
+        status: initialPipeline.status,
+        pipelinePhases: initialPipeline.pipelinePhases,
+        pendingGates: initialPipeline.pendingGates,
       });
+      // Mirror the initial gate set so SSE clients see consistent state.
+      for (const gate of initialPipeline.pendingGates || []) {
+        sendEvent('gate_pending', { gate });
+      }
 
       const heartbeatInterval = setInterval(() => {
         res.write(': heartbeat\n\n');
       }, 15000);
 
-      // We'll poll the overall PipelineResponse every few seconds
-      let pollInterval;
+      // T5: subscribe instead of polling. The bridge emits gate_pending /
+      // gate_resolved / runtime_log (per task) and we forward them as-is.
+      const unsubscribe = gateBridge.subscribeProject(workflowId, (_taskId, event, data) => {
+        sendEvent(event, data);
+      });
 
-      const stopAll = () => {
-        clearInterval(pollInterval);
-        clearInterval(heartbeatInterval);
-      };
-
-      let lastStatus = null;
-      const seenGates = new Set();
-
-      pollInterval = setInterval(async () => {
+      // Slow fallback tick — only catches terminal states (completed/failed)
+      // that no explicit broadcast covers. 10s instead of 2s so the cost is
+      // negligible vs the old 2s poll loop.
+      const fallbackTick = setInterval(async () => {
         try {
           const pipeline = await SdlcWorkflowService.getPipelineResponse(workflowId, req.user);
-
           if (!pipeline) {
             sendEvent('error', { message: 'Pipeline not found' });
             stopAll(); res.end(); return;
           }
-
-          // Emit new gates
-          for (const gate of pipeline.pendingGates || []) {
-            if (seenGates.has(gate.id)) continue;
-            seenGates.add(gate.id);
-            sendEvent('gate_pending', { gate });
-          }
-
-          // Check if resolved
-          for (const seen of seenGates) {
-            if (!pipeline.pendingGates.some(g => g.id === seen)) {
-              seenGates.delete(seen);
-              sendEvent('gate_resolved', { gateId: seen });
-            }
-          }
-
           if (pipeline.status === 'qa_complete') {
             sendEvent('completed', { qaResult: pipeline.qaResult });
             stopAll(); res.end(); return;
           }
-
           if (pipeline.status === 'failed') {
             sendEvent('error', { message: 'Pipeline failed' });
             stopAll(); res.end(); return;
           }
-
-          // Avoid spamming progress if unchanged, but for simplicity here we emit
-          if (lastStatus !== pipeline.status) {
-            sendEvent('progress', {
-              status: pipeline.status,
-              pipelinePhases: pipeline.pipelinePhases,
-              auditLog: pipeline.auditLog
-            });
-            lastStatus = pipeline.status;
-          }
-
         } catch (error) {
           sendEvent('error', { message: error.message });
           stopAll();
           res.end();
         }
-      }, 2000);
+      }, 10000);
+
+      const stopAll = () => {
+        clearInterval(heartbeatInterval);
+        clearInterval(fallbackTick);
+        unsubscribe();
+      };
 
       req.on('close', () => {
         stopAll();

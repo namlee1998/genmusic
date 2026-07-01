@@ -26,6 +26,10 @@ const taskLifecycle = require('./taskLifecycleService');
 const pending = new Map();
 /** taskId -> Set<(event, data) => void> */
 const subscribers = new Map();
+/** projectId -> Set<(taskId, event, data) => void> */
+const projectSubscribers = new Map();
+/** taskId -> projectId (reverse lookup, set when requestGate is called) */
+const taskToProject = new Map();
 
 function emit(taskId, event, data) {
   for (const listener of subscribers.get(taskId) || []) {
@@ -35,6 +39,36 @@ function emit(taskId, event, data) {
       logger.warn('gate subscriber failed', { taskId, event, error: err.message });
     }
   }
+  // T5 (B6) — fan out to project-level subscribers too. The session-level SSE
+  // stream uses this so a single subscribeProject() call covers every task
+  // belonging to the project (instead of polling getPipelineResponse every 2s).
+  const projectId = taskToProject.get(taskId);
+  if (projectId) {
+    for (const listener of projectSubscribers.get(projectId) || []) {
+      try {
+        listener(taskId, event, data);
+      } catch (err) {
+        logger.warn('gate project subscriber failed', { projectId, taskId, event, error: err.message });
+      }
+    }
+  }
+}
+
+/**
+ * Subscribe to every gate event emitted by ANY task belonging to `projectId`.
+ * Returns an unsubscribe function. Used by `streamPipelineStatus` to push
+ * session-wide state changes (gate_pending / gate_resolved / runtime_log /
+ * etc.) without polling.
+ */
+function subscribeProject(projectId, listener) {
+  if (!projectId) return () => {};
+  const set = projectSubscribers.get(projectId) || new Set();
+  set.add(listener);
+  projectSubscribers.set(projectId, set);
+  return () => {
+    set.delete(listener);
+    if (set.size === 0) projectSubscribers.delete(projectId);
+  };
 }
 
 function subscribe(taskId, listener) {
@@ -96,6 +130,7 @@ function requestGate({ taskId, projectId = null, role, kind, payload = {}, emitS
       timer,
       resolve,
     });
+    if (projectId) taskToProject.set(taskId, projectId);
   });
 
   const eventData = { approvalId, taskId, projectId, role, kind, payload, status: 'pending', createdAt: new Date().toISOString() };
@@ -221,5 +256,6 @@ module.exports = {
   findPersisted,
   markOrphanedPendingInterrupted,
   subscribe,
+  subscribeProject,
   _clearAll,
 };
