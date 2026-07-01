@@ -594,7 +594,7 @@ export default function AgentOutputPanel({ agent, gate, taskId, sessionId, phase
       .then((task) => {
         if (cancelled) return;
         setTaskStatus(task?.status || null);
-        setSummary(task?.result?.summary || gate?.payload.outputSummary || null);
+        setSummary(task?.result?.summary || gate?.payload.summary || null);
         const arts: TaskArtifact[] = Array.isArray(task?.artifacts) ? task.artifacts : [];
         setArtifacts(arts);
 
@@ -667,7 +667,7 @@ export default function AgentOutputPanel({ agent, gate, taskId, sessionId, phase
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [taskId, gate?.payload.outputSummary, agent, phaseStatus]);
+  }, [taskId, gate?.payload.summary, agent, phaseStatus]);
 
   const handleApprove = async () => {
     if (!gate) return;

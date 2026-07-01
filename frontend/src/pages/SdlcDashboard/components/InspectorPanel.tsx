@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Activity, Terminal, MessageCircle, FileCheck2, FileCode2, History,
+  Activity, Terminal, MessageCircle, FileCheck2, History,
   Loader2, AlertTriangle, CheckCircle2, X,
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import { useUiStore, type InspectorTab } from '@/store/useUiStore';
 import { useWorkflowStore } from '@/store/useWorkflowStore';
 import {
   selectRuntimeExecution,
-  type RuntimeArtifact,
   type RuntimeTimelineEntry,
   type RuntimeExecution,
 } from '@/store/workflowSelectors';
@@ -19,7 +19,6 @@ const TABS: Array<{ id: InspectorTab; label: string; icon: React.ReactNode }> = 
   { id: 'tools', label: 'Tool calls', icon: <Terminal size={12} /> },
   { id: 'questions', label: 'Human questions', icon: <MessageCircle size={12} /> },
   { id: 'review', label: 'Output review', icon: <FileCheck2 size={12} /> },
-  { id: 'artifact', label: 'Artifact preview', icon: <FileCode2 size={12} /> },
   { id: 'decisions', label: 'Decision history', icon: <History size={12} /> },
 ];
 
@@ -112,7 +111,6 @@ export function InspectorPanel({ onReviewResolved }: InspectorPanelProps) {
             onResolved={() => { setSelectedGateId(null); onReviewResolved?.(); }}
           />
         )}
-        {sessionId && tab === 'artifact' && <ArtifactTab artifact={runtime?.artifact ?? null} />}
         {sessionId && tab === 'decisions' && <DecisionsTab history={runtime?.session.gateHistory ?? []} />}
       </div>
     </aside>
@@ -296,9 +294,40 @@ function OutputReviewInline({
   const [comment, setComment] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<'approve' | 'reject' | null>(null);
-  const summary = (gate.payload?.outputSummary as string | null) ?? null;
+  const [artifacts, setArtifacts] = useState<Artifact[] | null>(null);
+  const [artifactsLoading, setArtifactsLoading] = useState(false);
+
+  // T3 (B2/B4) — backend writes payload.summary (NOT outputSummary). Spec §6.3
+  // says Output Review must render the artifact directly, not as a separate tab,
+  // so we fetch the gate's OWN task artifacts here (no more stale "latest completed
+  // phase" mismatch from the old ArtifactTab).
+  const summary = (gate.payload?.summary as string | null) ?? null;
   const issues = gate.payload?.validationIssues ?? [];
   const isRelease = gate.type === 'FINAL_RELEASE';
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!gate.taskId || isRelease) {
+      setArtifacts(null);
+      setArtifactsLoading(false);
+      return;
+    }
+    setArtifactsLoading(true);
+    getSdlcTaskStatus(gate.taskId)
+      .then((task) => {
+        if (cancelled) return;
+        setArtifacts(extractArtifacts(task));
+      })
+      .catch(() => {
+        if (!cancelled) setArtifacts([]);
+      })
+      .finally(() => {
+        if (!cancelled) setArtifactsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [gate.taskId, isRelease]);
 
   const submit = async (action: 'approve' | 'reject') => {
     setBusy(action);
@@ -338,6 +367,17 @@ function OutputReviewInline({
           </label>
           <div className="rounded-lg bg-surface-container/60 px-3 py-2 text-[12px] leading-relaxed text-on-surface">{summary}</div>
         </div>
+      )}
+
+      {/* Spec §6.3: render the artifact directly. Markdown → react-markdown,
+          code diff → monospace, HTML mockups → sandboxed iframe, images →
+          <img>. Each artifact is labeled with its type so reviewers know
+          what they're looking at. */}
+      {!isRelease && (
+        <ArtifactSection
+          loading={artifactsLoading}
+          artifacts={artifacts}
+        />
       )}
 
       {issues.length > 0 && (
@@ -383,65 +423,159 @@ function OutputReviewInline({
   );
 }
 
-// ── Artifact Preview ──
+// ── Artifact rendering (spec §6.3) ─────────────────────────────────────────
 
-function ArtifactTab({ artifact }: { artifact: RuntimeArtifact | null }) {
-  const [content, setContent] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+interface Artifact {
+  type: string;        // artifactType — e.g. 'prd', 'patch_diff', 'ux_spec'
+  text?: string | null;
+  json?: unknown;
+}
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!artifact?.taskId) {
-      setContent(null);
-      return;
+/** Extract a normalized artifact list from a task fetched via getSdlcTaskStatus. */
+function extractArtifacts(task: any): Artifact[] {
+  const out: Artifact[] = [];
+  const artifacts = Array.isArray(task?.artifacts) ? task.artifacts : [];
+  for (const a of artifacts) {
+    if (!a || typeof a !== 'object') continue;
+    const type = a.type ?? a.artifactType ?? 'artifact';
+    const text = typeof a.contentText === 'string' ? a.contentText : null;
+    const json = a.contentJson !== undefined && a.contentJson !== null ? a.contentJson : undefined;
+    // Skip empty rows.
+    if (!text && json === undefined) continue;
+    // Prefer primary output artifacts over support files for the headline
+    // render, but still include everything so reviewers see the full picture.
+    out.push({ type, text, json });
+  }
+  return out;
+}
+
+const HTML_ARTIFACT_TYPES = new Set(['ux_spec', 'html_mockup', 'wireframe_spec']);
+const DIFF_ARTIFACT_TYPES = new Set(['patch_diff', 'mock_code_diff']);
+const IMAGE_KEYS = ['image_data', 'image', 'dataUrl', 'screenshot'];
+
+function pickImageUrl(json: unknown): string | null {
+  if (!json || typeof json !== 'object') return null;
+  const rec = json as Record<string, unknown>;
+  for (const k of IMAGE_KEYS) {
+    const v = rec[k];
+    if (typeof v === 'string' && /^data:image\//.test(v)) return v;
+    if (Array.isArray(v)) {
+      const found = v.find((x) => typeof x === 'string' && /^data:image\//.test(x));
+      if (found) return found as string;
     }
-    setLoading(true);
-    getSdlcTaskStatus(artifact.taskId)
-      .then((task) => {
-        if (cancelled) return;
-        const summary = task?.result?.summary ?? task?.artifacts?.[0]?.contentText ?? '';
-        const agentOutputJson = task?.artifacts?.find((a: { type: string }) => a.type === 'agent_output')?.contentJson;
-        const jsonSummary = agentOutputJson ? JSON.stringify(agentOutputJson, null, 2) : '';
-        setContent([summary, jsonSummary].filter(Boolean).join('\n\n') || 'No content available for this artifact yet.');
-      })
-      .catch(() => {
-        if (!cancelled) setContent('Failed to load artifact content.');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [artifact?.taskId]);
+  }
+  return null;
+}
 
-  if (!artifact) {
+function ArtifactSection({ loading, artifacts }: { loading: boolean; artifacts: Artifact[] | null }) {
+  if (loading) {
     return (
-      <div className="flex flex-col items-center gap-2 text-[11px] text-on-surface-variant/60">
-        <FileCode2 size={24} className="opacity-50" />
-        <span>No artifact available for the current run.</span>
+      <div className="flex items-center gap-2 text-[11px] text-on-surface-variant">
+        <Loader2 size={11} className="animate-spin" /> Loading artifact…
+      </div>
+    );
+  }
+  if (!artifacts || artifacts.length === 0) {
+    return (
+      <div className="rounded-lg border border-outline-variant/20 bg-surface-container/40 px-3 py-2 text-[11px] text-on-surface-variant/70">
+        No artifact content available for this output yet.
       </div>
     );
   }
 
+  // Render each artifact according to its kind. Order so reviewers see the
+  // headline content first.
+  const priority = ['prd', 'ux_spec', 'html_mockup', 'patch_diff', 'mock_code_diff', 'qa_report', 'architecture_brief'];
+  const sorted = [...artifacts].sort((a, b) => {
+    const ai = priority.indexOf(a.type);
+    const bi = priority.indexOf(b.type);
+    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+  });
+
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <FileCode2 size={14} className="text-cyan-400" />
-        <div>
-          <h3 className="text-[12px] font-bold text-on-surface">{artifact.title}</h3>
-          <p className="text-[10px] uppercase tracking-wider text-on-surface-variant">{artifact.type} · {artifact.agent}</p>
-        </div>
-      </div>
-      {loading ? (
-        <div className="flex items-center gap-2 text-[11px] text-on-surface-variant"><Loader2 size={12} className="animate-spin" /> Loading…</div>
-      ) : (
-        <pre className="max-h-[420px] overflow-y-auto whitespace-pre-wrap rounded-lg border border-outline-variant/20 bg-black/30 p-3 font-mono text-[10.5px] leading-relaxed text-on-surface">
-{content ?? 'No content available for this artifact yet.'}
-        </pre>
-      )}
+      {sorted.map((art, idx) => (
+        <ArtifactBlock key={`${art.type}-${idx}`} artifact={art} />
+      ))}
     </div>
   );
+}
+
+function ArtifactBlock({ artifact }: { artifact: Artifact }) {
+  const label = artifact.type.replace(/_/g, ' ');
+  // 1. HTML mockup → sandboxed iframe (UX agent's prototype is a full HTML doc).
+  if (HTML_ARTIFACT_TYPES.has(artifact.type) && artifact.text && /<html/i.test(artifact.text)) {
+    return (
+      <div>
+        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-on-surface-variant">
+          {label} · HTML preview
+        </div>
+        <iframe
+          title={label}
+          srcDoc={artifact.text}
+          sandbox=""
+          className="h-[420px] w-full rounded-lg border border-outline-variant/30 bg-white"
+        />
+      </div>
+    );
+  }
+  // 2. Code diff → monospace pre.
+  if (DIFF_ARTIFACT_TYPES.has(artifact.type) && artifact.text) {
+    return (
+      <div>
+        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-on-surface-variant">
+          {label} · code diff
+        </div>
+        <pre className="max-h-[420px] overflow-auto whitespace-pre rounded-lg border border-outline-variant/20 bg-black/30 p-3 font-mono text-[10.5px] leading-relaxed text-on-surface">
+{artifact.text}
+        </pre>
+      </div>
+    );
+  }
+  // 3. Image preview → <img> if any field is a data URL.
+  const imageUrl = pickImageUrl(artifact.json);
+  if (imageUrl) {
+    return (
+      <div>
+        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-on-surface-variant">
+          {label} · image
+        </div>
+        <img
+          src={imageUrl}
+          alt={label}
+          className="max-h-[420px] max-w-full rounded-lg border border-outline-variant/20 bg-white object-contain"
+        />
+      </div>
+    );
+  }
+  // 4. Default: Markdown render for text, JSON.stringify for structured content.
+  if (artifact.text && artifact.text.trim()) {
+    return (
+      <div>
+        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-on-surface-variant">
+          {label}
+        </div>
+        <div className="rounded-lg border border-outline-variant/20 bg-surface-container/60 p-3 text-[12px] leading-relaxed text-on-surface">
+          <div className="prose prose-invert max-w-none text-[12px] leading-relaxed">
+            <ReactMarkdown>{artifact.text}</ReactMarkdown>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  if (artifact.json !== undefined) {
+    return (
+      <details className="rounded-lg border border-outline-variant/20 bg-surface-container/40">
+        <summary className="cursor-pointer px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-on-surface-variant">
+          {label} · structured
+        </summary>
+        <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap px-3 pb-3 font-mono text-[10.5px] text-on-surface">
+{JSON.stringify(artifact.json, null, 2)}
+        </pre>
+      </details>
+    );
+  }
+  return null;
 }
 
 // ── Decision History ──

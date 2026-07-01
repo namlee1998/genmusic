@@ -187,8 +187,9 @@ export default function SdlcDashboard() {
       setInspectorTab('review');
       return;
     }
-    // No pending review gate — show the agent's artifact preview if completed.
-    setInspectorTab('artifact');
+    // No pending review gate — drop back to the runtime log (artifact is now
+    // embedded in the Output Review panel per spec §6.3).
+    setInspectorTab('runtime');
   };
 
   const translatedError = translateError(activeSession?.error ?? null);

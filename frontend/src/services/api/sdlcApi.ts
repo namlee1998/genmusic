@@ -37,7 +37,7 @@ export interface GateItem {
     reason?: string;         // risk reason
     diff?: string;           // unified diff
     questions?: ClarificationQuestion[];    // agent clarification questions (object form, T2)
-    outputSummary?: string | null;   // agent's completed-output summary (output_review gates)
+    summary?: string | null;   // agent's completed-output summary (output_review gates; backend key per T3)
     validationIssues?: Array<{ rule: string; message?: string | null }>;
   };
   createdAt: string;

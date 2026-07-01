@@ -10,7 +10,7 @@
 
 import { create } from 'zustand';
 
-export type InspectorTab = 'runtime' | 'tools' | 'questions' | 'review' | 'artifact' | 'decisions';
+export type InspectorTab = 'runtime' | 'tools' | 'questions' | 'review' | 'decisions';
 
 export interface UiState {
   // Active session within the workflow. Workflow data lives elsewhere;
