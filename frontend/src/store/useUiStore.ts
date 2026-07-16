@@ -10,7 +10,7 @@
 
 import { create } from 'zustand';
 
-export type InspectorTab = 'runtime' | 'tools' | 'questions' | 'review' | 'decisions';
+export type InspectorTab = 'questions' | 'review' | 'decisions';
 
 export interface UiState {
   // Active session within the workflow. Workflow data lives elsewhere;
@@ -59,7 +59,7 @@ export interface UiState {
 
 export const useUiStore = create<UiState>((set) => ({
   activeSessionId: null,
-  inspectorTab: 'runtime',
+  inspectorTab: 'questions',
   sidebarCollapsed: false,
   showArchivedSessions: false,
   sessionBrowserQuery: '',
@@ -91,7 +91,7 @@ export const useUiStore = create<UiState>((set) => ({
   resetUi: () =>
     set({
       activeSessionId: null,
-      inspectorTab: 'runtime',
+      inspectorTab: 'questions',
       selectedAgentKey: null,
       selectedGateId: null,
       selectedArtifact: null,

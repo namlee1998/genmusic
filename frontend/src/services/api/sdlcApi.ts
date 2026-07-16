@@ -2,10 +2,11 @@
 //
 // Beginner reading guide: this file contains transport helpers only. Components
 // call these functions; backend workflow behavior lives in SdlcWorkflowService.
-// The primary /aifa UI polls getDemoBoard(), while subscribeTaskSSE remains
-// available for task-level clients and the legacy dashboard.
+// The primary /aifa UI polls getDemoBoard(). The SSE transport is owned by
+// @/services/sseClient and consumed via useWorkflowStore — there is exactly
+// one frontend transport implementation.
 
-import api, { getBaseURL } from './client';
+import api from './client';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -29,13 +30,19 @@ export interface GateItem {
   id: string;
   taskId?: string;
   type: GateType;
+  kind?: 'tool' | 'question' | 'output_review' | 'release';  // canonical dispatch key (frozen spec §6)
   role?: string;             // owning agent role, e.g. 'po-agent'
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   payload: {
     action?: string;         // 'MODIFY' | 'DELETE' | 'CREATE'
     path?: string;           // file path
+    file_path?: string;      // alt tool-gate key (PendingGate shape)
+    tool?: string;           // tool name (HITL_REVIEW)
+    toolName?: string;       // alt tool name key
     reason?: string;         // risk reason
+    category?: string;       // risk category (HITL_REVIEW)
     diff?: string;           // unified diff
+    display?: { command?: string | null; filePath?: string | null; diffPreview?: string | null; prompt?: string | null };
     questions?: ClarificationQuestion[];    // agent clarification questions (object form, T2)
     summary?: string | null;   // agent's completed-output summary (output_review gates; backend key per T3)
     validationIssues?: Array<{ rule: string; message?: string | null }>;
@@ -170,8 +177,15 @@ const getPipelineStatusReal = (workflowId: string): Promise<PipelineResponse> =>
 const resolveGateReal = (gateId: string, action: 'approve' | 'reject', comment?: string): Promise<{ success: boolean }> =>
   api.post(`${BASE}/approvals/${gateId}`, { action, comment }).then((r) => r.data);
 
-const releaseDecisionReal = (projectId: string, action: 'approve' | 'reject'): Promise<{ success: boolean; branch?: string; finalMd?: string }> =>
-  api.post(`${BASE}/projects/${projectId}/release-decision`, { action }).then((r) => r.data);
+const releaseDecisionReal = (
+  sessionId: string,
+  decisionId: string,
+  decision: 'APPROVE' | 'REJECT',
+  comment?: string,
+): Promise<{ success: boolean; branch?: string; finalMd?: string }> =>
+  api
+    .post(`${BASE}/sessions/${sessionId}/release-decision`, { decision_id: decisionId, decision, comment })
+    .then((r) => r.data);
 
 export const executeGitAction = async (
   sessionId: string,
@@ -186,71 +200,6 @@ export const executeGitAction = async (
     githubToken,
     commitMessage
   }).then(r => r.data);
-};
-
-// ── Real SSE Subscription ──────────────────────────────────────────────────
-
-const subscribeWorkflowSSEReal = (
-  workflowId: string,
-  handlers: {
-    onMessage?: (event: string, data: Record<string, unknown>) => void;
-    onError?: (error: unknown) => void;
-  }
-): AbortController => {
-  const abort = new AbortController();
-  let retryCount = 0;
-
-  const connect = async () => {
-    try {
-      const headers: Record<string, string> = {};
-
-      const baseUrl = getBaseURL().replace(/\/$/, '');
-      const response = await fetch(`${baseUrl}${BASE}/stream/${workflowId}`, {
-        signal: abort.signal,
-        headers
-      });
-
-      if (!response.body) return;
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let currentEvent: string | null = null;
-      retryCount = 0; // Reset retry count on successful connection
-
-      while (!abort.signal.aborted) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('event: ')) {
-            currentEvent = line.slice(7).trim();
-          } else if (line.startsWith('data: ') && currentEvent) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              handlers.onMessage?.(currentEvent, data);
-            } catch { /* Ignore malformed frames */ }
-            currentEvent = null;
-          }
-        }
-      }
-    } catch (err) {
-      if (!(err instanceof DOMException && err.name === 'AbortError')) {
-        handlers.onError?.(err);
-      }
-    }
-
-    if (!abort.signal.aborted) {
-      const delay = Math.min(1000 * Math.pow(2, retryCount), 10000);
-      retryCount++;
-      setTimeout(connect, delay);
-    }
-  };
-
-  connect();
-  return abort;
 };
 
 // ── Real API wrappers (no mock) ───────────────────────────────────────────
@@ -268,60 +217,13 @@ export const getPipelineStatus = (workflowId: string): Promise<PipelineResponse>
 export const resolveGate = (gateId: string, action: 'approve' | 'reject', comment?: string): Promise<{ success: boolean }> =>
   resolveGateReal(gateId, action, comment);
 
-export const releaseDecision = (projectId: string, action: 'approve' | 'reject'): Promise<{ success: boolean; branch?: string; finalMd?: string }> =>
-  releaseDecisionReal(projectId, action);
-
-export interface PipelineSseEventMap {
-  progress: {
-    status?: string;
-    pipelinePhases?: PhaseStatus[];
-    auditLog?: AuditEntry[];
-    qaResult?: QAResult | null;
-    releaseStatus?: 'pending' | 'approved' | 'rejected' | null;
-    repoInfo?: PipelineResponse['repoInfo'];
-  };
-  'agent_event': {
-    type: 'agent_start' | 'agent_tool_call' | 'agent_tool_result' | 'agent_complete' | 'file_change' | 'token_usage' | 'gate_triggered' | 'clarification_needed' | 'error';
-    agent?: 'ARCH' | 'PO' | 'UX' | 'DEV' | 'QA';
-    role?: string;
-    tool?: string;
-    filePath?: string;
-    action?: string;
-    details?: Record<string, unknown>;
-    error?: string;
-  };
-  gate_pending: { gate: GateItem };
-  gate_resolved: { gateId: string; decision?: 'approve' | 'reject' | 'answer'; comment?: string };
-  completed: { qaResult?: QAResult | null };
-  error: { message: string };
-}
-
-export type PipelineSseEventName = keyof PipelineSseEventMap;
-export type PipelineSseData<K extends PipelineSseEventName> = PipelineSseEventMap[K] & Record<string, unknown>;
-
-export function subscribeWorkflowSSE<K extends PipelineSseEventName = PipelineSseEventName>(
-  workflowId: string,
-  handlers: {
-    onMessage?: (event: K, data: PipelineSseData<K>) => void;
-    onError?: (error: unknown) => void;
-  }
-): AbortController;
-export function subscribeWorkflowSSE(
-  workflowId: string,
-  handlers: {
-    onMessage?: (event: string, data: Record<string, unknown>) => void;
-    onError?: (error: unknown) => void;
-  }
-): AbortController;
-export function subscribeWorkflowSSE(
-  workflowId: string,
-  handlers: {
-    onMessage?: (event: string, data: Record<string, unknown>) => void;
-    onError?: (error: unknown) => void;
-  }
-): AbortController {
-  return subscribeWorkflowSSEReal(workflowId, handlers);
-}
+export const releaseDecision = (
+  sessionId: string,
+  decisionId: string,
+  decision: 'APPROVE' | 'REJECT',
+  comment?: string,
+): Promise<{ success: boolean; branch?: string; finalMd?: string }> =>
+  releaseDecisionReal(sessionId, decisionId, decision, comment);
 
 // Re-export legacy functions from sdlcLegacy
 export {
@@ -422,7 +324,8 @@ export interface PendingGate {
   taskId: string;
   projectId?: string | null;
   role: string;
-  kind: 'tool' | 'question';
+  type?: GateType;            // canonical GateType (frozen spec §6) — derived from (role,kind) by backend's toGateType
+  kind: 'tool' | 'question' | 'output_review' | 'release';
   status?: 'pending' | 'interrupted';
   payload: {
     tool?: string;
@@ -439,7 +342,7 @@ export interface PendingGate {
 
 export const resolveApproval = (
   approvalId: string,
-  body: { action?: 'approve' | 'reject' | 'answer'; comment?: string; answers?: string[] | Record<string, string> },
+  body: { action?: 'approve' | 'reject'; comment?: string; answers?: string[] | Record<string, string> },
 ) => api.post(`${BASE}/approvals/${approvalId}`, body).then((r) => r.data.data);
 
 /**

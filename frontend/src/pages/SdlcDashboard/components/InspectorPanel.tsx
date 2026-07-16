@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Activity, Terminal, MessageCircle, FileCheck2, History,
+  Activity, MessageCircle, FileCheck2, History,
   Loader2, AlertTriangle, CheckCircle2, X,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -8,15 +8,13 @@ import { useUiStore, type InspectorTab } from '@/store/useUiStore';
 import { useWorkflowStore } from '@/store/useWorkflowStore';
 import {
   selectRuntimeExecution,
-  type RuntimeTimelineEntry,
   type RuntimeExecution,
 } from '@/store/workflowSelectors';
 import { ClarificationPanel } from './ClarificationPanel';
+import { ToolGatePanel } from './ToolGatePanel';
 import { getSdlcTaskStatus, type GateItem } from '@/services/api/sdlcApi';
 
 const TABS: Array<{ id: InspectorTab; label: string; icon: React.ReactNode }> = [
-  { id: 'runtime', label: 'Runtime log', icon: <Activity size={12} /> },
-  { id: 'tools', label: 'Tool calls', icon: <Terminal size={12} /> },
   { id: 'questions', label: 'Human questions', icon: <MessageCircle size={12} /> },
   { id: 'review', label: 'Output review', icon: <FileCheck2 size={12} /> },
   { id: 'decisions', label: 'Decision history', icon: <History size={12} /> },
@@ -37,6 +35,15 @@ export function InspectorPanel({ onReviewResolved }: InspectorPanelProps) {
   // Project RuntimeExecution outside the Zustand selector — the selector
   // allocates a fresh object per call and would otherwise create an
   // infinite-render loop.
+  //
+  // OBS-01.5 — `selectRuntimeExecution` is the canonical runtime-selector
+  // entry-point (workflowSelectors.ts routes through runtimeSelectors.ts).
+  // The Inspector MUST consume runtime state through this call only; no
+  // direct `session.pipelinePhases` / `session.agentStates[i].status` reads
+  // are permitted (canonical runtime contract §7 — "No component may derive
+  // runtime state independently"). Today's Inspector renders gate state
+  // and decisions only — no per-agent runtime visuals — so the runtime
+  // field surface here is read for parity with Dashboard and Agent Task.
   const runtime: RuntimeExecution | null = useMemo(
     () => (sessionId ? selectRuntimeExecution({ sessions: sessionsMap } as never, sessionId) : null),
     [sessionsMap, sessionId],
@@ -48,15 +55,18 @@ export function InspectorPanel({ onReviewResolved }: InspectorPanelProps) {
     return gates.find((g) => g.id === selectedGateId) ?? null;
   }, [selectedGateId, gates]);
 
-  // T2 (B1) — every agent (PO/UX/DEV/QA + ARCH→AGENT_CLARIFY) can raise a
-  // clarification gate. Treat all of them the same in the inspector.
-  const isClarificationGate = (t?: string) =>
-    t === 'PO_CLARIFY' || t === 'UX_CLARIFY' || t === 'DEV_CLARIFY' || t === 'QA_CLARIFY' || t === 'AGENT_CLARIFY';
-  const clarificationGates = gates.filter((g) => isClarificationGate(g.type));
+  // Frozen spec §6 — dispatch by PendingGate.kind, NOT by per-role gate type
+  // enums. `kind` is the canonical key the backend sends; `type` is a derived
+  // presentation hint. Both `kind='question'` (clarification) and
+  // `kind='tool'` (HITL_REVIEW / DEV_FILE_GATE) surface under the Human
+  // questions tab; `kind='output_review'` and `kind='release'` surface under
+  // the Output review tab. Keeping the three-tab layout intact.
+  const questionGates = gates.filter((g) => g.kind === 'question' || g.kind === 'tool');
+  const reviewGates = gates.filter((g) => g.kind === 'output_review' || g.kind === 'release');
 
-  // Auto-jump to "questions" when a clarification gate lands.
+  // Auto-jump to "questions" when a question/tool gate lands.
   useEffect(() => {
-    if (activeGate && isClarificationGate(activeGate.type) && tab !== 'questions') {
+    if (activeGate && (activeGate.kind === 'question' || activeGate.kind === 'tool') && tab !== 'questions') {
       setTab('questions');
     }
   }, [activeGate?.id, tab, setTab]);
@@ -76,14 +86,14 @@ export function InspectorPanel({ onReviewResolved }: InspectorPanelProps) {
           >
             {t.icon}
             <span>{t.label}</span>
-            {t.id === 'questions' && clarificationGates.length > 0 && (
+            {t.id === 'questions' && questionGates.length > 0 && (
               <span className="ml-1 rounded-full bg-amber-500/30 px-1.5 text-[9px] font-bold text-amber-400">
-                {clarificationGates.length}
+                {questionGates.length}
               </span>
             )}
-            {t.id === 'review' && gates.filter((g) => g.type.endsWith('_OUTPUT_REVIEW')).length > 0 && (
+            {t.id === 'review' && reviewGates.length > 0 && (
               <span className="ml-1 rounded-full bg-indigo-500/30 px-1.5 text-[9px] font-bold text-indigo-300">
-                {gates.filter((g) => g.type.endsWith('_OUTPUT_REVIEW')).length}
+                {reviewGates.length}
               </span>
             )}
           </button>
@@ -92,21 +102,20 @@ export function InspectorPanel({ onReviewResolved }: InspectorPanelProps) {
 
       <div className="flex-1 overflow-y-auto p-4">
         {!sessionId && <EmptyState />}
-        {sessionId && tab === 'runtime' && <RuntimeLogTab events={runtime?.events ?? []} />}
-        {sessionId && tab === 'tools' && <ToolCallsTab tools={runtime?.runtimeEvents ?? []} />}
         {sessionId && tab === 'questions' && (
           <QuestionsTab
             sessionId={sessionId}
-            gates={gates}
+            gates={questionGates}
             activeGate={activeGate}
             onSelectGate={(id) => setSelectedGateId(id)}
+            onResolved={() => { setSelectedGateId(null); onReviewResolved?.(); }}
           />
         )}
         {sessionId && tab === 'review' && (
           <OutputReviewTab
             sessionId={sessionId}
-            gates={gates.filter((g) => g.type.endsWith('_OUTPUT_REVIEW') || g.type === 'FINAL_RELEASE')}
-            activeGate={gates.find((g) => g.id === selectedGateId && (g.type.endsWith('_OUTPUT_REVIEW') || g.type === 'FINAL_RELEASE')) ?? null}
+            gates={reviewGates}
+            activeGate={reviewGates.find((g) => g.id === selectedGateId) ?? null}
             onSelectGate={(id) => setSelectedGateId(id)}
             onResolved={() => { setSelectedGateId(null); onReviewResolved?.(); }}
           />
@@ -128,75 +137,6 @@ function EmptyState() {
   );
 }
 
-// ── Runtime Log ──
-
-function RuntimeLogTab({ events }: { events: RuntimeTimelineEntry[] }) {
-  if (events.length === 0) {
-    return <div className="text-[11px] text-on-surface-variant/60">Waiting for runtime events…</div>;
-  }
-  return (
-    <div className="space-y-1.5">
-      {events.slice().reverse().map((evt) => (
-        <div
-          key={evt.id}
-          className="flex items-start gap-2 rounded-lg border border-outline-variant/20 bg-surface-container/60 px-3 py-2"
-        >
-          <span
-            className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${
-              evt.status === 'error'
-                ? 'bg-red-500'
-                : evt.status === 'warning'
-                  ? 'bg-amber-500'
-                  : evt.status === 'pending'
-                    ? 'bg-blue-500'
-                    : 'bg-emerald-500'
-            }`}
-          />
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between text-[10px] text-on-surface-variant/70">
-              <span className="font-bold uppercase tracking-wider text-on-surface">{evt.actor}</span>
-              <span className="font-mono">
-                {new Date(evt.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-              </span>
-            </div>
-            <p className="text-[11px] text-on-surface">{evt.action}</p>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ── Tool Calls (from runtimeEvents of type agent_tool_call / file_change) ──
-
-function ToolCallsTab({ tools }: { tools: import('@/models/SessionState').RuntimeEvent[] }) {
-  const toolEvents = tools.filter((t) => t.type === 'agent_tool_call' || t.type === 'file_change');
-  if (toolEvents.length === 0) {
-    return <div className="text-[11px] text-on-surface-variant/60">No tool calls yet.</div>;
-  }
-  return (
-    <div className="space-y-1.5">
-      {toolEvents.slice().reverse().map((evt) => (
-        <div key={evt.id} className="rounded-lg border border-outline-variant/20 bg-surface-container/60 p-2.5">
-          <div className="flex items-center justify-between text-[10px] text-on-surface-variant/80">
-            <span className="font-bold uppercase tracking-wider">{evt.agent ?? 'system'}</span>
-            <span className="font-mono">
-              {new Date(evt.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-            </span>
-          </div>
-          <div className="mt-1 text-[11px]">
-            <span className="font-bold text-cyan-300">{evt.tool ?? evt.type}</span>
-            {evt.filePath && (
-              <code className="ml-1.5 rounded bg-black/30 px-1.5 py-0.5 text-[10px] text-on-surface">{evt.filePath}</code>
-            )}
-            {evt.action && <p className="mt-0.5 text-on-surface-variant">{evt.action}</p>}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // ── Human Questions ──
 
 function QuestionsTab({
@@ -204,23 +144,35 @@ function QuestionsTab({
   gates,
   activeGate,
   onSelectGate,
+  onResolved,
 }: {
   sessionId: string;
   gates: GateItem[];
   activeGate: GateItem | null;
   onSelectGate: (id: string) => void;
+  onResolved: () => void;
 }) {
-  const questionGates = gates.filter((g) =>
-    g.type === 'PO_CLARIFY' || g.type === 'UX_CLARIFY' || g.type === 'DEV_CLARIFY' || g.type === 'QA_CLARIFY' || g.type === 'AGENT_CLARIFY',
+  // Dispatch by gate.kind (frozen spec §6):
+  //   kind='question' → ClarificationPanel (existing, AskUserQuestion shape)
+  //   kind='tool'     → ToolGatePanel   (HITL_REVIEW / DEV_FILE_GATE)
+  // type-specific enums (PO_CLARIFY/DEV_FILE_GATE/...) are still accepted as
+  // a fallback for old payloads that arrived before the dispatcher refactor.
+  const clarificationGates = gates.filter((g) =>
+    g.kind === 'question'
+    || g.type === 'PO_CLARIFY' || g.type === 'UX_CLARIFY' || g.type === 'DEV_CLARIFY' || g.type === 'QA_CLARIFY' || g.type === 'AGENT_CLARIFY',
   );
-  if (questionGates.length === 0) {
+  const toolGates = gates.filter((g) =>
+    g.kind === 'tool' || g.type === 'HITL_REVIEW' || g.type === 'DEV_FILE_GATE',
+  );
+  const dispatchableGates = [...clarificationGates, ...toolGates];
+  if (dispatchableGates.length === 0) {
     return <div className="text-[11px] text-on-surface-variant/60">No pending questions. Agents are running autonomously.</div>;
   }
   return (
     <div className="flex flex-col gap-3">
-      {questionGates.length > 1 && (
+      {dispatchableGates.length > 1 && (
         <div className="flex flex-wrap gap-1.5">
-          {questionGates.map((g) => (
+          {dispatchableGates.map((g) => (
             <button
               key={g.id}
               onClick={() => onSelectGate(g.id)}
@@ -230,15 +182,17 @@ function QuestionsTab({
                   : 'bg-surface-container text-on-surface-variant/70 hover:text-on-surface'
               }`}
             >
-              {g.id.slice(0, 8)}
+              {g.id.slice(0, 8)} · {g.kind === 'tool' ? 'tool' : 'ask'}
             </button>
           ))}
         </div>
       )}
-      {activeGate && (activeGate.type === 'PO_CLARIFY' || activeGate.type === 'UX_CLARIFY' || activeGate.type === 'DEV_CLARIFY' || activeGate.type === 'QA_CLARIFY' || activeGate.type === 'AGENT_CLARIFY') ? (
+      {activeGate && (activeGate.kind === 'question' || clarificationGates.some((g) => g.id === activeGate.id)) ? (
         <ClarificationPanel sessionId={sessionId} gate={activeGate} />
+      ) : activeGate && (activeGate.kind === 'tool' || toolGates.some((g) => g.id === activeGate.id)) ? (
+        <ToolGatePanel sessionId={sessionId} gate={activeGate} onResolved={onResolved} />
       ) : (
-        <div className="text-[11px] text-on-surface-variant/60">Select a question to answer.</div>
+        <div className="text-[11px] text-on-surface-variant/60">Select a gate to act on.</div>
       )}
     </div>
   );
@@ -334,7 +288,11 @@ function OutputReviewInline({
     setError(null);
     try {
       if (isRelease) {
-        await releaseDecision(sessionId, action, comment.trim() || undefined);
+        await releaseDecision(
+          sessionId,
+          action.toUpperCase() as 'APPROVE' | 'REJECT',
+          comment.trim() || undefined,
+        );
       } else {
         await resolveOutputReviewGate(sessionId, gate.id, action, comment.trim() || undefined);
       }
@@ -435,15 +393,18 @@ interface Artifact {
 function extractArtifacts(task: any): Artifact[] {
   const out: Artifact[] = [];
   const artifacts = Array.isArray(task?.artifacts) ? task.artifacts : [];
+  // For ux-agent: only show the html_mockup preview. The other UX artifacts
+  // (ux_spec / user_flow / wireframe_spec / screens / component_inventory)
+  // are spec inputs for DEV — not what reviewers want on the dashboard.
+  const isUx = task?.type === 'ux-agent';
   for (const a of artifacts) {
     if (!a || typeof a !== 'object') continue;
     const type = a.type ?? a.artifactType ?? 'artifact';
+    if (isUx && type !== 'html_mockup') continue;
     const text = typeof a.contentText === 'string' ? a.contentText : null;
     const json = a.contentJson !== undefined && a.contentJson !== null ? a.contentJson : undefined;
     // Skip empty rows.
     if (!text && json === undefined) continue;
-    // Prefer primary output artifacts over support files for the headline
-    // render, but still include everything so reviewers see the full picture.
     out.push({ type, text, json });
   }
   return out;

@@ -39,7 +39,11 @@ const ROLE_MAX_TURNS = {
   'po-agent': 30,
   'ux-agent': 35,
   'dev-agent': 200,
-  'qa-agent': 50,
+  // QA needs extra turns to (a) read upstream artifacts, (b) write 13
+  // required structured fields, (c) self-test the patch, (d) populate
+  // evidence. 50 was empirically too tight — see
+  // docs/fixbug/AUDIT_2026_07_09_FULL_PIPELINE.md Bug 2 evidence.
+  'qa-agent': 150,
 };
 function maxTurnsForRole(role) {
   const roleEnv = Number(process.env[`CLAUDE_CODE_${stageKey(role).toUpperCase()}_MAX_TURNS`]);
@@ -51,7 +55,7 @@ function timeoutMsForRole(role, fallback) {
   if (Number.isFinite(roleEnv) && roleEnv > 0) return Math.floor(roleEnv);
   return fallback;
 }
-const ALLOWED_TOOLS = ['Read', 'Glob', 'Grep', 'LS', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash'];
+const ALLOWED_TOOLS = ['Read', 'Glob', 'Grep', 'LS', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'AskUserQuestion'];
 const ROLE_LABEL = {
   'architecture-agent': 'Architecture',
   'po-agent': 'Product Owner',
@@ -86,19 +90,37 @@ function safeJson(value, max = 24000) {
 function compactContext(role, context = {}) {
   const allowed = {
     'architecture-agent': ['featureRequest', 'feedbackPrompt', 'repoContext', 'repoIndex', 'scopeHints'],
-    'po-agent': ['featureRequest', 'feedbackPrompt'],
-    'ux-agent': ['prd', 'user_stories', 'acceptance_criteria', 'risk_classification', 'feedbackPrompt'],
+    'po-agent': [
+      'featureRequest', 'feedbackPrompt',
+      // project_definition is the canonical A2A contract from Architecture
+      // (docs/architecture/A2A_PIPELINE_REDESIGN.md §4). PO/UX/DEV/QA all
+      // receive it as a structured object. architecture_brief is kept as
+      // derived documentation for one phase (to be removed in Phase 3).
+      'project_definition',
+      'architecture_brief',
+    ],
+    'ux-agent': [
+      'prd', 'user_stories', 'acceptance_criteria', 'risk_classification',
+      'feedbackPrompt',
+      'project_definition',
+    ],
     'dev-agent': [
       'prd', 'acceptance_criteria', 'risk_classification', 'ux_spec',
       'user_flow', 'wireframe_spec', 'component_inventory',
       'screens', 'color_palette', 'typography',
       'feedbackPrompt', 'repoContext',
+      'project_definition',
       'architecture_brief',
     ],
     'qa-agent': [
       'acceptance_criteria', 'risk_classification', 'ux_spec', 'implementation_plan',
       'patch_diff', 'mock_code_diff', 'changed_files', 'build_result',
-      'self_test_report', 'risk_assessment', 'security_notes', 'security_gate', 'feedbackPrompt', 'repoContext',
+      'self_test_report', 'risk_assessment', 'security_notes', 'security_gate',
+      'feedbackPrompt', 'repoContext',
+      // Phase 2: QA receives project_definition so it can pick test
+      // runner / environment / scope from the canonical tech-stack fields.
+      // QA prompt itself is not modified in Phase 2.
+      'project_definition',
     ],
   }[role] || Object.keys(context);
   return Object.fromEntries(allowed.filter((key) => context[key] !== undefined).map((key) => [key, context[key]]));
@@ -111,16 +133,78 @@ function parseJsonObject(text) {
   for (const match of fenced) {
     if (match[1]) candidates.push(match[1]);
   }
-  candidates.push(...extractBalancedJsonObjects(text));
+  const fencedCount = candidates.length;
+  const balancedCandidates = extractBalancedJsonObjects(text);
+  candidates.push(...balancedCandidates);
   candidates.push(text);
-  const parsedCandidates = [];
-  for (const candidate of candidates) {
-    try {
-      const parsed = JSON.parse(candidate.trim());
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) parsedCandidates.push(parsed);
-    } catch (_) { /* try next */ }
+
+  // Prefer the fenced ```json block when present. extractBalancedJsonObjects
+  // is a brace counter that mis-counts when string values contain escape
+  // sequences or nested objects (e.g. QA evidence strings with "(<AppHeader")
+  // and emits a truncated candidate that JSON.parse then rejects. When the
+  // agent honored its prompt contract and emitted one fenced block, trust it
+  // over the balanced-brace candidates. Falls through to the existing logic
+  // when there is no fenced match or no candidate parsed cleanly.
+  if (fencedCount > 0) {
+    for (let idx = 0; idx < fencedCount; idx += 1) {
+      const trimmed = candidates[idx].trim();
+      if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) continue;
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return parsed;
+        }
+      } catch (_) {
+        // fall through to existing multi-candidate flow
+      }
+    }
   }
-  return parsedCandidates.sort((a, b) => jsonCandidateScore(b) - jsonCandidateScore(a))[0] || null;
+  const parsedCandidates = [];
+  // TEMP DIAGNOSTIC — parseJsonObject: capture per-candidate outcome so the
+  // CLAUDE_OUTPUT_PARSE_ERROR root cause can be nailed down. Logs only when
+  // the function is about to return null (the path the throw at line 709
+  // hits). Zero behavior change otherwise.
+  const perCandidate = [];
+  for (const candidate of candidates) {
+    const trimmed = candidate.trim();
+    const len = trimmed.length;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        parsedCandidates.push(parsed);
+        perCandidate.push({ source: 'fenced|balanced|whole', len, parsed: true, score: jsonCandidateScore(parsed) });
+      } else {
+        perCandidate.push({
+          source: 'fenced|balanced|whole',
+          len,
+          parsed: false,
+          rejectedByFilter: true,
+          typeofValue: parsed === null ? 'null' : Array.isArray(parsed) ? 'array' : typeof parsed,
+        });
+      }
+    } catch (err) {
+      perCandidate.push({
+        source: 'fenced|balanced|whole',
+        len,
+        parsed: false,
+        jsonParseError: { name: err.name, message: err.message },
+      });
+    }
+  }
+  const result = parsedCandidates.sort((a, b) => jsonCandidateScore(b) - jsonCandidateScore(a))[0] || null;
+  if (result === null && typeof text === 'string') {
+    const head = (s) => (typeof s === 'string' ? { len: s.length, head: s.slice(0, 200), tail: s.slice(-200) } : null);
+    console.error('[claudeCodeRunner][DIAG] parseJsonObject returned null', {
+      textLen: text.length,
+      textHead: text.slice(0, 200),
+      textTail: text.slice(-200),
+      candidateCount: candidates.length,
+      perCandidate,
+      firstFencedCandidate: head(candidates[0]),
+      lastFencedCandidate: head(candidates[candidates.length - 1]),
+    });
+  }
+  return result;
 }
 
 function jsonCandidateScore(candidate) {
@@ -230,17 +314,18 @@ function normalizeOutput(role, parsed, meta = {}) {
 
   // Reshape known list fields (string→array) so the gate's array checks pass.
   coerceArrayFields(role, output);
-  // Real DEV runs sometimes group security evidence under risk_classification.
-  // Promote existing evidence without fabricating or weakening requirements.
-  if (role === 'dev-agent' && output.risk_classification && typeof output.risk_classification === 'object') {
-    output.security_notes = output.security_notes || output.risk_classification.security_notes;
-    output.security_gate = output.security_gate || output.risk_classification.security_gate;
-  }
+  // Phase 3.6: DEV no longer emits risk_classification / security_notes /
+  // security_gate. Those fields are QA-only canonical. The promotion block
+  // was removed; real QA runs surface security evidence directly.
   if (role === 'dev-agent' && output.patch_diff && !output.patch_format) {
     output.patch_format = 'unified_diff';
   }
 
   const contract = assertOutputConforms(role, output);
+  // Spec §6.1: clarification_questions is NOT a post-mortem JSON field. The
+  // platform uses mid-run AskUserQuestion. Force the field to an empty array
+  // on the wire so any defensive post-mortem handler has nothing to act on.
+  output.clarification_questions = [];
   if (!contract.ok) {
     const problems = [
       contract.missing.length ? `missing: ${contract.missing.join(', ')}` : null,
@@ -264,7 +349,7 @@ async function loadPromptTemplate(role) {
     return [
       `You are the ${ROLE_LABEL[role] || role} agent in AIFA.`,
       'Work on the repository in your working directory using the available tools.',
-      'Make reasonable assumptions and continue without asking interactive questions.',
+      'If you need human input to proceed (ambiguous requirements, missing business rules, framework choices that change the design), call the AskUserQuestion tool with 2–4 options. A paused question is far cheaper than an output you have to throw away.',
       `Return a valid ${AGENT_CONTRACT_VERSION} JSON object only as your final message.`,
     ].join('\n');
   }
@@ -285,7 +370,14 @@ async function buildPrompt({ role, repoPath, context }) {
     `- Output contract: ${AGENT_CONTRACT_VERSION}`,
     `- Required artifact keys: ${required.join(', ') || '(none)'}`,
     '- Work inside the working directory only; use repo-relative paths for file operations.',
-    '- Make reasonable assumptions and continue without calling AskUserQuestion.',
+    '',
+    '### Human clarification is a PLATFORM capability (spec §6.1)',
+    '- When you cannot proceed because information is missing or genuinely ambiguous, you MUST call the `AskUserQuestion` tool mid-run with 2–4 options per question.',
+    '- Calling `AskUserQuestion` is the ONLY supported way to ask the human for clarification. It pauses your execution; the UI displays the question; the user answers; the tool returns the answer to YOUR SAME execution; you continue reasoning from the exact interruption point. Same task, same session, same Claude conversation.',
+    '- You MAY call `AskUserQuestion` more than once in one run if you have multiple ambiguities. Each call pauses → answers → resumes the SAME execution. There is no assumption you ask only once.',
+    '- NEVER write a `clarification_questions` field in your final JSON. The runtime contract rejects it; the platform uses mid-run AskUserQuestion instead. Final JSON must contain only the required artifact keys (plus `outputVersion`, `stage`, `rawSummary`, and optional `summary`/`confidence_score`/`token_usage`/`observability`).',
+    '- When in doubt: ask. Guessing is more expensive than a 5-second human check.',
+    '',
     '- Your FINAL message must contain exactly one fenced ```json block with this shape:',
     '```json',
     JSON.stringify({
@@ -414,6 +506,43 @@ async function runAgent({
   onProgress,
   timeoutMs,
 }) {
+  // FIX D — make USE_MOCK_CLAUDE_CODE honored even when EXECUTION_PATH=claude-code.
+  // The e2eTrace harness and CI smoke flows want a deterministic, hermetic run
+  // that doesn't require a live `claude` CLI login. We delegate to the same
+  // buildMockOutput the langchain adapter uses, then normalize so the
+  // agent-io.v3 contract check downstream still has a real envelope to parse.
+  if (process.env.USE_MOCK_CLAUDE_CODE === 'true') {
+    // eslint-disable-next-line global-require
+    const { buildMockOutput } = require('../services/agentDispatcher');
+    const fakeTask = { type: role, id: taskId || null };
+    const mockOutput = await buildMockOutput(fakeTask, context).catch((err) => {
+      const wrapped = new Error(`Mock mode failed for ${role}: ${err.message}`);
+      wrapped.code = 'CLAUDE_MOCK_BUILD_FAILED';
+      wrapped.recoverable = true;
+      throw wrapped;
+    });
+    const parsedEnvelope = {
+      outputVersion: AGENT_CONTRACT_VERSION,
+      stage: role.replace(/-agent$/, ''),
+      artifact: mockOutput,
+      rawSummary: mockOutput.summary || `Mock ${role} completed.`,
+    };
+    const output = normalizeOutput(role, parsedEnvelope, { sessionId: null, totalCostUsd: 0, usage: null });
+    output.observability = {
+      ...(output.observability || {}),
+      runner: 'claude-agent-sdk:mock',
+      mock: true,
+      output_contract: AGENT_CONTRACT_VERSION,
+    };
+    output.observability.claude_result = {
+      subtype: 'mock',
+      num_turns: 0,
+      stop_reason: 'mock_short_circuit',
+      max_turns: maxTurnsForRole(role),
+    };
+    return { output, messages: ['mock'], toolCalls: [], cliSessionId: null, taskId };
+  }
+
   const { query } = await loadSdk();
   // Per-role timeout: ARCH (read-only) gets a tighter ceiling than the global
   // default; other roles fall back to the global default.
@@ -440,6 +569,26 @@ async function runAgent({
     };
 
     const maxTurns = maxTurnsForRole(role);
+    // TEMP DIAGNOSTIC — capture CLI stderr + first messages + interrupt callsite
+    // to investigate [ede_diagnostic] result_type=user failures. Remove once
+    // root cause is confirmed. Zero behavior change: stderrCapture only
+    // receives lines the SDK already prints to stderr when DEBUG_CLAUDE_AGENT_SDK
+    // is set; otherwise SDK pipes stderr to /dev/null and the buffer stays empty.
+    const diag = {
+      stderr: [],
+      messages: [],
+      interruptCallsite: null,
+      isError: false,
+      resultErrors: null,
+      resultSubtype: null,
+    };
+    const stderrCapture = (chunk) => {
+      const s = typeof chunk === 'string' ? chunk : chunk?.toString?.() || '';
+      for (const line of s.split(/\r?\n/)) {
+        if (line) diag.stderr.push(line);
+      }
+      if (diag.stderr.length > 200) diag.stderr.splice(0, diag.stderr.length - 200);
+    };
     const q = query({
       prompt,
       options: {
@@ -449,6 +598,9 @@ async function runAgent({
         allowedTools: ALLOWED_TOOLS,
         maxTurns,
         ...(process.env.CLAUDE_CODE_MODEL ? { model: process.env.CLAUDE_CODE_MODEL } : {}),
+        // Always capture stderr so we can see CLI internal logs even without
+        // DEBUG_CLAUDE_AGENT_SDK. Cheap (~few KB/s); buffer capped at 200 lines.
+        stderr: stderrCapture,
       },
     });
 
@@ -459,6 +611,8 @@ async function runAgent({
         // Still paused on a human gate, or the deadline was pushed out → re-check
         // later instead of killing a run that is legitimately waiting/working.
         if (gateDepth > 0 || Date.now() < startedAt + effectiveTimeoutMs + extraBudgetMs) { armTimer(); return; }
+        // TEMP DIAGNOSTIC — capture who fired the interrupt
+        diag.interruptCallsite = new Error('interrupt callstack').stack;
         try { q.interrupt?.(); } catch (_) { /* noop */ }
       }, Math.max(1000, deadline - Date.now()));
       if (typeof timer.unref === 'function') timer.unref();
@@ -475,14 +629,27 @@ async function runAgent({
     let stopReason = null;
     let resultErrors = [];
     const messageTypes = [];
+    const toolCalls = [];
 
     try {
       for await (const message of q) {
         messageTypes.push(message.type);
+        // TEMP DIAGNOSTIC — capture up to first 30 message types + subtypes
+        if (diag.messages.length < 30) {
+          diag.messages.push({
+            type: message.type,
+            subtype: message.subtype,
+            stop_reason: message.stop_reason,
+            is_error: message.is_error,
+            num_turns: message.num_turns,
+          });
+        }
         if (message.type === 'assistant') {
           for (const block of message.message?.content || []) {
             if (block.type === 'text' && typeof onProgress === 'function') {
               onProgress({ type: 'text', data: block.text });
+            } else if (block.type === 'tool_use') {
+              toolCalls.push({ name: block.name, input: block.input || null });
             }
           }
         } else if (message.type === 'result') {
@@ -495,10 +662,46 @@ async function runAgent({
           numTurns = message.num_turns ?? null;
           stopReason = message.stop_reason ?? null;
           resultErrors = Array.isArray(message.errors) ? message.errors : [];
+          // TEMP DIAGNOSTIC — stash result fields for post-mortem dump
+          diag.isError = isError;
+          diag.resultErrors = resultErrors;
+          diag.resultSubtype = resultSubtype;
         }
       }
+    } catch (loopErr) {
+      // TEMP DIAGNOSTIC — capture buffer state when iterator throws before
+      // a result message arrives (the [ede_diagnostic] case). Attach the
+      // dump to the thrown error so the outer attempt() / caller can log it
+      // after the standard retry/fail handling.
+      loopErr.diag = {
+        role,
+        messageTypesSeen: messageTypes,
+        messages: diag.messages.slice(),
+        stderrTail: diag.stderr.slice(-30),
+        interruptCallsite: diag.interruptCallsite,
+      };
+      console.error('[claudeCodeRunner][DIAG] iterator threw before result', loopErr.diag);
+      throw loopErr;
     } finally {
       clearTimeout(timer);
+    }
+
+    // TEMP DIAGNOSTIC — when an error result lands, dump the full capture
+    // buffer. Helps identify whether CLI stderr reported anything before
+    // the result message arrived.
+    if (isError) {
+      console.error('[claudeCodeRunner][DIAG] isError result captured', {
+        role,
+        subtype: resultSubtype,
+        stopReason,
+        numTurns,
+        errors: resultErrors,
+        messageTypesSeen: messageTypes,
+        messages: diag.messages,
+        stderrTail: diag.stderr.slice(-30),
+        interruptCallsite: diag.interruptCallsite,
+        iteratorError: diag.iteratorError,
+      });
     }
 
     // An error result (e.g. an API/socket error surfaced as a result message)
@@ -517,13 +720,17 @@ async function runAgent({
       err.numTurns = numTurns;
       err.stopReason = stopReason;
       err.sdkErrors = resultErrors;
+      // TEMP DIAGNOSTIC — propagate CLI stderr so observability.failure.stderrPreview
+      // is populated. See CLAUDE_OUTPUT_PARSE_ERROR block above for rationale.
+      err.stderr = diag.stderr.join('\n');
+      err.messageTypesSeen = messageTypes.slice(0, 50);
       if (resultSubtype === 'error_max_turns') {
         err.code = 'CLAUDE_CODE_MAX_TURNS';
         err.message = `Claude Code reached maxTurns=${maxTurns} before finishing (turns=${numTurns}, stop_reason=${stopReason || 'unknown'})`;
       }
       throw err;
     }
-    return { resultText, sessionId, totalCostUsd, usage, messageTypes, resultSubtype, numTurns, stopReason };
+    return { resultText, sessionId, totalCostUsd, usage, messageTypes, toolCalls, resultSubtype, numTurns, stopReason };
   };
 
   const maxAttempts = Math.max(1, Number(process.env.CLAUDE_CODE_MAX_RETRIES ?? 2) + 1);
@@ -533,6 +740,13 @@ async function runAgent({
       run = await attempt();
       break;
     } catch (err) {
+      // TEMP DIAGNOSTIC — if the error has a captured diag from the inner
+      // iterator catch, dump it once (before the retry/fail branch) so we
+      // don't lose the evidence when the run loops to the next attempt.
+      if (err.diag && !err.diag._logged) {
+        console.error('[claudeCodeRunner][DIAG] attempt failed with diag payload', err.diag);
+        err.diag._logged = true;
+      }
       if (i < maxAttempts && (isTransientError(err) || isRetryableToolUseError(err))) {
         // eslint-disable-next-line no-console
         console.warn(`[claudeCodeRunner] recoverable error on ${role} attempt ${i}/${maxAttempts}, retrying: ${err.message}`);
@@ -543,7 +757,7 @@ async function runAgent({
     }
   }
   const {
-    resultText, sessionId, totalCostUsd, usage, messageTypes, resultSubtype, numTurns, stopReason,
+    resultText, sessionId, totalCostUsd, usage, messageTypes, toolCalls, resultSubtype, numTurns, stopReason,
   } = run;
 
   let parsed = parseJsonObject(resultText);
@@ -564,6 +778,19 @@ async function runAgent({
     err.rawResult = resultText;
     err.repairResult = repairResult;
     err.repairError = repairError?.message || null;
+    // TEMP DIAGNOSTIC — propagate CLI stderr + message-type trace into the
+    // thrown error so observability.failure.stderrPreview is populated next
+    // time a run produces an empty resultText. Without this, parse failures
+    // look identical to "agent crashed" failures, making the silent-exit
+    // root cause indistinguishable. Remove once UX silent-exit is fixed.
+    err.stderr = diag.stderr.join('\n');
+    err.messageTypesSeen = messageTypes.slice(0, 50);
+    err.diag = {
+      messageTypesSeen: messageTypes.slice(0, 50),
+      messages: diag.messages.slice(),
+      stderrTail: diag.stderr.slice(-30),
+      interruptCallsite: diag.interruptCallsite,
+    };
     throw err;
   }
 
@@ -574,7 +801,7 @@ async function runAgent({
     stop_reason: stopReason,
     max_turns: maxTurnsForRole(role),
   };
-  return { output, messages: messageTypes, cliSessionId: sessionId, taskId };
+  return { output, messages: messageTypes, toolCalls, cliSessionId: sessionId, taskId };
 }
 
 module.exports = {

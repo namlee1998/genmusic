@@ -3,22 +3,25 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, Search, Archive, ArchiveRestore, Layers, GitFork } from 'lucide-react';
 import { useWorkflowStore, type ConnectionStatus } from '@/store/useWorkflowStore';
 import { useUiStore } from '@/store/useUiStore';
-import { AGENT_KEYS, type AgentKey, type SessionState } from '@/models/SessionState';
+import { AGENT_KEYS, type SessionState } from '@/models/SessionState';
+import {
+  countCompletedAgents,
+  selectAgentPhaseStatus,
+  getRuntimeVisual,
+} from '@/store/runtimeSelectors';
 
-const PHASE_DOT_COLORS: Record<SessionState['pipelinePhases'][number]['status'], string> = {
-  pending: 'bg-surface-container-high/70 text-on-surface-variant',
-  running: 'bg-blue-500 text-white',
-  gate_pending: 'bg-amber-500 text-white',
-  awaiting_review: 'bg-amber-500 text-white',
-  completed: 'bg-emerald-500 text-white',
-  failed: 'bg-red-500 text-white',
-  skipped: 'bg-outline text-on-surface-variant',
-};
+// OBS-01.10 R-15: removed the local `PHASE_DOT_COLORS` map. The canonical
+// runtime selector (`runtimeSelectors.ts`) is the SINGLE source of colour
+// mapping per the canonical runtime contract §5.2.2 cross-page identity
+// invariant and §7 forbidden pattern "Duplicated CSS mapping". Per-agent
+// dots now consume `getRuntimeVisual(status).background` (the same value
+// the Dashboard pipeline strip and the Agent Task card border use).
 
 const STATUS_LABEL: Record<SessionState['status'], string> = {
   pending: 'Pending',
   running: 'Running',
   awaiting_approval: 'Awaiting',
+  awaiting_release: 'Awaiting Release',
   completed: 'Done',
   failed: 'Failed',
 };
@@ -27,6 +30,7 @@ const STATUS_BADGE: Record<SessionState['status'], string> = {
   pending: 'bg-surface-container-high/60 text-on-surface-variant',
   running: 'bg-blue-500/15 text-blue-400',
   awaiting_approval: 'bg-amber-500/15 text-amber-400',
+  awaiting_release: 'bg-amber-500/15 text-amber-400',
   completed: 'bg-emerald-500/15 text-emerald-400',
   failed: 'bg-error/15 text-error',
 };
@@ -136,7 +140,11 @@ function SessionCard({
   onSelect: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const completedPhases = session.pipelinePhases.filter((p) => p.status === 'completed').length;
+  // Read the completed-phase count through the canonical selector.
+  // The selector is the single owner of runtime state; no consumer
+  // may compute `session.pipelinePhases.filter(...).length`
+  // directly (canonical runtime contract §7).
+  const completedPhases = countCompletedAgents(session);
   const progress = (completedPhases / 5) * 100;
   const pendingCount = session.pendingGates.length;
 
@@ -173,12 +181,20 @@ function SessionCard({
 
         <div className="grid grid-cols-5 gap-1">
           {AGENT_KEYS.map((k) => {
-            const p = session.pipelinePhases.find((x) => x.agent === k);
-            const status = p?.status ?? 'pending';
+            // Read the per-agent status through the canonical
+            // selector. The selector is the single source of
+            // runtime state; this consumer MUST NOT read
+            // session.pipelinePhases directly.
+            const status = selectAgentPhaseStatus(session, k);
+            // OBS-01.10 R-15: dots consume the canonical runtime visual
+            // (the same source Dashboard pipeline strip and Agent Task
+            // card border use). Cross-page identity is enforced by
+            // construction per contract §5.2.2.
+            const dotClass = getRuntimeVisual(status).background;
             return (
               <span
                 key={k}
-                className={`flex items-center justify-center rounded text-[8px] font-bold ${PHASE_DOT_COLORS[status]}`}
+                className={`flex items-center justify-center rounded text-[8px] font-bold ${dotClass}`}
                 title={`${k} · ${status}`}
               >
                 {k}

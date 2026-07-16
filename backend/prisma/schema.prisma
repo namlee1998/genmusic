@@ -104,17 +104,24 @@ model AgentEvent {
   id         String   @id @default(uuid())
   taskId     String
   projectId  String
+  sessionId  String?
   sequence   Int
   type       String
   actor      String
   payload    String?
+  envelope   String?  // JSON string — canonical EventEnvelope (preferred over payload for replay)
   createdAt  DateTime @default(now())
 
   task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
-  @@unique([taskId, sequence])
+  // Per-session sequence space: every canonical EventEnvelope belongs to a
+  // session, and sequence is monotonically allocated by sequenceService.next.
+  // The unique constraint enforces the transport invariant at the persistence
+  // layer (one per-session sequence space).
+  @@unique([sessionId, sequence])
   @@index([projectId, createdAt])
   @@index([taskId, createdAt])
+  @@index([sessionId, sequence])
 }
 
 model AgentArtifact {

@@ -6,9 +6,17 @@ import {
 } from 'lucide-react';
 import { useUiStore, type InspectorTab } from '@/store/useUiStore';
 import { useWorkflowStore } from '@/store/useWorkflowStore';
-import { AGENT_KEYS, type AgentKey, type SessionState } from '@/models/SessionState';
+import { AGENT_KEYS, type SessionState } from '@/models/SessionState';
 import type * as api from '@/services/api/sdlcApi';
 import { ClarificationPanel } from './components/ClarificationPanel';
+import {
+  countCompletedAgents,
+  getRuntimeAnimation,
+  getRuntimeIcon,
+  getRuntimeVisual,
+  selectAgentPhaseStatus,
+  selectRuntimeStatus,
+} from '@/store/runtimeSelectors';
 
 /**
  * OverviewPage — runtime monitoring of all running workflows.
@@ -54,7 +62,7 @@ export function OverviewPage() {
     return { pendingApprovals, runningSessions, completedToday, total: sessions.length };
   }, [sessions]);
 
-  const onSelectSession = (sessionId: string, tab: InspectorTab = 'runtime') => {
+  const onSelectSession = (sessionId: string, tab: InspectorTab = 'questions') => {
     setActiveSession(sessionId);
     setInspectorTab(tab);
     navigate(`/sdlc/build?sessionId=${sessionId}`);
@@ -179,20 +187,17 @@ function SessionMonitorCard({
   onOpenQuestions: () => void;
   onOpenReview: () => void;
 }) {
-  const completed = session.pipelinePhases.filter((p) => p.status === 'completed').length;
+  const completed = countCompletedAgents(session);
   const percent = Math.round((completed / 5) * 100);
-  const runningAgent = useMemo(() => {
-    for (const k of AGENT_KEYS) {
-      if (session.agentStates[k]?.status === 'running') return k;
-    }
-    return null;
-  }, [session]);
-  const reviewingAgent = useMemo(() => {
-    for (const k of AGENT_KEYS) {
-      if (session.agentStates[k]?.status === 'awaiting_review') return k;
-    }
-    return null;
-  }, [session]);
+  // currentAgent / reviewingAgent come from the canonical selector.
+  // The selector is the single owner of runtime derivations
+  // (canonical runtime contract §7 — "No component may compute
+  // currentAgent independently"). The selector preserves byte-
+  // identical behaviour to the prior inline derivation.
+  const { currentAgent: runningAgent, reviewingAgent } = useMemo(
+    () => selectRuntimeStatus(session),
+    [session],
+  );
   const focusedGate: api.GateItem | null = focusGateId
     ? session.pendingGates.find((g) => g.id === focusGateId) ?? null
     : null;
@@ -231,25 +236,31 @@ function SessionMonitorCard({
         </div>
         <div className="grid grid-cols-5 gap-1">
           {AGENT_KEYS.map((key) => {
-            const phase = session.pipelinePhases.find((p) => p.agent === key);
-            const status = phase?.status ?? 'pending';
+            // OBS-01.3 — Dashboard pipeline strip renders every per-agent
+            // runtime state via the canonical visual map. No
+            // component may hardcode runtime colours outside the
+            // canonical map (canonical runtime contract §5.2.3,
+            // §7 — duplicated CSS mapping is FORBIDDEN).
+            const status = selectAgentPhaseStatus(session, key);
+            const visual = getRuntimeVisual(status);
+            const Icon = getRuntimeIcon(status);
+            // OBS-01.6 — runtime animation class is sourced from
+            // the canonical visual map. No inline `animate-*` class
+            // is permitted on the icon (canonical contract §7,
+            // §5.1.4 — only `running` may carry `animate-spin`,
+            // applied to the Loader2 icon via the canonical map).
+            const animation = getRuntimeAnimation(status);
             return (
               <div
                 key={key}
-                className={`flex flex-col items-center gap-0.5 rounded-md py-1 text-[9px] font-bold uppercase tracking-wider ${
-                  status === 'completed'
-                    ? 'bg-emerald-500/20 text-emerald-400'
-                    : status === 'running'
-                      ? 'bg-blue-500/20 text-blue-300'
-                      : status === 'awaiting_review'
-                        ? 'bg-amber-500/20 text-amber-300'
-                        : status === 'failed'
-                          ? 'bg-red-500/20 text-red-400'
-                          : 'bg-surface-container text-on-surface-variant/60'
-                }`}
+                data-testid={`dashboard-pipeline-cell-${key}`}
+                data-runtime-status={status}
+                title={`${key} · ${visual.badge}`}
+                className={`flex flex-col items-center gap-0.5 rounded-md border ${visual.border} py-1 text-[9px] font-bold uppercase tracking-wider ${visual.background}`}
               >
+                <Icon size={10} className={animation} aria-hidden="true" />
                 <span>{key}</span>
-                <PhaseStatusLabel status={status} />
+                <span className="font-mono">{visual.glyph}</span>
               </div>
             );
           })}
@@ -258,21 +269,37 @@ function SessionMonitorCard({
 
       {/* Current agent + tool line */}
       <div className="flex flex-wrap items-center gap-4 text-[11px] text-on-surface-variant">
-        {runningAgent && (
-          <div className="flex items-center gap-1.5">
-            <Loader2 size={11} className="animate-spin text-blue-400" />
-            <span><b className="text-on-surface">{runningAgent}</b> running</span>
-            {session.agentStates[runningAgent].currentAction && (
-              <span className="text-on-surface-variant/60">— {session.agentStates[runningAgent].currentAction}</span>
-            )}
-          </div>
-        )}
-        {reviewingAgent && (
-          <div className="flex items-center gap-1.5">
-            <Clock size={11} className="text-amber-400" />
-            <span><b className="text-on-surface">{reviewingAgent}</b> awaiting your review</span>
-          </div>
-        )}
+        {runningAgent && (() => {
+          // OBS-01.3 / OBS-01.6 — read the canonical runtime visual
+          // for the running-agent indicator, including the canonical
+          // animation class. No inline colour/icon/animation
+          // classes are permitted (canonical runtime contract §7).
+          // The contract §5.1.4 reserves `animate-spin` for the
+          // `running` state's Loader2; OBS-01.6 routes it through
+          // the canonical map rather than hardcoding it.
+          const visual = getRuntimeVisual('running');
+          const RunningIcon = getRuntimeIcon('running');
+          const animation = getRuntimeAnimation('running');
+          return (
+            <div className="flex items-center gap-1.5">
+              <RunningIcon size={11} className={`${visual.background} ${animation}`.trim()} aria-hidden="true" />
+              <span><b className="text-on-surface">{runningAgent}</b> {visual.badge.toLowerCase()}</span>
+              {session.agentStates[runningAgent].currentAction && (
+                <span className="text-on-surface-variant/60">— {session.agentStates[runningAgent].currentAction}</span>
+              )}
+            </div>
+          );
+        })()}
+        {reviewingAgent && (() => {
+          const visual = getRuntimeVisual('awaiting_review');
+          const ReviewIcon = getRuntimeIcon('awaiting_review');
+          return (
+            <div className="flex items-center gap-1.5">
+              <ReviewIcon size={11} className={visual.background} aria-hidden="true" />
+              <span><b className="text-on-surface">{reviewingAgent}</b> {visual.badge.toLowerCase()}</span>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Pending gates */}
@@ -355,16 +382,6 @@ function SessionMonitorCard({
       )}
     </article>
   );
-}
-
-function PhaseStatusLabel({ status }: { status: SessionState['pipelinePhases'][number]['status'] }) {
-  const label =
-    status === 'completed' ? '✓' :
-    status === 'running' ? '…' :
-    status === 'awaiting_review' ? '!' :
-    status === 'failed' ? '✗' :
-    status === 'skipped' ? '⊘' : '·';
-  return <span className="font-mono">{label}</span>;
 }
 
 function SessionStatusIcon({ status }: { status: SessionState['status'] }) {

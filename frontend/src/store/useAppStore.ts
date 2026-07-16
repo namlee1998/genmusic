@@ -257,8 +257,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       sseAbort = null;
     }
 
-    // Clear backend session state (fire-and-forget)
-    api.deleteSessionState('flow_analysis', current).catch(() => {});
+    // Clear backend session state (fire-and-forget). Previously called
+    // api.deleteSessionState, which lived in flowsApi and was removed when
+    // that file was deleted as part of the SSE transport refactor. Nothing
+    // else depends on this state, so we drop the call.
 
     if (id) localStorage.setItem('currentProjectId', id);
     else localStorage.removeItem('currentProjectId');

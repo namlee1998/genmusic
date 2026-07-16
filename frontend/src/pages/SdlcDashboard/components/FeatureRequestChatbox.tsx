@@ -16,7 +16,6 @@ export default function FeatureRequestChatbox({ onClose }: { onClose?: () => voi
   const isLoading = useWorkflowStore((s) => s.isLoading);
 
   const [requestText, setRequestText] = useState('');
-  const [techStack, setTechStack] = useState('Auto');
 
   const handleCancel = () => {
     searchParams.delete('focusRequest');
@@ -31,9 +30,9 @@ export default function FeatureRequestChatbox({ onClose }: { onClose?: () => voi
     // Get the repository path silently from local storage (established when importing project)
     const repoUrl = currentProjectId ? (localStorage.getItem(`repoUrl_${currentProjectId}`) || '') : '';
 
-    // Start pipeline (creates a new session)
-    const finalRequest = techStack === 'Auto' ? requestText.trim() : `[Tech Stack: ${techStack}] ${requestText.trim()}`;
-    await startPipeline(currentProjectId || '', repoUrl, finalRequest);
+    // Start pipeline (creates a new session). The user types the desired
+    // tech stack directly into the textarea — no pre-baked selector.
+    await startPipeline(currentProjectId || '', repoUrl, requestText.trim());
 
     // Clear input and close modal
     setRequestText('');
@@ -71,32 +70,11 @@ export default function FeatureRequestChatbox({ onClose }: { onClose?: () => voi
             <textarea
               value={requestText}
               onChange={(e) => setRequestText(e.target.value)}
-              placeholder={t('chatbox.textareaPlaceholder', "Describe the feature you want AIFA to build (e.g., 'Add a sign-up form with password validation')...")}
-              rows={5}
+              placeholder={t('chatbox.textareaPlaceholder', "Describe the feature you want AIFA to build. Include the desired tech stack in your description, e.g. 'Build a sign-up form in Python/FastAPI with email + password validation'...")}
+              rows={7}
               className="w-full bg-slate-950/60 border border-white/10 rounded-md px-3.5 py-2 text-xs text-white focus:outline-none focus:border-indigo-500/60 placeholder:text-slate-500 transition-colors resize-none"
               autoFocus
             />
-          </div>
-
-          {/* Tech Stack Selector */}
-          <div className="flex flex-col gap-1.5 mt-1 mb-2">
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Ngôn ngữ mục tiêu (Target Tech Stack)</span>
-            <div className="flex gap-2 flex-wrap">
-              {['Auto', 'Node.js / React', 'Python / FastAPI', 'Go / Gin', 'Java / Spring'].map((stack) => (
-                <button
-                  key={stack}
-                  type="button"
-                  onClick={() => setTechStack(stack)}
-                  className={`px-3 py-1.5 rounded-md text-[11px] font-medium transition-all ${techStack === stack ? 'bg-indigo-500 text-white shadow-[0_0_10px_rgba(99,102,241,0.5)] border border-indigo-400' : 'bg-slate-900 border border-white/10 text-slate-400 hover:bg-slate-800'}`}
-                >
-                  {stack === 'Auto' ? '✨ ' : stack.includes('React') ? '🟨 ' : stack.includes('Python') ? '🐍 ' : stack.includes('Go') ? '🐹 ' : '☕ '}
-                  {stack}
-                </button>
-              ))}
-            </div>
-            <span className="text-[9px] text-slate-500 mt-1 italic">
-              * Lựa chọn này sẽ được tự động đính kèm vào yêu cầu để ép Agent viết code theo đúng ngôn ngữ.
-            </span>
           </div>
 
           {/* Submit */}

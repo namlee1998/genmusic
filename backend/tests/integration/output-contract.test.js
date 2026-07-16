@@ -7,40 +7,57 @@ jest.mock('uuid', () => ({ v4: jest.fn(() => 'test-uuid') }));
 
 const SdlcWorkflowService = require('../../src/services/SdlcWorkflowService');
 
-const EXPECTED_VERSION = 'gate-output.v4';
+const EXPECTED_VERSION = 'gate-output.v5';
 
 // Frozen expectation of rule name → severity per role.
 const EXPECTED = {
   'architecture-agent': {
-    repository_summary_present: 'BLOCKER', technology_stack_present: 'BLOCKER',
-    technical_decisions_present: 'BLOCKER', constraints_present: 'BLOCKER',
-    repository_routing_present: 'BLOCKER',
-    repository_routing_has_target: 'BLOCKER',
-    repository_routing_has_framework: 'BLOCKER',
-    repository_routing_has_language: 'BLOCKER',
-    architecture_brief_present: 'BLOCKER',
+    // A2A Contract — project_definition is the only required structured
+    // output. Per-field BLOCKERs enforce the {value, source, status}
+    // metadata model (missing or assumed on mandatory fields is BLOCKER).
+    project_definition_present: 'BLOCKER',
+    project_type_missing: 'BLOCKER', project_type_assumed_forbidden: 'BLOCKER',
+    language_missing: 'BLOCKER', language_assumed_forbidden: 'BLOCKER',
+    framework_missing: 'BLOCKER', framework_assumed_forbidden: 'BLOCKER',
+    runtime_missing: 'BLOCKER', runtime_assumed_forbidden: 'BLOCKER',
+    package_manager_missing: 'BLOCKER', package_manager_assumed_forbidden: 'BLOCKER',
+    build_system_missing: 'BLOCKER', build_system_assumed_forbidden: 'BLOCKER',
+    deployment_target_missing: 'BLOCKER', deployment_target_assumed_forbidden: 'BLOCKER',
+    repository_missing: 'BLOCKER', repository_assumed_forbidden: 'BLOCKER',
+    constraints_missing: 'BLOCKER', constraints_assumed_forbidden: 'BLOCKER',
+    out_of_scope_missing: 'BLOCKER', out_of_scope_assumed_forbidden: 'BLOCKER',
+    repository_target_module_missing: 'BLOCKER',
+    // Derived fields demoted to WARNING — documentation only.
+    architecture_brief_present: 'WARNING',
+    repository_routing_present: 'WARNING',
+    technical_decisions_present: 'WARNING',
+    repository_summary_present: 'WARNING',
+    technology_stack_present: 'WARNING',
   },
   'po-agent': {
     prd_present: 'BLOCKER', user_stories_present: 'BLOCKER', ac_present: 'BLOCKER',
     ac_testable: 'BLOCKER', ac_measurable: 'WARNING', scope_present: 'BLOCKER',
-    out_of_scope_present: 'BLOCKER', risk_classification_present: 'BLOCKER',
+    out_of_scope_present: 'BLOCKER',
   },
   'ux-agent': {
     ux_spec_present: 'BLOCKER', user_flow_present: 'BLOCKER', wireframe_present: 'BLOCKER',
     screens_present: 'BLOCKER', components_present: 'BLOCKER',
+    html_mockup_is_complete_html5: 'BLOCKER',
   },
   'dev-agent': {
     implementation_plan_present: 'BLOCKER', patch_present: 'BLOCKER', changed_files_present: 'BLOCKER',
-    patch_format: 'WARNING', build_ok: 'BLOCKER',
-    build_tests: 'BLOCKER', self_test_report: 'BLOCKER', linked_ac: 'BLOCKER',
-    risk_assessment_present: 'BLOCKER', risk_classification_present: 'BLOCKER',
-    security_notes: 'BLOCKER', security_gate: 'BLOCKER',
+    patch_format: 'WARNING',
   },
   'qa-agent': {
     test_cases_present: 'BLOCKER', coverage_present: 'BLOCKER', coverage_complete: 'BLOCKER', tests_executed: 'BLOCKER',
     test_count_consistent: 'BLOCKER', test_evidence_present: 'BLOCKER', tests_passed: 'BLOCKER',
     no_blockers: 'BLOCKER', qa_report_present: 'BLOCKER',
-    release_decision_present: 'BLOCKER', release_reason: 'BLOCKER',
+    // Phase 3.6: validation evidence promoted from DEV to QA.
+    build_result_present: 'BLOCKER', self_test_report_present: 'BLOCKER',
+    linked_ac_ids_present: 'BLOCKER', risk_classification_present: 'BLOCKER',
+    risk_assessment_present: 'BLOCKER', security_notes: 'BLOCKER', security_gate: 'BLOCKER',
+    // Phase 3.6: release_decision removed from QA (Release Manager owns it).
+    release_reason: 'BLOCKER',
     quality_gate_pass: 'BLOCKER',
   },
 };
@@ -68,7 +85,6 @@ describe('I5 — versioned output contract drift guard', () => {
         acceptance_criteria: ['AC-1: something measurable and clear'],
         scope: 'Implement the requested feature.',
         out_of_scope: 'No unrelated changes.',
-        risk_classification: { level: 'LOW', required_gates: ['schema', 'validation'] },
       },
     );
     expect(res.ok).toBe(true);

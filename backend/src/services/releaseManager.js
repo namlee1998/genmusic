@@ -1,8 +1,13 @@
 // ── Release Decision Logic ──────────────────────────────────────────────────
 const { v4: uuidv4 } = require('uuid');
+const path = require('path');
 const { Task, HitlDecision, PipelineSession } = require('../models');
 const { ApiError } = require('../middleware/errorHandler');
 const { FINAL_GATE, RELEASE_DECISIONS, GATE_CONFIG } = require('./sdlcConstants');
+const repoService = require('./repoService');
+const workflowReport = require('./workflowReport');
+const { qaGatePassed } = require('./qaGate');
+const { publishEvent } = require('./eventPublisher');
 const logger = require('../config/logger');
 
 /**
@@ -51,10 +56,7 @@ async function submitReleaseDecision({
     throw new ApiError(409, `This QA run was already finalized as ${priorReleaseDecision.decision}`);
   }
 
-  const qaGatePass = qaTask.result?.gateRecommendation === 'PASS' || (() => {
-    const tr = qaTask.agentOutput?.test_run_report || {};
-    return tr.executed === true && typeof tr.failed === 'number' && tr.failed === 0 && (tr.total || 0) > 0;
-  })();
+  const qaGatePass = qaGatePassed(qaTask);
   if (!qaGatePass) {
     throw new ApiError(409, 'Release gate is unavailable until QA quality gate returns PASS');
   }
@@ -89,7 +91,17 @@ async function submitReleaseDecision({
     },
   });
 
-  // T6.2 — on RELEASED, assemble the release bundle
+  // §19.4 A.3 — FINAL_RELEASE APPROVE branch:
+  //   - Pure packaging + publishing stage; never re-runs an agent.
+  //   - 1. Remove any previously-generated release bundle for THIS session
+  //        so the new commit is "delete old + add new", not "append new".
+  //   - 2. Build the new bundle (final.md + qa-report.md + audit-trail.json)
+  //        via the existing workflowReport.writeReleaseBundle.
+  //   - 3. Commit the bundle in the user's repo. This is the canonical
+  //        publishing event; distinct from per-agent checkpoint commits.
+  //   - 4. Push (best-effort; commit is mandatory).
+  //   - 5. Flip the session to 'completed'.
+  //   - 6. Emit pipeline_completed — the only place this event fires now.
   let releaseOutputs = null;
   if (decision === 'APPROVE') {
     try {
@@ -98,20 +110,93 @@ async function submitReleaseDecision({
         deps.getAuditTrail(projectId, null, sessionId),
         deps.getRepoContext(projectId, sessionId),
       ]);
-      const workflowReport = require('./workflowReport');
+
+      // 1. Remove previously-generated release artifacts (if any) for this
+      //    session. The bundle lives in sessions/<slug>-<shortId>/ inside
+      //    the canonical repo; findPreviousBundle confirms ownership via the
+      //    naming convention (and a .aifa-bundle-id marker when present) so
+      //    we never delete a different session's bundle.
+      const repoPath = repoContext?.repoPath || repoService.repoPathFor(projectId, sessionId);
+      const canonicalRepoPath = repoService.repoPathFor(projectId);
+      const sessionsRoot = path.join(canonicalRepoPath, 'sessions');
+      const oldBundle = await workflowReport.findPreviousBundle(sessionsRoot, sessionId);
+      if (oldBundle) {
+        await workflowReport.removeGitTracked(repoPath, oldBundle.relativePath);
+        const fs = require('fs/promises');
+        await fs.rm(oldBundle.absolutePath, { recursive: true, force: true });
+      }
+
+      // 2. Write the new bundle. workflowReport.writeReleaseBundle now
+      //    includes audit-trail.json (added in §19 step 1).
       const bundle = await workflowReport.writeReleaseBundle({
         projectId, session, repoContext, packet, audit, evidence, releaseDecision: record,
       });
       releaseOutputs = bundle.outputs;
+
+      // 3. Commit the bundle. The commit message is prefixed
+      //    `[release][<shortId>]` so it's visually distinct from per-agent
+      //    checkpoint commits written by commitAndPushOnApprove.
+      if (repoPath) {
+        const git = repoService.git;
+        await git(['add', '-A'], repoPath);
+        const status = (await git(['status', '--porcelain'], repoPath)).trim();
+        if (status) {
+          await git(['config', 'user.name', 'AIFA Release'], repoPath).catch(() => {});
+          await git(['config', 'user.email', 'release@aifa.io'], repoPath).catch(() => {});
+          const shortId = String(sessionId).slice(0, 8);
+          await git(['commit', '-m', `[release][${shortId}] aifa: publish final.md + qa-report.md + audit-trail.json`], repoPath);
+
+          // 4. Push is best-effort — commit is mandatory, push is not.
+          //    Mirrors commitAndPushOnApprove's semantics: failures are
+          //    logged, never thrown.
+          const token = process.env.GH_TOKEN;
+          if (token) {
+            try {
+              const remoteUrl = (await git(['config', '--get', 'remote.origin.url'], repoPath).catch(() => '') || '').trim();
+              if (remoteUrl.startsWith('https://')) {
+                const authUrl = remoteUrl.replace('https://', `https://${token}@`);
+                await git(['push', authUrl, 'HEAD'], repoPath);
+              }
+            } catch (pushErr) {
+              logger.warn('release push best-effort failed', { projectId, sessionId, error: pushErr.message });
+            }
+          }
+        }
+      }
+
+      // 5. Mark the session completed.
       await PipelineSession.update(sessionId, { status: 'completed', outputDir: bundle.outputDir });
+
+      // 6. Emit pipeline_completed — the canonical terminal event. Only
+      //    here, never at the QA commit boundary (that path was re-homed
+      //    to FINAL_RELEASE gate creation in SdlcWorkflowService A.1).
+      await publishEvent(
+        'pipeline_completed',
+        { projectId, sessionId, taskId: qaTask.id, role: 'release' },
+        {
+          qaResult: {
+            status: 'passed',
+            coverage: evidence.coverage_percentage ?? null,
+            blockers: evidence.open_blockers.length,
+            warnings: 0,
+            reportUrl: `/api/v1/sdlc/sessions/${sessionId}/release-files/qa-report.md`,
+            commitSha: 'see session.repoInfo',
+          },
+        },
+      );
     } catch (err) {
       logger.error('release bundle failed', { projectId, sessionId, error: err.message });
+      throw err;
     }
   }
 
   return { hitlDecision: record, releaseOutputs };
 }
 
+// Phase 3.6: QA is the canonical owner of validation evidence. New sessions
+// read risk_classification / security_gate / build_result from qaTask.
+// Legacy persisted sessions may still carry these fields on devTask / poTask —
+// we keep a defensive fallback so historical releases remain readable.
 async function buildReleaseEvidenceSummary(sessionId) {
   const [poTask, uxTask, devTask, qaTask] = await Promise.all([
     Task.findLatestBySession(sessionId, 'po-agent', 'completed', 'committed'),
@@ -119,9 +204,15 @@ async function buildReleaseEvidenceSummary(sessionId) {
     Task.findLatestBySession(sessionId, 'dev-agent', 'completed', 'committed'),
     Task.findLatestBySession(sessionId, 'qa-agent', 'completed', 'committed'),
   ]);
-  const risk = poTask?.approvedOutput?.risk_classification || poTask?.agentOutput?.risk_classification || null;
-  const securityGate = devTask?.approvedOutput?.security_gate || devTask?.agentOutput?.security_gate || null;
   const qaOutput = qaTask?.approvedOutput || qaTask?.agentOutput || {};
+  const risk = qaOutput.risk_classification
+    || poTask?.approvedOutput?.risk_classification
+    || poTask?.agentOutput?.risk_classification
+    || null;
+  const securityGate = qaOutput.security_gate
+    || devTask?.approvedOutput?.security_gate
+    || devTask?.agentOutput?.security_gate
+    || null;
   const openBlockers = [
     ...(securityGate?.issues || []),
     ...((qaOutput.blocker_count || 0) > 0
@@ -137,7 +228,10 @@ async function buildReleaseEvidenceSummary(sessionId) {
       dev: devTask ? { task_id: devTask.id, output_version: devTask.outputVersion } : null,
       qa: qaTask ? { task_id: qaTask.id, output_version: qaTask.outputVersion } : null,
     },
-    build_result: devTask?.approvedOutput?.build_result || devTask?.agentOutput?.build_result || null,
+    build_result: qaOutput.build_result
+      || devTask?.approvedOutput?.build_result
+      || devTask?.agentOutput?.build_result
+      || null,
     security_gate: securityGate,
     qa_gate: qaTask?.result?.gateRecommendation || null,
     coverage_percentage: qaOutput.coverage_summary?.percentage ?? null,

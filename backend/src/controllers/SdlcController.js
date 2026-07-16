@@ -7,8 +7,20 @@
 const SdlcWorkflowService = require('../services/SdlcWorkflowService');
 const repoService = require('../services/repoService');
 const { validateRepoUrl } = repoService;
-const gateBridge = require('../services/gateBridge');
+const eventBus = require('../services/eventBus');
+const { publishEvent } = require('../services/eventPublisher');
+const { createEnvelope } = require('../dto/eventEnvelope');
+const AgentEvent = require('../models/AgentEvent');
 const logger = require('../config/logger');
+
+// Legacy migration helper. ONLY used by streamPipelineStatus replay for
+// AgentEvent rows that predate the transport refactor and lack a stored
+// envelope column. Reconstructs a canonical envelope from the legacy
+// (type, payload, sequence) row so replay stays in the same shape as live
+// events. Not exported. Producers MUST go through publishEvent.
+function buildLegacyEnvelope(type, base, payload, sequence) {
+  return createEnvelope(type, base, payload, sequence);
+}
 
 
 // Demo scenarios exposed by the dev-only scenario selector endpoint.
@@ -273,103 +285,109 @@ class SdlcController {
 
   async streamPipelineStatus(req, res, next) {
     try {
-      const { workflowId } = req.params;
+      const sessionId = req.params.sessionId ?? req.params.workflowId;
 
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       res.flushHeaders?.();
 
-      const sendEvent = (event, data, id = null) => {
-        if (id !== null) res.write(`id: ${id}\n`);
-        res.write(`event: ${event}\n`);
-        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      // Canonical transport: every frame is the canonical EventEnvelope JSON
+      // forwarded verbatim from where it was published. Replay re-emits
+      // row.envelope byte-for-byte; live envelopes are produced exclusively
+      // by publishEvent.
+      const sendEnvelope = (envelope) => {
+        if (!envelope) return;
+        res.write(`id: ${envelope.sequence}\n`);
+        res.write(`data: ${JSON.stringify(envelope)}\n\n`);
+      };
+
+      const sendError = (message, code = null, statusCode = 500) => {
+        // Transport error path — the canonical envelope requires projectId,
+        // which we may not have yet (e.g. session lookup failed). Emit a
+        // non-envelope `data:` line that the FE sseClient logs and discards,
+        // rather than synthesizing an envelope (no manual UUID/sequence).
+        res.write(`data: ${JSON.stringify({ error: { message, code, statusCode } })}\n\n`);
       };
 
       const cursorRaw = req.headers['last-event-id'] ?? req.query.after_sequence ?? 0;
       let lastSeq = Number.isFinite(Number(cursorRaw)) ? Number(cursorRaw) : 0;
+      const isResume = lastSeq > 0;
 
-      // T5 (B6) — push, not poll. We:
-      //   1) emit the initial snapshot once on connect so the client has the
-      //      current pipeline status without waiting for a poll tick;
-      //   2) subscribe to gateBridge.subscribeProject(workflowId) so every
-      //      gate / runtime event under the project fans out to this stream
-      //      with zero latency;
-      //   3) poll a SLOW background tick (10s, was 2s) ONLY to detect terminal
-      //      states the workflow doesn't otherwise broadcast (qa_complete,
-      //      failed) — these are infrequent so the latency trade-off is fine.
-
+      // Resolve the projectId for this session before subscribing so the
+      // bus subscription covers the seed envelope we publish below.
       let initialPipeline;
       try {
-        initialPipeline = await SdlcWorkflowService.getPipelineResponse(workflowId, req.user);
+        initialPipeline = await SdlcWorkflowService.getPipelineResponse(sessionId, req.user);
       } catch (err) {
-        // Cannot call next(err) here — headers are already sent on this SSE
-        // response, which would crash with ERR_HTTP_HEADERS_SENT. Convert
-        // to a structured SSE error event and close the stream cleanly.
-        logger.warn?.('streamPipelineStatus: initial snapshot failed', { workflowId, error: err.message });
-        sendEvent('error', { message: err.message, code: err.code || null, statusCode: err.statusCode || 500 });
+        sendError(err.message, err.code || null, err.statusCode || 500);
         return res.end();
       }
-      if (!initialPipeline) {
-        sendEvent('error', { message: 'Pipeline not found' });
+      if (!initialPipeline || !initialPipeline.projectId) {
+        sendError('Pipeline not found');
         return res.end();
       }
+      const projectId = initialPipeline.projectId;
 
-      sendEvent('progress', {
-        step: 'connected',
-        resumedFrom: lastSeq,
-        log: 'Connected to SDLC pipeline stream...',
-        status: initialPipeline.status,
-        pipelinePhases: initialPipeline.pipelinePhases,
-        pendingGates: initialPipeline.pendingGates,
-      });
-      // Mirror the initial gate set so SSE clients see consistent state.
-      for (const gate of initialPipeline.pendingGates || []) {
-        sendEvent('gate_pending', { gate });
+      // 1) Subscribe FIRST so the seed envelope we publish below is fanned
+      //    out to this connection via the same canonical path every other
+      //    live event uses.
+      const unsubscribe = eventBus.subscribeProject(projectId, sendEnvelope);
+
+      // 2) Replay any persisted envelopes for this session. row.envelope is
+      //    forwarded verbatim. The legacy fallback (buildLegacyEnvelope) is
+      //    reserved for rows pre-dating this transport refactor.
+      try {
+        const persisted = await AgentEvent.list({
+          sessionId,
+          afterSequence: lastSeq,
+          limit: 1000,
+        });
+        for (const row of persisted) {
+          if (row.envelope) {
+            sendEnvelope(row.envelope);
+          } else if (row.payload) {
+            const envelope = buildLegacyEnvelope(
+              row.type === 'gate_audit' ? 'runtime_log' : row.type,
+              { projectId: row.projectId, sessionId, taskId: row.taskId, role: null },
+              row.payload,
+              row.sequence,
+            );
+            sendEnvelope(envelope);
+          }
+        }
+      } catch (err) {
+        logger.warn?.('streamPipelineStatus: replay failed', { sessionId, error: err.message });
       }
 
+      // 3) Initial snapshot: session_started (or session_resumed on reconnect).
+      //    Producers ALWAYS go through publishEvent — never a manual
+      //    UUID/sequence/timestamp.
+      const snapshotType = isResume ? 'session_resumed' : 'session_started';
+      await publishEvent(
+        snapshotType,
+        { projectId, sessionId, taskId: null, role: null },
+        {
+          status: initialPipeline.status,
+          pipelinePhases: initialPipeline.pipelinePhases,
+          repoInfo: initialPipeline.repoInfo || null,
+          pendingGates: initialPipeline.pendingGates || [],
+          resumedFrom: lastSeq,
+          log: isResume ? 'Resumed SDLC pipeline stream...' : 'Connected to SDLC pipeline stream...',
+        },
+      );
+
+      // 4) Heartbeat only. Terminal events (pipeline_completed /
+      //    pipeline_failed) are owned by SdlcWorkflowService — they are
+      //    published exactly once at the state transition and fan out via
+      //    the canonical publishEvent path. The SSE controller never polls
+      //    for terminal states and never publishes terminal events.
       const heartbeatInterval = setInterval(() => {
         res.write(': heartbeat\n\n');
       }, 15000);
 
-      // T5: subscribe instead of polling. The bridge emits gate_pending /
-      // gate_resolved / runtime_log (per task) and we forward them as-is.
-      // IMPORTANT: `subscribeProject` keys on projectId, not sessionId.
-      // `workflowId` here IS the sessionId (see /stream/:workflowId), so we
-      // must resolve the projectId from the snapshot and subscribe with that,
-      // otherwise no events ever fan out to this stream.
-      const unsubscribe = gateBridge.subscribeProject(initialPipeline.projectId, (_taskId, event, data) => {
-        sendEvent(event, data);
-      });
-
-      // Slow fallback tick — only catches terminal states (completed/failed)
-      // that no explicit broadcast covers. 10s instead of 2s so the cost is
-      // negligible vs the old 2s poll loop.
-      const fallbackTick = setInterval(async () => {
-        try {
-          const pipeline = await SdlcWorkflowService.getPipelineResponse(workflowId, req.user);
-          if (!pipeline) {
-            sendEvent('error', { message: 'Pipeline not found' });
-            stopAll(); res.end(); return;
-          }
-          if (pipeline.status === 'qa_complete') {
-            sendEvent('completed', { qaResult: pipeline.qaResult });
-            stopAll(); res.end(); return;
-          }
-          if (pipeline.status === 'failed') {
-            sendEvent('error', { message: 'Pipeline failed' });
-            stopAll(); res.end(); return;
-          }
-        } catch (error) {
-          sendEvent('error', { message: error.message });
-          stopAll();
-          res.end();
-        }
-      }, 10000);
-
       const stopAll = () => {
         clearInterval(heartbeatInterval);
-        clearInterval(fallbackTick);
         unsubscribe();
       };
 
@@ -378,9 +396,6 @@ class SdlcController {
         res.end();
       });
     } catch (err) {
-      // Don't call next(err) if we already committed the SSE response —
-      // it crashes with ERR_HTTP_HEADERS_SENT. Just log and let the
-      // connection close naturally.
       if (res.headersSent) {
         logger.warn?.('sse stream: late error after headers sent', { error: err.message });
         try { res.end(); } catch (_) { /* ignore */ }
@@ -436,128 +451,14 @@ class SdlcController {
   }
 
   async streamStatus(req, res, next) {
-    try {
-      const { task_id } = req.params;
-
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-      res.flushHeaders?.();
-
-      // DMO-004: an SSE frame carries an `id:` = the persisted AgentEvent
-      // sequence so a client can resume after a drop. The cursor comes from the
-      // standard EventSource `Last-Event-ID` header, or `?after_sequence=` for
-      // fetch-based clients.
-      const sendEvent = (event, data, id = null) => {
-        if (id !== null) res.write(`id: ${id}\n`);
-        res.write(`event: ${event}\n`);
-        res.write(`data: ${JSON.stringify(data)}\n\n`);
-      };
-
-      const cursorRaw = req.headers['last-event-id'] ?? req.query.after_sequence ?? 0;
-      let lastSeq = Number.isFinite(Number(cursorRaw)) ? Number(cursorRaw) : 0;
-
-      // Replay every persisted AgentEvent after the cursor (and tail new ones),
-      // each tagged with its sequence id so a reconnect never loses an event.
-      const flushPersistedEvents = async () => {
-        const events = await SdlcWorkflowService
-          .getTaskEvents(task_id, { afterSequence: lastSeq, limit: 500 }, req.user)
-          .catch(() => []);
-        for (const ev of events) {
-          sendEvent('agent_event', {
-            sequence: ev.sequence,
-            type: ev.type,
-            actor: ev.actor,
-            payload: ev.payload,
-            createdAt: ev.createdAt,
-          }, ev.sequence);
-          if (ev.sequence > lastSeq) lastSeq = ev.sequence;
-        }
-      };
-
-      sendEvent('progress', {
-        step: 'connected',
-        resumedFrom: lastSeq,
-        log: 'Connected to SDLC task stream...',
-      });
-      // Immediate replay so a reconnect catches up without waiting a poll tick.
-      await flushPersistedEvents();
-
-      const heartbeatInterval = setInterval(() => {
-        res.write(': heartbeat\n\n');
-      }, 15000);
-
-      let pollInterval;
-      const unsubscribeGateEvents = gateBridge.subscribe(task_id, (event, data) => {
-        sendEvent(event, data);
-      });
-      const stopAll = () => {
-        clearInterval(pollInterval);
-        clearInterval(heartbeatInterval);
-        unsubscribeGateEvents();
-      };
-
-      // T2/T7: only emit a gate_pending event when the pending set changes, so
-      // the client isn't spammed every poll tick.
-      const seenGates = new Set();
-
-      pollInterval = setInterval(async () => {
-        try {
-          await flushPersistedEvents(); // DMO-004: stream newly-persisted events with ids
-          const task = await SdlcWorkflowService.getTaskStatus(task_id, req.user);
-
-          if (!task) {
-            sendEvent('error', { message: 'Task not found' });
-            stopAll(); res.end(); return;
-          }
-
-          for (const gate of task.pendingGates || []) {
-            if (seenGates.has(gate.approvalId)) continue;
-            seenGates.add(gate.approvalId);
-            sendEvent('gate_pending', gate);
-          }
-
-          if (task.status === 'completed') {
-            sendEvent('completed', {
-              ...task.result,
-              artifacts: task.artifacts || [],
-              hitlDecision: task.hitlDecision || null,
-            });
-            stopAll(); res.end(); return;
-          }
-
-          if (task.status === 'failed') {
-            sendEvent('error', { message: task.error || 'Task failed' });
-            stopAll(); res.end(); return;
-          }
-
-          sendEvent('progress', {
-            step: task.type,
-            status: task.status,
-            log: `Processing: ${task.type}`,
-          });
-        } catch (error) {
-          sendEvent('error', { message: error.message });
-          stopAll();
-          res.end();
-        }
-      }, 2000);
-
-      req.on('close', () => {
-        stopAll();
-        res.end();
-      });
-    } catch (err) {
-      // Don't call next(err) if we already committed the SSE response —
-      // it crashes with ERR_HTTP_HEADERS_SENT. Just log and let the
-      // connection close naturally.
-      if (res.headersSent) {
-        logger.warn?.('sse stream: late error after headers sent', { error: err.message });
-        try { res.end(); } catch (_) { /* ignore */ }
-      } else {
-        next(err);
-      }
-    }
+    // Legacy per-task SSE endpoint. The single canonical transport is
+    // /stream/:sessionId (streamPipelineStatus). Per-task streams are
+    // deprecated — there is exactly one transport path.
+    return res.status(410).json({
+      status: 'error',
+      code: 'STREAM_STATUS_DEPRECATED',
+      message: 'GET /sdlc/status/:task_id is deprecated. Use GET /sdlc/stream/:sessionId as the single canonical SSE transport.',
+    });
   }
 
   async getWorkflowStatus(req, res, next) {
@@ -589,11 +490,20 @@ class SdlcController {
   async submitReleaseDecision(req, res, next) {
     try {
       const { session_id } = req.params;
-      const { decision_id, decision, comment } = req.body;
+      const { decision_id, comment } = req.body;
+      // Wire-format normalization: the UI panels send lowercase `action`
+      // ('approve' | 'reject') but the canonical contract owned by
+      // sdlcConstants.RELEASE_DECISIONS and releaseManager is uppercase
+      // `decision` ('APPROVE' | 'REJECT'). Accept either field name; map
+      // to the canonical contract here so the service layer (and the
+      // frozen schema) is never exposed to a UI-side casing drift.
+      const rawDecision = req.body.decision ?? (typeof req.body.action === 'string'
+        ? req.body.action.toUpperCase()
+        : undefined);
       const result = await SdlcWorkflowService.submitReleaseDecision({
         sessionId: session_id,
         decisionId: decision_id,
-        decision,
+        decision: rawDecision,
         comment: comment || '',
         user: req.user,
       });

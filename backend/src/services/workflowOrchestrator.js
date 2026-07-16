@@ -30,6 +30,22 @@ const PREDECESSOR_ROLE = {
 
 const MAX_PARALLEL_WORKFLOWS = () => Math.max(1, Number(process.env.MAX_PARALLEL_WORKFLOWS) || 4);
 
+// Phase 2 plumbing (docs/architecture/A2A_PIPELINE_REDESIGN.md §8 Phase 2):
+// Resolve a JSON-object artifact (currently only `project_definition`) from
+// the upstream task and return it as a structured object ready for
+// `buildContextFromArtifacts` extras. Returns null when the artifact is
+// absent or empty, so callers can safely spread the result.
+async function resolveStructuredArtifact(artifacts, artifactType, deps) {
+  if (!deps || typeof deps.resolveArtifactContent !== 'function') return null;
+  const row = artifacts.find((a) => a.artifactType === artifactType);
+  if (!row) return null;
+  const { contentJson } = await deps.resolveArtifactContent(row);
+  if (contentJson && typeof contentJson === 'object' && !Array.isArray(contentJson)) {
+    return contentJson;
+  }
+  return null;
+}
+
 // =============================================================================
 // runArchitectureAgent
 // =============================================================================
@@ -81,6 +97,16 @@ async function runArchitectureAgent(params, deps) {
     versionStatus: 'draft',
   });
 
+  // Persist the original Feature Request on the ARCH task's observability so
+  // the auto-advance path (startNextAgentIfAvailable → runPOAgent) can recover
+  // it without requiring an extra DB column or new persistent artifact type.
+  // PO already stores featureRequest the same way (runPOAgent below) — keep the
+  // pattern uniform.
+  if (featureRequest) {
+    const archObservability = { featureRequest };
+    await Task.update(task.id, { observability: archObservability });
+  }
+
   if (backlogId) {
     try {
       await FeatureBacklog.linkTask(backlogId, task.id, projectId);
@@ -107,6 +133,44 @@ async function runArchitectureAgent(params, deps) {
       });
       repoContext = { ...opened, repoUrl: null, request: featureRequest?.title || '' };
     }
+  } else if (deps.repoService?.prepareSessionRepo) {
+    // Spec v3 §11: every run needs a git workspace so the per-agent commits
+    // (5 agents + final.md) actually land in git. When ARCH is invoked without
+    // a repoUrl this is still required — fall back to prepareSessionRepo,
+    // which auto-initializes an empty repo if no canonical upload exists
+    // (see repoService.prepareSessionRepo). Without this, the rest of the
+    // pipeline would silently skip every commit ("workspace missing") and
+    // declare RELEASED on a run that left zero git history behind.
+    const prepared = await deps.repoService.prepareSessionRepo({
+      projectId,
+      sessionId: session.id,
+      request: featureRequest?.title || '',
+    });
+    repoContext = { ...prepared, repoUrl: null, request: featureRequest?.title || '' };
+  }
+
+  // FIX A — persist the workspace path BEFORE runAgent starts so:
+  //   1. _getRepoContext(projectId, sessionId) returns a real working tree
+  //      for every downstream agent (PO/UX/DEV/QA) — without this, the
+  //      agents' Write/Edit tools operate against process.cwd() instead
+  //      of the cloned/opened repo.
+  //   2. commitAndPushOnApprove computes the same path and finds the
+  //      workspace on disk, so per-agent commits fire as Spec §7.2/§11
+  //      require (was: PipelineSession.repoPath stayed NULL and 0 of 6
+  //      commits ever landed).
+  if (repoContext?.repoPath) {
+    await PipelineSession.update(session.id, {
+      repoPath: repoContext.repoPath,
+      workingBranch: repoContext.workingBranch,
+      baseBranch: repoContext.baseBranch,
+    });
+    logger.info('[SDLC] ARCH workspace persisted', {
+      taskId: task.id,
+      sessionId: session.id,
+      repoPath: repoContext.repoPath,
+      workingBranch: repoContext.workingBranch,
+      baseBranch: repoContext.baseBranch,
+    });
   }
 
   // AIFA v2.1 token-economy: the backend owns repository discovery. Build a
@@ -307,9 +371,17 @@ async function runPOAgent(params, deps) {
 
   const architecture_brief = sourceArtifacts.find((a) => a.artifactType === 'architecture_brief')?.contentText || null;
 
+  // Phase 2: resolve the canonical `project_definition` artifact from the
+  // ARCH task and inject it as a flat object into the PO context. PO's
+  // `compactContext` whitelist (claudeCodeRunner.js) now includes
+  // `project_definition`, so the value flows into the AIFA Context as a
+  // structured object — no prompt change required.
+  const projectDefinition = await resolveStructuredArtifact(sourceArtifacts, 'project_definition', deps);
+
   const context = await deps.buildContextFromArtifacts(sourceArtifacts, {
     feedbackPrompt,
     architecture_brief,
+    ...(projectDefinition ? { project_definition: projectDefinition } : {}),
     ...(previousDraft ? { previousDraft } : {}),
     ...(featureRequest ? { featureRequest } : {}),
   });
@@ -328,9 +400,40 @@ async function runUXAgent(params, deps) {
   const sourceTask = await deps.requireApprovedTask(sourceTaskId, 'po-agent', user);
   await requireUpstreamArtifact(sourceTask, 'ux-agent');
 
-  const sourceArtifacts = await AgentArtifact.findByTaskId(sourceTask.id);
+  // B16: mirror runQAAgent — also load Architecture artifacts so UX receives
+  // the canonical `project_definition` + `architecture_brief` per the
+  // a2a_handoff envelope contract (artifactManager.js:113-122). Without this
+  // UX sees only PO artifacts and self-reports the missing project_definition.
+  const archTask = await Task.findLatestBySession(
+    sourceTask.sessionId,
+    'architecture-agent',
+    'completed',
+    'committed',
+  );
+
+  const [archProjectDefinition, archArtifacts, poArtifacts] = await Promise.all([
+    archTask
+      ? resolveStructuredArtifact(
+          await AgentArtifact.findByTaskId(archTask.id),
+          'project_definition',
+          deps,
+        )
+      : Promise.resolve(null),
+    archTask ? AgentArtifact.findByTaskId(archTask.id) : Promise.resolve([]),
+    AgentArtifact.findByTaskId(sourceTask.id),
+  ]);
+
+  // De-dupe by contentHash so the same artifact (e.g. on a retry/refresh)
+  // is not listed twice; ARCH contributes first, PO never overrides.
+  const seenHashes = new Set();
+  const allArtifacts = [...archArtifacts, ...poArtifacts].filter((a) => {
+    if (!a.contentHash || seenHashes.has(a.contentHash)) return false;
+    seenHashes.add(a.contentHash);
+    return true;
+  });
+
   const inputHash = deps.contentHash({
-    artifacts: sourceArtifacts.map((a) => a.contentHash),
+    artifacts: allArtifacts.map((a) => a.contentHash),
     feedbackPrompt,
   });
 
@@ -345,7 +448,13 @@ async function runUXAgent(params, deps) {
     versionStatus: 'draft',
   });
 
-  const context = await deps.buildContextFromArtifacts(sourceArtifacts, { feedbackPrompt, ...(previousDraft ? { previousDraft } : {}) });
+  const repoContext = deps.getRepoContext ? await deps.getRepoContext(task.projectId, task.sessionId) : null;
+  const context = await deps.buildContextFromArtifacts(allArtifacts, {
+    feedbackPrompt,
+    ...(archProjectDefinition ? { project_definition: archProjectDefinition } : {}),
+    ...(repoContext ? { repoContext } : {}),
+    ...(previousDraft ? { previousDraft } : {}),
+  });
   deps.runAgent(task, context, user?.id).catch((err) => console.error('[SDLC] UX Agent failed:', err));
 
   return task;
@@ -388,9 +497,11 @@ async function runDEVAgent(params, deps) {
   const architecture_brief = [...poArtifacts, ...uxArtifacts]
     .find((a) => a.artifactType === 'architecture_brief')?.contentText || null;
 
+  const repoContext = deps.getRepoContext ? await deps.getRepoContext(task.projectId, task.sessionId) : null;
   const context = await deps.buildContextFromArtifacts([...poArtifacts, ...uxArtifacts], {
     feedbackPrompt,
     architecture_brief,
+    ...(repoContext ? { repoContext } : {}),
     ...(previousDraft ? { previousDraft } : {}),
   });
   deps.runAgent(task, context, user?.id).catch((err) => console.error('[SDLC] DEV Agent failed:', err));
@@ -419,18 +530,37 @@ async function runQAAgent(params, deps) {
   );
   if (existingQa) return existingQa;
 
-  const [poTask, uxTask] = await Promise.all([
+  const [poTask, uxTask, archTask] = await Promise.all([
     Task.findLatestBySession(sourceTask.sessionId, 'po-agent', 'completed', 'committed'),
     Task.findLatestBySession(sourceTask.sessionId, 'ux-agent', 'completed', 'committed'),
+    // Phase 2: also surface the ARCH (architecture-agent) task so QA can
+    // reach `project_definition` across the whole ARCH → PO → UX → DEV → QA
+    // chain (QA's chain predecessor is DEV, but the canonical A2A
+    // contract originates from ARCH).
+    Task.findLatestBySession(sourceTask.sessionId, 'architecture-agent', 'completed', 'committed'),
   ]);
 
-  const allArtifacts = (
-    await Promise.all([
-      poTask ? AgentArtifact.findByTaskId(poTask.id) : Promise.resolve([]),
-      uxTask ? AgentArtifact.findByTaskId(uxTask.id) : Promise.resolve([]),
-      AgentArtifact.findByTaskId(sourceTask.id),
-    ])
-  ).flat();
+  const [archProjectDefinition, archArtifacts] = archTask
+    ? await Promise.all([
+        resolveStructuredArtifact(
+          await AgentArtifact.findByTaskId(archTask.id),
+          'project_definition',
+          deps,
+        ),
+        AgentArtifact.findByTaskId(archTask.id),
+      ])
+    : [null, []];
+
+  const allArtifacts = [
+    ...(archArtifacts || []),
+    ...(
+      await Promise.all([
+        poTask ? AgentArtifact.findByTaskId(poTask.id) : Promise.resolve([]),
+        uxTask ? AgentArtifact.findByTaskId(uxTask.id) : Promise.resolve([]),
+        AgentArtifact.findByTaskId(sourceTask.id),
+      ])
+    ).flat(),
+  ];
 
   const inputHash = deps.contentHash({
     artifacts: allArtifacts.map((a) => a.contentHash),
@@ -448,7 +578,13 @@ async function runQAAgent(params, deps) {
     versionStatus: 'draft',
   });
 
-  const context = await deps.buildContextFromArtifacts(allArtifacts, { feedbackPrompt, ...(previousDraft ? { previousDraft } : {}) });
+  const repoContext = deps.getRepoContext ? await deps.getRepoContext(task.projectId, task.sessionId) : null;
+  const context = await deps.buildContextFromArtifacts(allArtifacts, {
+    feedbackPrompt,
+    ...(archProjectDefinition ? { project_definition: archProjectDefinition } : {}),
+    ...(repoContext ? { repoContext } : {}),
+    ...(previousDraft ? { previousDraft } : {}),
+  });
   deps.runAgent(task, context, user?.id).catch((err) => console.error('[SDLC] QA Agent failed:', err));
 
   return task;
@@ -486,6 +622,21 @@ async function startNextAgentIfAvailable(task, userId, deps) {
   const existing = tasks.find((candidate) => candidate.type === nextAgent && candidate.sourceRunId === task.id);
   if (existing) return existing;
 
+  // Recover the original Feature Request from the upstream task's observability
+  // when auto-advancing into PO. ARCH persists `observability.featureRequest`
+  // at task creation (runArchitectureAgent); PO persists the same field
+  // symmetrically. Without this, runPOAgent receives featureRequest=null and
+  // the PO agent's AIFA Context only contains feedbackPrompt="", which
+  // historically caused PO to ask "the AIFA context provided an empty
+  // feedbackPrompt" instead of producing the PRD.
+  let carriedFeatureRequest = null;
+  if (nextAgent === 'po-agent') {
+    const sourceObservability = task.observability || {};
+    if (sourceObservability.featureRequest && typeof sourceObservability.featureRequest === 'object') {
+      carriedFeatureRequest = sourceObservability.featureRequest;
+    }
+  }
+
   const args = {
     projectId: task.projectId,
     sourceTaskId: task.id,
@@ -493,6 +644,7 @@ async function startNextAgentIfAvailable(task, userId, deps) {
     // created up-front by runArchitectureAgent so PO reuses it instead of
     // creating a duplicate PipelineSession and re-cloning the repo.
     ...(nextAgent === 'po-agent' && task.sessionId ? { sessionId: task.sessionId } : {}),
+    ...(nextAgent === 'po-agent' && carriedFeatureRequest ? { featureRequest: carriedFeatureRequest } : {}),
     user: userId ? { id: userId } : null,
   };
 

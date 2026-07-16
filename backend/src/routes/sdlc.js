@@ -59,7 +59,8 @@ router.get('/status/:task_id', SdlcController.streamStatus.bind(SdlcController))
 
 // ── V4 Pipeline ──────────────────────────────────────────────────────────
 router.get('/pipeline/:workflowId', SdlcController.getPipelineStatus.bind(SdlcController));
-router.get('/stream/:workflowId', SdlcController.streamPipelineStatus.bind(SdlcController));
+// Canonical SSE transport: /stream/:sessionId. One endpoint, one envelope.
+router.get('/stream/:sessionId', SdlcController.streamPipelineStatus.bind(SdlcController));
 
 // ── Workflow-level views ──────────────────────────────────────────────────
 // GET /api/v1/sdlc/workflow-status?project_id=xxx

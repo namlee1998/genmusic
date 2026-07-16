@@ -327,11 +327,12 @@ async function getReleaseFile(sessionId, fileName, user) {
 }
 
 async function getTaskEvents(taskId, { afterSequence = null, limit = 200 } = {}, user) {
+  // ACCEPTANCE.md M4: auth is bypassed (CLAUDE.md §4). The
+  // MembershipService stub remains for the other six call sites in this
+  // file; do NOT reintroduce a requireProjectRole check here.
+  void user;
   const task = await Task.findById(taskId);
   if (!task) throw new ApiError(404, 'Task not found');
-  if (user) {
-    await MembershipService.requireProjectRole(user.id, task.projectId, ['owner', 'admin', 'editor', 'viewer']);
-  }
   return AgentEvent.list({
     taskId,
     afterSequence: Number.isFinite(Number(afterSequence)) ? Number(afterSequence) : null,

@@ -8,6 +8,7 @@ const HitlDecision = require('./HitlDecision');
 const PendingGate = require('./PendingGate');
 const AgentEvent = require('./AgentEvent');
 const PipelineSession = require('./PipelineSession');
+const FeatureBacklog = require('./FeatureBacklog');
 
 module.exports = {
   Document,
@@ -20,5 +21,6 @@ module.exports = {
   PendingGate,
   AgentEvent,
   PipelineSession,
+  FeatureBacklog,
 };
 

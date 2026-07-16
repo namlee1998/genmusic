@@ -187,16 +187,82 @@ async function writeReleaseBundle({ projectId, session, repoContext, packet, aud
   const qaPath = path.join(outputDir, 'qa-report.md');
   await fs.writeFile(qaPath, qaReport, 'utf8');
 
+  // audit-trail.json — full audit timeline so consumers can replay/reconstruct
+  // the session deterministically without hitting the database. The same
+  // `audit` blob was already injected into final.md §8; persisting it as JSON
+  // makes it machine-readable.
+  const auditPath = path.join(outputDir, 'audit-trail.json');
+  await fs.writeFile(auditPath, JSON.stringify(audit ?? {}, null, 2), 'utf8');
+
   const outputs = [
     { type: 'branch', value: repoContext?.workingBranch || null },
     { type: 'commit', value: commitHash },
     { type: 'output_dir', value: outputDir },
     { type: 'final_md', value: finalMdPath },
     { type: 'qa_report', value: qaPath },
+    { type: 'audit_trail', value: auditPath },
     { type: 'release_decision', value: releaseDecision?.decision || 'APPROVE' },
   ];
   logger.info('release bundle written', { projectId, outputDir, finalMdPath, commitHash, branch: repoContext?.workingBranch || null });
   return { outputs, finalMdPath, commitHash, diff, outputDir };
 }
 
-module.exports = { writeReleaseBundle, buildFinalMarkdown };
+/**
+ * Locate a previously-written release bundle for the given session, if any.
+ * Used by the release path to delete the old bundle before writing the new
+ * one so the commit is "delete old + add new", not "append new".
+ *
+ * @param {string} sessionsRoot  absolute path to <canonicalRepoPath>/sessions
+ * @param {string} sessionId
+ * @returns {Promise<{ absolutePath: string, relativePath: string, slug: string, shortId: string } | null>}
+ */
+async function findPreviousBundle(sessionsRoot, sessionId) {
+  if (!sessionsRoot || !sessionId) return null;
+  const shortId = String(sessionId).slice(0, 8);
+  let entries = [];
+  try {
+    entries = await fs.readdir(sessionsRoot);
+  } catch (_err) {
+    return null; // sessionsRoot missing — no prior bundle.
+  }
+  // Match a folder whose trailing -<shortId> suffix equals this session's
+  // shortId. This is the same naming convention writeReleaseBundle uses at
+  // line 164 (`${slug}-${shortId}`), so the match is exact.
+  const match = entries.find((entry) => entry.endsWith(`-${shortId}`));
+  if (!match) return null;
+  const absolutePath = path.join(sessionsRoot, match);
+  // Confirm ownership via .aifa-bundle-id (if present) so we never delete
+  // another session's bundle that happens to share the shortId suffix.
+  const markerPath = path.join(absolutePath, '.aifa-bundle-id');
+  try {
+    const marker = (await fs.readFile(markerPath, 'utf8')).trim();
+    if (marker && marker !== sessionId) return null;
+  } catch (_err) {
+    // No marker — accept by naming convention. Older bundles predate the
+    // marker; the shortId suffix match is still a reliable ownership signal.
+  }
+  return { absolutePath, relativePath: path.posix.join('sessions', match), slug: match, shortId };
+}
+
+/**
+ * Stage a path for removal via `git rm -rf --cached` so the deletion shows
+ * up in the next commit's diff. Errors are swallowed (best-effort): if the
+ * path isn't tracked or isn't a repo, the on-disk fs.rm below still
+ * guarantees the file is gone.
+ *
+ * @param {string} cwd      absolute path to the repo root
+ * @param {string} relPath  relative path inside the repo
+ */
+async function removeGitTracked(cwd, relPath) {
+  if (!cwd || !relPath) return;
+  try {
+    const { execFile } = require('child_process');
+    await new Promise((resolve) => {
+      execFile('git', ['rm', '-rf', '--cached', '--ignore-unmatch', relPath], { cwd, windowsHide: true }, () => resolve());
+    });
+  } catch (_err) {
+    // best-effort
+  }
+}
+
+module.exports = { writeReleaseBundle, buildFinalMarkdown, findPreviousBundle, removeGitTracked };

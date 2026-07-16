@@ -67,7 +67,7 @@ export interface GateHistoryEntry {
   payload?: unknown;
 }
 
-export type SessionStatus = 'pending' | 'running' | 'awaiting_approval' | 'completed' | 'failed';
+export type SessionStatus = 'pending' | 'running' | 'awaiting_approval' | 'awaiting_release' | 'completed' | 'failed';
 
 export interface SessionState {
   // Identity

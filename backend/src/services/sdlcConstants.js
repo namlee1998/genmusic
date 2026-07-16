@@ -22,6 +22,17 @@ const OUTPUT_REVIEW_GATE_TYPE = {
   'qa-agent': 'QA_OUTPUT_REVIEW',
 };
 
+// Frozen spec §6: clarification gates carry the same kind='question' but
+// are routed to one of these per-role gate types so the FE can dispatch by
+// gate.kind without needing role-specific branches.
+const CLARIFY_GATE_TYPE = {
+  'architecture-agent': 'AGENT_CLARIFY',
+  'po-agent': 'PO_CLARIFY',
+  'ux-agent': 'UX_CLARIFY',
+  'dev-agent': 'DEV_CLARIFY',
+  'qa-agent': 'QA_CLARIFY',
+};
+
 const NEXT_AGENT = {
   'architecture-agent': 'po-agent',
   'intent-agent': 'po-agent',
@@ -73,7 +84,7 @@ const GATE_CONFIG = {
 const AUTO_APPROVE_CONFIDENCE = GATE_CONFIG.AUTO_APPROVE_CONFIDENCE;
 
 // ── Output Contract ──────────────────────────────────────────────────────────
-const OUTPUT_CONTRACT_VERSION = 'gate-output.v4';
+const OUTPUT_CONTRACT_VERSION = 'gate-output.v5';
 
 const _acList = (o) => (Array.isArray(o.acceptance_criteria) ? o.acceptance_criteria : []);
 const _matrix = (o) => (Array.isArray(o.ac_coverage_matrix) ? o.ac_coverage_matrix : []);
@@ -81,80 +92,198 @@ const _matrix = (o) => (Array.isArray(o.ac_coverage_matrix) ? o.ac_coverage_matr
 // AIFA v2.1 §3: the architecture-agent output is validated against the
 // versioned output contract in gateManager.validateGateOutput. The
 // contract iterates rules and calls rule.check(o, task) — so every entry
-// here must expose a `check` function. Earlier revisions put
-// ARCHITECTURE_RULES in the artifact-manifest shape ({key, required})
-// which crashed the validator with "rule.check is not a function". Each
-// rule below asserts the corresponding architecture artifact key is
-// present and non-empty.
-const ARCHITECTURE_RULES = [
+// here must expose a `check` function.
+//
+// Project Definition (the A2A contract) is the *primary* structured
+// output. Each mandatory field carries `{value, source, status}` metadata.
+// BLOCKER rules inspect each entry's `status` deterministically; derived
+// fields (architecture_brief, repository_routing, technical_decisions,
+// repository_summary, technology_stack, top-level constraints) are now
+// WARNING-only — they exist as human-readable documentation only and are
+// not read by the pipeline for decisions.
+const PROJECT_DEFINITION_MANDATORY_KEYS = [
+  'project_type',
+  'language',
+  'framework',
+  'runtime',
+  'package_manager',
+  'build_system',
+  'deployment_target',
+  'repository',
+  'constraints',
+  'out_of_scope',
+];
+
+function pdEntry(pd, key) {
+  if (!pd || typeof pd !== 'object') return null;
+  const e = pd[key];
+  return e && typeof e === 'object' && 'status' in e ? e : null;
+}
+
+function pdEntryValue(pd, key) {
+  const e = pdEntry(pd, key);
+  return e ? e.value : null;
+}
+
+function _pdFieldMissing(o, key) {
+  const e = pdEntry(o.project_definition, key);
+  if (!e) return true;
+  if (e.status === 'missing') return true;
+  return !hasContent(e.value);
+}
+
+function _pdFieldAssumedForbidden(o, key) {
+  const e = pdEntry(o.project_definition, key);
+  return e && e.status === 'assumed';
+}
+
+// OBS-01.10 R-25: canonical executionStatus → visible PhaseStatus mapping.
+// Per docs/OBS1/phase1-runtime-observability/07_CANONICAL_RUNTIME_CONTRACT.md §7
+// "Deriving runtime from `Task.status` (legacy)" is FORBIDDEN. The SSE
+// snapshot's pipelinePhases[i].status MUST be sourced from the canonical
+// machine (`Task.executionStatus`), not from the legacy `Task.status`.
+//
+// The mapping collapses the 8 canonical `executionStatus` values onto the 7
+// FE-visible `PhaseStatus` values (per `frontend/src/services/api/sdlcApi.ts:73`
+// and `frontend/src/store/runtimeSelectors.ts:61-68`):
+//   queued       → pending     (canonical initial)
+//   dispatched   → pending     (reserved; matrix permits but no producer)
+//   running      → running
+//   awaiting_gate → gate_pending
+//   completed    → completed
+//   failed       → failed
+//   cancelled    → skipped     (FE projection collapses with timeout)
+//   timeout      → skipped     (FE projection collapses with cancelled)
+const EXECUTION_STATUS_TO_PHASE_STATUS = Object.freeze({
+  queued: 'pending',
+  dispatched: 'pending',
+  running: 'running',
+  awaiting_gate: 'gate_pending',
+  completed: 'completed',
+  failed: 'failed',
+  cancelled: 'skipped',
+  timeout: 'skipped',
+});
+
+/**
+ * Project a single phaseData entry (built by `mapPhase` in
+ * `SdlcWorkflowService.getWorkflowStatus:1151-1172`) onto the FE-visible
+ * `PhaseStatus` value used by the canonical runtime selector.
+ *
+ * Precedence:
+ *   1. If `phaseData.executionStatus` is set (the canonical machine), the
+ *      visible status is the canonical mapping above. This is the contract-
+ *      mandated source per OBS-01.10 R-25.
+ *   2. If `phaseData.executionStatus` is null/undefined, fall back to the
+ *      legacy `phaseData.status` field. Schema default is `'queued'`, so this
+ *      branch is unreachable for tasks created via the schema default; it
+ *      exists only as a defensive guard.
+ *   3. The `awaitingReview` projection (legacy contract for output_review
+ *      gates per `OBS1_PHASE510_ANALYSIS.md §4.1`) is applied LAST and
+ *      overrides the canonical mapping. This preserves the existing
+ *      behaviour where a task with `awaitingReview === true` shows as
+ *      `gate_pending` regardless of `executionStatus`.
+ *
+ * @param {string} agentName - one of 'Architecture' | 'PO' | 'UX' | 'DEV' | 'QA'
+ * @param {{ taskId?: string, status?: string, executionStatus?: string|null,
+ *           versionStatus?: string, awaitingReview?: boolean, invalid?: boolean
+ *         }|null} phaseData
+ * @param {boolean} [isSkipped=false]
+ * @returns {{ agent: string, status: string, taskId?: string,
+ *             awaitingReview?: boolean, invalid?: boolean }}
+ */
+function toPhaseStatus(agentName, phaseData, isSkipped = false) {
+  if (isSkipped && !phaseData) return { agent: agentName, status: 'skipped' };
+  if (!phaseData) return { agent: agentName, status: 'pending' };
+  // R-25: read the canonical machine first.
+  let status;
+  if (phaseData.executionStatus && EXECUTION_STATUS_TO_PHASE_STATUS[phaseData.executionStatus] !== undefined) {
+    status = EXECUTION_STATUS_TO_PHASE_STATUS[phaseData.executionStatus];
+  } else if (typeof phaseData.status === 'string') {
+    // Defensive fallback for legacy callers that omit `executionStatus`.
+    status = phaseData.status;
+  } else {
+    status = 'pending';
+  }
+  // Preserve the awaitingReview projection (canonical projection of the
+  // output_review gate path — see OBS1_PHASE510_ANALYSIS.md §4.1 and the
+  // contract §4 evidence gaps "gated vs ungated output_review").
+  if (phaseData.awaitingReview) status = 'gate_pending';
+  return {
+    agent: agentName,
+    status,
+    taskId: phaseData.taskId,
+    awaitingReview: phaseData.awaitingReview,
+    invalid: phaseData.invalid,
+  };
+}
+
+const PROJECT_DEFINITION_RULES = [
   {
-    rule: 'repository_summary_present',
+    rule: 'project_definition_present',
     severity: 'BLOCKER',
-    detail: 'repository_summary is missing or empty',
-    check: (o) => hasContent(o.repository_summary),
+    detail: 'project_definition is missing or empty',
+    check: (o) => hasContent(o.project_definition),
+  },
+  // Per-key BLOCKER: each mandatory field must have a non-empty value AND
+  // status !== 'missing'.
+  ...PROJECT_DEFINITION_MANDATORY_KEYS.map((key) => ({
+    rule: `${key}_missing`,
+    severity: 'BLOCKER',
+    detail: `project_definition.${key} is missing or has status=missing`,
+    check: (o) => !_pdFieldMissing(o, key),
+  })),
+  // Mandatory fields may NOT be `assumed`. They must be `confirmed` (user
+  // input or repo-derived). This is the deterministic enforcement against
+  // hallucination — Claude cannot silently pick framework=FastAPI without
+  // calling AskUserQuestion.
+  ...PROJECT_DEFINITION_MANDATORY_KEYS.map((key) => ({
+    rule: `${key}_assumed_forbidden`,
+    severity: 'BLOCKER',
+    detail: `project_definition.${key} has status=assumed but is mandatory; AskUserQuestion required`,
+    check: (o) => !_pdFieldAssumedForbidden(o, key),
+  })),
+  // Nested: repository.target_module must be present.
+  {
+    rule: 'repository_target_module_missing',
+    severity: 'BLOCKER',
+    detail: 'project_definition.repository.target_module is missing',
+    check: (o) => hasContent(pdEntryValue(o.project_definition, 'repository')?.target_module),
+  },
+  // Derived fields — WARNING only. They exist as human-readable documentation.
+  {
+    rule: 'architecture_brief_present',
+    severity: 'WARNING',
+    detail: 'architecture_brief (derived documentation) is missing',
+    check: (o) => hasContent(o.architecture_brief),
   },
   {
-    rule: 'technology_stack_present',
-    severity: 'BLOCKER',
-    detail: 'technology_stack is missing or empty',
-    check: (o) => hasContent(o.technology_stack),
+    rule: 'repository_routing_present',
+    severity: 'WARNING',
+    detail: 'repository_routing (derived documentation) is missing',
+    check: (o) => hasContent(o.repository_routing),
   },
   {
     rule: 'technical_decisions_present',
-    severity: 'BLOCKER',
-    detail: 'technical_decisions is missing or empty',
+    severity: 'WARNING',
+    detail: 'technical_decisions (derived documentation) is missing',
     check: (o) => {
       const d = o.technical_decisions;
-      if (Array.isArray(d)) return d.length > 0 && d.some((x) => hasContent(x));
+      if (Array.isArray(d)) return d.length === 0 || d.some((x) => hasContent(x));
       return hasContent(d);
     },
   },
   {
-    rule: 'constraints_present',
-    severity: 'BLOCKER',
-    detail: 'constraints is missing or empty',
-    check: (o) => {
-      const c = o.constraints;
-      if (Array.isArray(c)) return c.length > 0 && c.some((x) => hasContent(x));
-      return hasContent(c);
-    },
+    rule: 'repository_summary_present',
+    severity: 'WARNING',
+    detail: 'repository_summary (derived documentation) is missing',
+    check: (o) => hasContent(o.repository_summary),
   },
   {
-    rule: 'repository_routing_present',
-    severity: 'BLOCKER',
-    detail: 'repository_routing is missing or empty',
-    check: (o) => hasContent(o.repository_routing),
-  },
-  {
-    rule: 'repository_routing_has_target',
-    severity: 'BLOCKER',
-    detail: 'repository_routing.target_module is missing',
-    check: (o) => hasContent(o.repository_routing?.target_module),
-  },
-  {
-    rule: 'repository_routing_has_framework',
-    severity: 'BLOCKER',
-    detail: 'repository_routing.framework is missing',
-    check: (o) => hasContent(o.repository_routing?.framework),
-  },
-  {
-    rule: 'repository_routing_has_language',
-    severity: 'BLOCKER',
-    detail: 'repository_routing.language is missing',
-    check: (o) => hasContent(o.repository_routing?.language),
-  },
-  {
-    rule: 'architecture_brief_present',
-    severity: 'BLOCKER',
-    detail: 'architecture_brief is missing or empty (expected: Markdown string at top-level of agent output)',
-    check: (o) => hasContent(o.architecture_brief),
-    inspect: (o) => {
-      const v = o?.architecture_brief;
-      if (v === undefined) return 'received: undefined (field not produced by agent)';
-      if (v === null) return 'received: null';
-      if (typeof v === 'string') return `received: empty string (length=${v.length})`;
-      return `received: ${typeof v} (non-string value)`;
-    },
+    rule: 'technology_stack_present',
+    severity: 'WARNING',
+    detail: 'technology_stack (derived documentation) is missing',
+    check: (o) => hasContent(o.technology_stack),
   },
 ];
 
@@ -189,10 +318,6 @@ const PO_RULES = [
     rule: 'out_of_scope_present', severity: 'BLOCKER', detail: 'Out-of-scope boundaries are empty',
     check: (o) => hasContent(o.out_of_scope)
   },
-  {
-    rule: 'risk_classification_present', severity: 'BLOCKER', detail: 'Risk classification is incomplete',
-    check: (o) => hasContent(o.risk_classification?.level) && Array.isArray(o.risk_classification?.required_gates) && o.risk_classification.required_gates.length > 0
-  },
 ];
 
 const UX_RULES = [
@@ -216,6 +341,27 @@ const UX_RULES = [
     rule: 'components_present', severity: 'BLOCKER', detail: 'Component inventory is empty',
     check: (o) => hasContent(o.component_inventory)
   },
+  {
+    // BUG: claudeCodeRunner can persist a UX run whose html_mockup was cut off
+    // mid-CSS/markup when the SDK emits subtype='success' but stop_reason='error'
+    // or the run was interrupted before the closing </html> was written. The
+    // runner's normalizeOutput does not re-validate field completeness, and the
+    // existing UX_RULES never inspected html_mockup, so a truncated mockup
+    // reached AgentArtifact with status=VALID and executionStatus=completed.
+    // The repair path (claudeCodeRunner.repairRawOutput) only runs when the
+    // *outer* JSON parse fails, not when an individual field is partial.
+    // Guard: a complete HTML5 mockup starts with <!DOCTYPE html> and ends with
+    // </html>. If either is missing, downstream DEV/QA receive an incomplete
+    // artifact. Mark BLOCKER so output_review surfaces the issue to the human
+    // reviewer instead of silently passing.
+    rule: 'html_mockup_is_complete_html5', severity: 'BLOCKER',
+    detail: 'html_mockup is not a complete HTML5 document (missing <!DOCTYPE html> at start or </html> at end)',
+    check: (o) => {
+      const html = typeof o.html_mockup === 'string' ? o.html_mockup.trim() : '';
+      if (!html) return false;
+      return html.startsWith('<!DOCTYPE html>') && html.endsWith('</html>');
+    },
+  },
 ];
 
 const DEV_RULES = [
@@ -234,40 +380,6 @@ const DEV_RULES = [
   {
     rule: 'patch_format', severity: 'WARNING', detail: 'patch_format is not defined',
     check: (o) => !!o.patch_format
-  },
-  {
-    rule: 'build_ok', severity: 'BLOCKER', detail: 'Build did not pass',
-    check: (o) => (o.build_result || {}).build_ok !== false
-  },
-  {
-    rule: 'build_tests', severity: 'BLOCKER', detail: 'Test execution evidence is missing',
-    check: (o) => (o.build_result || {}).tests_ran === true
-  },
-  {
-    rule: 'self_test_report', severity: 'BLOCKER', detail: 'DEV self-test report is missing',
-    check: (o) => hasContent(o.self_test_report)
-  },
-  {
-    rule: 'linked_ac', severity: 'BLOCKER', detail: 'Patch is not linked to any AC',
-    check: (o) => Array.isArray(o.linked_ac_ids) && o.linked_ac_ids.length > 0
-  },
-  {
-    rule: 'risk_assessment_present', severity: 'BLOCKER', detail: 'Risk assessment is empty',
-    check: (o) => hasContent(o.risk_assessment)
-  },
-  {
-    rule: 'risk_classification_present', severity: 'BLOCKER', detail: 'Risk classification is incomplete',
-    check: (o) => hasContent(o.risk_classification?.level) && Array.isArray(o.risk_classification?.required_gates) && o.risk_classification.required_gates.length > 0
-  },
-  {
-    rule: 'security_notes', severity: 'BLOCKER', detail: 'High-risk DEV output is missing security notes',
-    when: (o) => !!o.risk_classification?.required_gates?.includes('security'),
-    check: (o) => !!o.security_notes
-  },
-  {
-    rule: 'security_gate', severity: 'BLOCKER', detail: 'Security gate must PASS before DEV handoff',
-    when: (o) => !!o.risk_classification?.required_gates?.includes('security'),
-    check: (o) => o.security_gate?.recommendation === 'PASS'
   },
 ];
 
@@ -312,12 +424,42 @@ const QA_RULES = [
     rule: 'qa_report_present', severity: 'BLOCKER', detail: 'QA report is empty',
     check: (o) => hasContent(o.qa_report)
   },
+  // ── Phase 3.6: validation evidence promoted to QA ───────────────────────────
+  // These artifacts were previously emitted by DEV. After Phase 3.6 they are
+  // QA's canonical output. The Release Manager consumes them from QA output;
+  // DEV no longer emits any of these fields.
   {
-    rule: 'release_decision_present', severity: 'BLOCKER', detail: 'Release decision is empty or invalid',
-    check: (o) => ['approve', 'reject', 'needs_changes'].includes(String(o.release_decision || '').toLowerCase())
+    rule: 'build_result_present', severity: 'BLOCKER', detail: 'QA build_result is missing',
+    check: (o) => hasContent(o.build_result)
   },
   {
-    rule: 'release_reason', severity: 'BLOCKER', detail: 'Release decision has no justification',
+    rule: 'self_test_report_present', severity: 'BLOCKER', detail: 'QA self_test_report is missing',
+    check: (o) => hasContent(o.self_test_report)
+  },
+  {
+    rule: 'linked_ac_ids_present', severity: 'BLOCKER', detail: 'AC traceability is missing',
+    check: (o) => Array.isArray(o.linked_ac_ids) && o.linked_ac_ids.length > 0
+  },
+  {
+    rule: 'risk_classification_present', severity: 'BLOCKER', detail: 'Risk classification is incomplete',
+    check: (o) => hasContent(o.risk_classification?.level) && Array.isArray(o.risk_classification?.required_gates) && o.risk_classification.required_gates.length > 0
+  },
+  {
+    rule: 'risk_assessment_present', severity: 'BLOCKER', detail: 'Risk assessment is empty',
+    check: (o) => hasContent(o.risk_assessment)
+  },
+  {
+    rule: 'security_notes', severity: 'BLOCKER', detail: 'High-risk QA output is missing security notes',
+    when: (o) => !!o.risk_classification?.required_gates?.includes('security'),
+    check: (o) => !!o.security_notes
+  },
+  {
+    rule: 'security_gate', severity: 'BLOCKER', detail: 'Security gate must PASS for high-risk QA output',
+    when: (o) => !!o.risk_classification?.required_gates?.includes('security'),
+    check: (o) => o.security_gate?.recommendation === 'PASS'
+  },
+  {
+    rule: 'release_reason', severity: 'BLOCKER', detail: 'Release recommendation has no justification',
     check: (o) => !!(o.release_reason && o.release_reason.trim())
   },
   {
@@ -334,7 +476,7 @@ const QA_RULES = [
 
 const OUTPUT_CONTRACTS = {
   version: OUTPUT_CONTRACT_VERSION,
-  'architecture-agent': ARCHITECTURE_RULES,
+  'architecture-agent': PROJECT_DEFINITION_RULES,
   'po-agent': PO_RULES,
   'ux-agent': UX_RULES,
   'dev-agent': DEV_RULES,
@@ -343,6 +485,35 @@ const OUTPUT_CONTRACTS = {
 
 // ── Retry / Policy ───────────────────────────────────────────────────────────
 const MAX_RETRY_PER_STEP = 3;
+// Hard cap for AskUserQuestion enforcement retries. After this many
+// attempts without resolving all BLOCKERs, the task is marked FAILED.
+// Distinct from MAX_RETRY_PER_STEP which governs the inner per-step retry
+// budget used by other retry paths. Per-role caps let non-ARCH retries
+// stay bounded (downstream BLOCKERs are cheaper than ARCH's
+// project_definition surface).
+const ARCH_MAX_ASK_RETRIES = 3;
+const PO_MAX_ASK_RETRIES = 2;
+const UX_MAX_ASK_RETRIES = 2;
+const DEV_MAX_ASK_RETRIES = 2;
+const QA_MAX_ASK_RETRIES = 2;
+
+const ASK_RETRY_CAPS_BY_ROLE = {
+  'architecture-agent': ARCH_MAX_ASK_RETRIES,
+  'po-agent': PO_MAX_ASK_RETRIES,
+  'ux-agent': UX_MAX_ASK_RETRIES,
+  'dev-agent': DEV_MAX_ASK_RETRIES,
+  'qa-agent': QA_MAX_ASK_RETRIES,
+};
+
+// Per-role throw code when a role exhausts retries. Used by the
+// AskUserQuestion enforcement loop to surface the exhausted state.
+const ASK_RETRY_EXCEEDED_CODE_BY_ROLE = {
+  'architecture-agent': 'ARCH_MAX_RETRIES_EXCEEDED',
+  'po-agent': 'PO_MAX_RETRIES_EXCEEDED',
+  'ux-agent': 'UX_MAX_RETRIES_EXCEEDED',
+  'dev-agent': 'DEV_MAX_RETRIES_EXCEEDED',
+  'qa-agent': 'QA_MAX_RETRIES_EXCEEDED',
+};
 const RETRY_REASONS = ['schema_invalid', 'ac_not_measurable', 'coverage_gap', 'build_fail', 'quality_low', 'other'];
 
 const AGENT_POLICY = {
@@ -370,6 +541,7 @@ module.exports = {
   WORKSPACE_DIR,
   AGENT_GATES,
   OUTPUT_REVIEW_GATE_TYPE,
+  CLARIFY_GATE_TYPE,
   NEXT_AGENT,
   NODE_TARGET,
   REWORK_TARGETS,
@@ -380,9 +552,22 @@ module.exports = {
   AUTO_APPROVE_CONFIDENCE,
   OUTPUT_CONTRACT_VERSION,
   OUTPUT_CONTRACTS,
+  PROJECT_DEFINITION_MANDATORY_KEYS,
+  PROJECT_DEFINITION_RULES,
+  pdEntry,
+  pdEntryValue,
+  EXECUTION_STATUS_TO_PHASE_STATUS,
+  toPhaseStatus,
   _acList,
   _matrix,
   MAX_RETRY_PER_STEP,
+  ARCH_MAX_ASK_RETRIES,
+  PO_MAX_ASK_RETRIES,
+  UX_MAX_ASK_RETRIES,
+  DEV_MAX_ASK_RETRIES,
+  QA_MAX_ASK_RETRIES,
+  ASK_RETRY_CAPS_BY_ROLE,
+  ASK_RETRY_EXCEEDED_CODE_BY_ROLE,
   RETRY_REASONS,
   AGENT_POLICY,
   FINAL_GATE,

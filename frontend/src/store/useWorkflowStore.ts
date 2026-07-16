@@ -4,21 +4,18 @@
  * Backed by SSE only. Holds one SessionState per sessionId plus coarse
  * connection metadata. NO optimistic mutations after HTTP commands — the
  * backend SSE emits the resulting state change. This is the contract.
+ *
+ * The reducer is a thin envelope dispatcher; all per-type business mapping
+ * lives in store/eventMappers.ts.
  */
 
 import { create } from 'zustand';
 import * as sdlcApi from '@/services/api/sdlcApi';
-import {
-  type SessionState,
-  type RuntimeEvent,
-  type AgentKey,
-  type AgentState,
-  type GateHistoryEntry,
-  AGENT_KEYS,
-  defaultSessionState,
-  RUNTIME_EVENTS_LIMIT,
-  emptyAgentStates,
-} from '@/models/SessionState';
+import { subscribe as sseSubscribe } from '@/services/sseClient';
+import { getBaseURL } from '@/services/api/client';
+import { type SessionState, defaultSessionState } from '@/models/SessionState';
+import { applyEnvelope } from '@/store/eventMappers';
+import { isEnvelope, type EventEnvelope } from '@/dto/event';
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'error';
 
@@ -40,7 +37,12 @@ export interface WorkflowState {
   resolveGate(sessionId: string, gateId: string, action: 'approve' | 'reject', comment?: string): Promise<void>;
   resolveOutputReviewGate(sessionId: string, gateId: string, action: 'approve' | 'reject', comment?: string): Promise<void>;
   resolveClarification(sessionId: string, gateId: string, answers: Record<string, string>): Promise<void>;
-  releaseDecision(sessionId: string, action: 'approve' | 'reject', comment?: string): Promise<void>;
+  resolveToolGate(sessionId: string, gateId: string, action: 'approve' | 'reject', comment?: string): Promise<void>;
+  releaseDecision(
+    sessionId: string,
+    decision: 'APPROVE' | 'REJECT',
+    comment?: string,
+  ): Promise<void>;
 
   cleanupSession(sessionId: string): void;
   resetAll(): void;
@@ -48,106 +50,37 @@ export interface WorkflowState {
   // ── Internal — invoked by the SSE dispatcher ──
   _subscribeSession(sessionId: string): void;
   _unsubscribeSession(sessionId: string): void;
-  _applySseEvent(sessionId: string, event: string, data: Record<string, unknown>): void;
+  _applySseEvent(sessionId: string, envelope: EventEnvelope): void;
 }
 
 // ── helpers (pure, kept module-private) ─────────────────────────────────────
 
-const AGENT_TO_ROLE: Record<string, AgentKey> = {
-  'architecture-agent': 'ARCH',
-  'po-agent': 'PO',
-  'ux-agent': 'UX',
-  'dev-agent': 'DEV',
-  'qa-agent': 'QA',
-};
-
-function inferAgentKey(role?: string): AgentKey | null {
-  if (!role) return null;
-  return AGENT_TO_ROLE[role] ?? null;
-}
-
-function applyAgentEvent(
-  agentStates: Record<AgentKey, AgentState>,
-  evt: RuntimeEvent,
-  now: number,
-): Record<AgentKey, AgentState> {
-  const agentKey = evt.agent ?? null;
-  if (!agentKey) return agentStates;
-  const next = { ...agentStates };
-  const existing = next[agentKey];
-  const advanced: AgentState = { ...existing };
-
-  switch (evt.type) {
-    case 'agent_start':
-      advanced.status = 'running';
-      advanced.startedAt = advanced.startedAt ?? now;
-      advanced.lastEventAt = now;
-      advanced.currentStep = 'starting';
-      advanced.currentAction = evt.action ?? `${agentKey} initiated`;
-      advanced.currentFile = null;
-      advanced.toolName = null;
-      break;
-    case 'agent_tool_call':
-      advanced.status = 'running';
-      advanced.toolName = evt.tool ?? advanced.toolName;
-      advanced.currentFile = (evt.filePath as string | null) ?? advanced.currentFile;
-      advanced.currentAction = evt.action ?? `using ${evt.tool ?? 'tool'}`;
-      advanced.currentStep = 'tool_execution';
-      advanced.lastEventAt = now;
-      break;
-    case 'agent_tool_result':
-      advanced.lastEventAt = now;
-      break;
-    case 'file_change':
-      advanced.lastEventAt = now;
-      break;
-    case 'agent_complete':
-      advanced.status = 'completed';
-      advanced.completedAt = now;
-      advanced.currentStep = 'completed';
-      advanced.currentAction = 'finished';
-      advanced.toolName = null;
-      advanced.lastEventAt = now;
-      break;
-    case 'gate_triggered':
-      advanced.status = 'awaiting_review';
-      advanced.lastEventAt = now;
-      advanced.currentStep = 'awaiting_hitl';
-      break;
-    case 'clarification_needed':
-      advanced.status = 'awaiting_review';
-      advanced.lastEventAt = now;
-      advanced.currentStep = 'awaiting_clarification';
-      break;
-    case 'error':
-      advanced.status = 'failed';
-      advanced.lastEventAt = now;
-      advanced.currentStep = 'failed';
-      advanced.currentAction = evt.error ?? 'failed';
-      break;
-    case 'token_usage':
-    default:
-      advanced.lastEventAt = now;
-      break;
-  }
-
-  next[agentKey] = advanced;
-  return next;
-}
-
 // ── store ────────────────────────────────────────────────────────────────────
 
-let runtimeEventSeq = 0;
-function nextRuntimeEventId(): string {
-  runtimeEventSeq += 1;
-  return `rt_${Date.now()}_${runtimeEventSeq}`;
-}
+let lastSeenEnvelopeId: string | null = null;
+const seenEnvelopeIds = new Set<string>();
+const SEEN_ENVELOPE_LIMIT = 1000;
+
+// Per-session reconnect cursor. Reconnect MUST send Last-Event-ID so the
+// server replays only events with sequence > cursor (spec §13.1 step 1,
+// §13.4 ordering guarantee).
+const lastSeenSequenceBySession = new Map<string, number>();
+
+// Per-session SSE teardown. sseSubscribe returns an unsubscribe function;
+// store it here so resetAll / cleanupSession / AbortController.abort() can
+// actually close the connection.
+const sseUnsubscribeFns = new Map<string, () => void>();
 
 export const useWorkflowStore = create<WorkflowState>((set, get) => {
   const unsubscribe = (sessionId: string) => {
     const ac = get().sseAbortControllers[sessionId];
     if (ac) {
       ac.abort();
+    }
+    const teardown = sseUnsubscribeFns.get(sessionId);
+    if (teardown) {
+      teardown();
+      sseUnsubscribeFns.delete(sessionId);
     }
     set((s) => {
       const nextConn = { ...s.sseConnections };
@@ -158,6 +91,23 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => {
     });
   };
 
+  const openSubscription = (sessionId: string, afterSequence: number) => {
+    const baseUrl = getBaseURL().replace(/\/$/, '');
+    const url = `${baseUrl}/sdlc/stream/${sessionId}`;
+
+    // sseSubscribe wires the canonical envelope contract directly to the
+    // store; the store never sees legacy (event, data) tuples. Forward the
+    // reconnect cursor so the server replays only events newer than it.
+    const teardown = sseSubscribe(
+      url,
+      (envelope) => {
+        get()._applySseEvent(sessionId, envelope);
+      },
+      { lastEventId: afterSequence },
+    );
+    return teardown;
+  };
+
   const subscribe = (sessionId: string) => {
     // If we already have a live subscription, don't open a second one.
     if (get().sseAbortControllers[sessionId]) return;
@@ -166,18 +116,26 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => {
       sseConnections: { ...s.sseConnections, [sessionId]: 'connecting' },
     }));
 
-    const abort = sdlcApi.subscribeWorkflowSSE(sessionId, {
-      onMessage: (event, data) => {
-        get()._applySseEvent(sessionId, event, data);
-      },
-      onError: () => {
-        // subscribeWorkflowSSE auto-reconnects internally; reflect error in
-        // connection status only as a UI hint.
-        set((s) => ({
-          sseConnections: { ...s.sseConnections, [sessionId]: 'error' },
-        }));
-      },
-    });
+    // First-open: no cursor. Reconnect: pass the last seen sequence so the
+    // server replays only events with sequence > cursor.
+    const afterSequence = lastSeenSequenceBySession.get(sessionId) ?? 0;
+    const teardown = openSubscription(sessionId, afterSequence);
+    sseUnsubscribeFns.set(sessionId, teardown);
+
+    const abort = new AbortController();
+    // Override abort() so callers that invoke `abort.abort()` actually tear
+    // down the SSE connection held by sseSubscribe.
+    (abort as AbortController & { _teardown?: () => void })._teardown = teardown;
+    const wrappedAbort = () => {
+      const t = sseUnsubscribeFns.get(sessionId);
+      if (t) {
+        t();
+        sseUnsubscribeFns.delete(sessionId);
+      }
+      // Mark the AbortController as aborted so callers can introspect.
+      try { abort.abort(); } catch { /* noop */ }
+    };
+    (abort as unknown as { abort: () => void }).abort = wrappedAbort;
 
     set((s) => ({
       sseAbortControllers: { ...s.sseAbortControllers, [sessionId]: abort },
@@ -239,17 +197,33 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => {
     },
 
     resolveClarification: async (sessionId, gateId, answers) => {
-      await sdlcApi.resolveApproval(gateId, { action: 'answer', answers });
+      await sdlcApi.resolveApproval(gateId, { answers });
     },
 
-    releaseDecision: async (sessionId, action, comment) => {
+    // Tool-gate resolve (HITL_REVIEW / DEV_FILE_GATE, kind='tool'). The
+    // backend canonical contract is `POST /approvals/:id` — same endpoint
+    // clarification uses; only the body shape differs.
+    resolveToolGate: async (sessionId, gateId, action, comment) => {
+      await sdlcApi.resolveApproval(gateId, {
+        action,
+        ...(action === 'reject' ? { comment: comment?.trim() || undefined } : {}),
+      });
+    },
+
+    releaseDecision: async (sessionId, decision, comment) => {
       const session = get().sessions[sessionId];
       if (!session) return;
-      await sdlcApi.releaseDecision(session.projectId, action);
+      // Producer-side: mint exactly ONE decision_id per user decision
+      // invocation (spec §10, idempotency key). Backend validator
+      // (releaseManager.js:27) rejects submissions without it. The store
+      // owns the user decision workflow; the UI does NOT own idempotency.
+      const decisionId = crypto.randomUUID();
+      await sdlcApi.releaseDecision(sessionId, decisionId, decision, comment);
     },
 
     cleanupSession: (sessionId) => {
       get()._unsubscribeSession(sessionId);
+      lastSeenSequenceBySession.delete(sessionId);
       set((s) => {
         const next = { ...s.sessions };
         delete next[sessionId];
@@ -261,6 +235,10 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => {
       // Abort all SSE connections.
       const aborts = get().sseAbortControllers;
       Object.values(aborts).forEach((ac) => ac?.abort?.());
+      // sseSubscribe owns its own teardown; clear our registry too.
+      sseUnsubscribeFns.forEach((t) => t());
+      sseUnsubscribeFns.clear();
+      lastSeenSequenceBySession.clear();
       set({
         sessions: {},
         sseConnections: {},
@@ -274,183 +252,40 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => {
     _subscribeSession: subscribe,
     _unsubscribeSession: unsubscribe,
 
-    _applySseEvent: (sessionId, event, data) => {
+    _applySseEvent: (sessionId, envelope) => {
+      // Transport contract: only canonical EventEnvelope is accepted here.
+      if (!isEnvelope(envelope)) return;
+
+      // Replay dedup — AgentEvent stores full envelopes, so on reconnect the
+      // server may resend an envelope the client already applied live.
+      if (seenEnvelopeIds.has(envelope.id)) return;
+      seenEnvelopeIds.add(envelope.id);
+      lastSeenEnvelopeId = envelope.id;
+      if (seenEnvelopeIds.size > SEEN_ENVELOPE_LIMIT) {
+        // Bound the dedup set — drop the oldest entry. (Insertion order is
+        // preserved in JS Sets.)
+        const first = seenEnvelopeIds.values().next().value;
+        if (first !== undefined) seenEnvelopeIds.delete(first);
+      }
+
+      // Track the highest seen sequence per session for reconnect. Sequence
+      // is the canonical ordering metadata (spec §13.4) — the reconnect
+      // cursor sent as Last-Event-ID comes from this map.
+      const prevSeq = lastSeenSequenceBySession.get(sessionId) ?? 0;
+      if (Number.isFinite(envelope.sequence) && envelope.sequence > prevSeq) {
+        lastSeenSequenceBySession.set(sessionId, envelope.sequence);
+      }
+
       const session = get().sessions[sessionId];
       if (!session) return;
-      const now = Date.now();
 
-      const update = (mutator: (s: SessionState) => SessionState) => {
-        set((s) => {
-          const current = s.sessions[sessionId];
-          if (!current) return {} as Partial<WorkflowState>;
-          return { sessions: { ...s.sessions, [sessionId]: mutator(current) } };
-        });
-      };
-
-      switch (event) {
-        case 'progress': {
-          const incomingPhases = data.pipelinePhases as SessionState['pipelinePhases'] | undefined;
-          const incomingAudit = data.auditLog as SessionState['auditLog'] | undefined;
-          const incomingStatus = data.status as SessionState['status'] | undefined;
-          const incomingRepo = data.repoInfo as SessionState['repoInfo'] | undefined;
-          update((s) => ({
-            ...s,
-            status: incomingStatus ?? s.status,
-            pipelinePhases: incomingPhases ?? s.pipelinePhases,
-            auditLog: incomingAudit ?? s.auditLog,
-            repoInfo: incomingRepo ?? s.repoInfo,
-            lastUpdatedAt: now,
-          }));
-          break;
-        }
-
-        case 'agent_event': {
-          // T6 (B8) — the envelope's `type` lives at root per spec §11. The
-          // backend persists it on AgentEvent.type and the SSE bridge re-emits
-          // it untouched (`SdlcController.flushPersistedEvents` → sendEvent
-          // 'agent_event' with `type: ev.type` at the root). Trust the wire —
-          // never silently default to `agent_tool_call`, which was masking
-          // unknown/missing type values and corrupting the timeline.
-          const knownTypes: ReadonlySet<RuntimeEvent['type']> = new Set([
-            'agent_start', 'agent_tool_call', 'agent_tool_result',
-            'agent_complete', 'file_change', 'token_usage',
-            'gate_triggered', 'clarification_needed', 'error',
-          ]);
-          const incomingType = typeof data.type === 'string' ? data.type : null;
-          const resolvedType: RuntimeEvent['type'] =
-            incomingType && knownTypes.has(incomingType as RuntimeEvent['type'])
-              ? (incomingType as RuntimeEvent['type'])
-              : 'agent_tool_call'; // graceful fallback only when type is missing/invalid; logged for diagnostics
-          if (incomingType && !knownTypes.has(incomingType as RuntimeEvent['type'])) {
-            console.warn('[aifa] agent_event with unknown type', { type: incomingType, data });
-          }
-          const evt: RuntimeEvent = {
-            id: nextRuntimeEventId(),
-            sessionId,
-            timestamp: new Date().toISOString(),
-            type: resolvedType,
-            agent: (data.agent as AgentKey | undefined) ?? inferAgentKey(data.role as string | undefined) ?? undefined,
-            tool: (data.tool as string | undefined) ?? undefined,
-            filePath: (data.filePath as string | undefined) ?? undefined,
-            action: (data.action as string | undefined) ?? undefined,
-            details: data,
-            error: (data.error as string | undefined) ?? undefined,
-          };
-
-          update((s) => {
-            const bounded = s.runtimeEvents.length >= RUNTIME_EVENTS_LIMIT
-              ? s.runtimeEvents.slice(s.runtimeEvents.length - RUNTIME_EVENTS_LIMIT + 1)
-              : s.runtimeEvents;
-            return {
-              ...s,
-              runtimeEvents: [...bounded, evt],
-              agentStates: applyAgentEvent(s.agentStates, evt, now),
-              lastUpdatedAt: now,
-            };
-          });
-          break;
-        }
-
-        case 'gate_pending': {
-          const incomingGate = data.gate as SessionState['pendingGates'][number] | undefined;
-          if (!incomingGate) break;
-          update((s) => {
-            if (s.pendingGates.some((g) => g.id === incomingGate.id)) {
-              return { ...s, lastUpdatedAt: now };
-            }
-            const agentForGate = inferAgentKey(incomingGate.role) ?? null;
-            const nextAgentStates = agentForGate
-              ? {
-                  ...s.agentStates,
-                  [agentForGate]: {
-                    ...s.agentStates[agentForGate],
-                    status: 'awaiting_review' as const,
-                    lastEventAt: now,
-                    currentStep: 'awaiting_hitl',
-                  },
-                }
-              : s.agentStates;
-            return {
-              ...s,
-              pendingGates: [...s.pendingGates, incomingGate],
-              status: 'awaiting_approval',
-              agentStates: nextAgentStates,
-              lastUpdatedAt: now,
-            };
-          });
-          break;
-        }
-
-        case 'gate_resolved': {
-          const gateId = data.gateId as string | undefined;
-          const decision = (data.decision as GateHistoryEntry['decision']) ?? 'approve';
-          const comment = data.comment as string | undefined;
-          if (!gateId) break;
-          update((s) => {
-            const gate = s.pendingGates.find((g) => g.id === gateId);
-            const nextPending = s.pendingGates.filter((g) => g.id !== gateId);
-            const historyEntry: GateHistoryEntry | null = gate
-              ? {
-                  gateId: gate.id,
-                  type: gate.type,
-                  agent: inferAgentKey(gate.role),
-                  decision,
-                  comment,
-                  resolvedAt: new Date().toISOString(),
-                  payload: gate.payload,
-                }
-              : null;
-            const nextHistory = historyEntry ? [historyEntry, ...s.gateHistory] : s.gateHistory;
-            const nextStatus: SessionState['status'] =
-              nextPending.length > 0
-                ? 'awaiting_approval'
-                : s.status === 'awaiting_approval'
-                  ? 'running'
-                  : s.status;
-            return {
-              ...s,
-              pendingGates: nextPending,
-              gateHistory: nextHistory,
-              status: nextStatus,
-              lastUpdatedAt: now,
-            };
-          });
-          break;
-        }
-
-        case 'completed': {
-          const qaResult = (data.qaResult as SessionState['qaResult']) ?? null;
-          update((s) => ({
-            ...s,
-            status: 'completed',
-            qaResult: qaResult ?? s.qaResult,
-            agentStates: AGENT_KEYS.reduce((acc, key) => {
-              const existing = s.agentStates[key];
-              acc[key] = existing.status === 'running'
-                ? { ...existing, status: 'completed', completedAt: existing.completedAt ?? now, currentStep: 'completed', lastEventAt: now }
-                : existing;
-              return acc;
-            }, { ...s.agentStates }),
-            lastUpdatedAt: now,
-          }));
-          break;
-        }
-
-        case 'error': {
-          const message = (data.message as string | undefined) ?? 'Pipeline failed';
-          update((s) => ({
-            ...s,
-            status: 'failed',
-            error: message,
-            lastUpdatedAt: now,
-          }));
-          break;
-        }
-
-        default:
-          // Unknown event — ignore silently.
-          break;
-      }
+      set((s) => {
+        const current = s.sessions[sessionId];
+        if (!current) return {} as Partial<WorkflowState>;
+        return {
+          sessions: { ...s.sessions, [sessionId]: applyEnvelope(current, envelope) },
+        };
+      });
     },
   };
 });
@@ -475,5 +310,3 @@ export const selectConnectionStatus = (s: WorkflowState) =>
     : Object.values<ConnectionStatus>(s.sseConnections).some((c) => c === 'connected')
       ? ('connected' as ConnectionStatus)
       : ('error' as ConnectionStatus);
-
-export const _unused_emptyAgentStates = emptyAgentStates;

@@ -15,6 +15,10 @@ import type {
 } from '@/models/SessionState';
 import { AGENT_KEYS } from '@/models/SessionState';
 import type { WorkflowState } from './useWorkflowStore';
+import {
+  projectAgentToPhaseStatus,
+  selectRuntimeStatus,
+} from './runtimeSelectors';
 
 // ── Presentation types (kept here so consumers don't depend on the model) ──
 
@@ -218,17 +222,17 @@ export function selectRuntimeExecution(state: WorkflowState, sessionId: string |
   const session = state.sessions[sessionId];
   if (!session) return null;
 
-  // currentAgent is read directly from agentStates (requirement: no scanning
-  // runtimeEvents per render). We pick the agent whose status is running or
-  // awaiting_review, preferring running.
-  let runningAgent: AgentKey | null = null;
-  let reviewingAgent: AgentKey | null = null;
-  for (const key of AGENT_KEYS) {
-    const a = session.agentStates[key];
-    if (a.status === 'running') runningAgent = key;
-    else if (a.status === 'awaiting_review' && !reviewingAgent) reviewingAgent = key;
-  }
-  const currentAgent = runningAgent ?? reviewingAgent ?? null;
+  // Runtime state derivation is owned by the canonical selector.
+  // See frontend/src/store/runtimeSelectors.ts and the contract at
+  // docs/runtime-observability/07_CANONICAL_RUNTIME_CONTRACT.md.
+  // This module is the single consumer; no other reducer / component
+  // may compute runtime state independently.
+  const runtimeStatus = selectRuntimeStatus(session);
+  const currentAgent = runtimeStatus.currentAgent;
+  // runtimeStatus.reviewingAgent is exposed by the canonical
+  // selector but not consumed by this function (the prior inline
+  // derivation also assigned it without using it). Kept for
+  // parity — see RuntimeStatus contract in runtimeSelectors.ts.
 
   const currentAgentState = currentAgent ? session.agentStates[currentAgent] : null;
 
@@ -242,23 +246,15 @@ export function selectRuntimeExecution(state: WorkflowState, sessionId: string |
       }
     : detectCurrentTool(session.runtimeEvents, session.pendingGates, currentAgent);
 
-  // Phases — drawn from the coarse pipelinePhases array, with awaiting_review
-  // merged in from agentStates for display.
-  const phaseForAgent: Record<AgentKey, RuntimeAgentPhase['status']> = {} as Record<AgentKey, RuntimeAgentPhase['status']>;
-  for (const phase of session.pipelinePhases) {
-    phaseForAgent[phase.agent] = phase.status;
-  }
-  for (const key of AGENT_KEYS) {
-    if (session.agentStates[key].status === 'awaiting_review' && phaseForAgent[key] === 'running') {
-      phaseForAgent[key] = 'awaiting_review';
-    }
-  }
-
+  // Phases — drawn from the canonical selector. The selector's
+  // `projectAgentToPhaseStatus` returns the FE-visible PhaseStatus
+  // value directly (matching the prior inline derivation at
+  // workflowSelectors.ts:247-264 byte-for-byte).
   const phases: RuntimeAgentPhase[] = AGENT_KEYS.map((agent) => {
     const phase = session.pipelinePhases.find((p) => p.agent === agent);
     return {
       agent,
-      status: phaseForAgent[agent] ?? 'pending',
+      status: projectAgentToPhaseStatus(session, agent),
       taskId: phase?.taskId,
     };
   });

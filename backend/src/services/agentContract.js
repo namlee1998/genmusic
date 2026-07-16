@@ -3,7 +3,7 @@
 // Beginner reading guide: REQUIRED_OUTPUT_KEYS is the minimum shape accepted
 // from deterministic mock output, the real Claude Agent SDK runner, and the
 // Python/LangChain service. Detailed semantic/risk rules live in
-// SdlcWorkflowService.OUTPUT_CONTRACTS (gate-output.v4).
+// SdlcWorkflowService.OUTPUT_CONTRACTS (gate-output.v5).
 //
 // An adapter returns a plain object containing at least the role's required
 // output keys below. tests/integration/agent-contract.test.js catches drift at
@@ -11,21 +11,53 @@
 //
 // Keep this contract deliberately small. Do not duplicate richer gate rules.
 
-const AGENT_CONTRACT_VERSION = 'agent-io.v3';
+const AGENT_CONTRACT_VERSION = 'agent-io.v5';
 
+// Project Definition is the A2A Contract for the architecture-agent — the
+// sole required structured output. The legacy fields (architecture_brief,
+// repository_routing, technical_decisions, repository_summary,
+// technology_stack, top-level constraints) are listed below for
+// discoverability, but `assertOutputConforms` treats only `project_definition`
+// as required. The legacy fields remain in the output as human-readable
+// documentation alongside the A2A Contract and are validated as WARNING-only
+// in sdlcConstants.PROJECT_DEFINITION_RULES.
 const REQUIRED_OUTPUT_KEYS = {
-  'architecture-agent': ['repository_summary', 'technology_stack', 'technical_decisions', 'constraints', 'repository_routing', 'architecture_brief'],
-  'po-agent': ['prd', 'user_stories', 'acceptance_criteria', 'scope', 'out_of_scope', 'risk_classification'],
-  'ux-agent': ['ux_spec', 'user_flow', 'wireframe_spec', 'screens', 'component_inventory'],
+  'architecture-agent': [
+    'project_definition',
+    'architecture_brief',
+    'repository_summary',
+    'technology_stack',
+    'technical_decisions',
+    'constraints',
+    'repository_routing',
+  ],
+  'po-agent': ['prd', 'user_stories', 'acceptance_criteria', 'scope', 'out_of_scope'],
+  'ux-agent': ['ux_spec', 'user_flow', 'wireframe_spec', 'screens', 'component_inventory', 'html_mockup'],
   'dev-agent': [
-    'implementation_plan', 'patch_diff', 'changed_files', 'sandbox_result',
-    'self_test_report', 'linked_ac_ids', 'risk_assessment', 'risk_classification',
+    'implementation_plan', 'patch_diff', 'changed_files',
   ],
   'qa-agent': [
     'test_cases', 'qa_report', 'ac_coverage_matrix', 'test_run_report',
-    'release_decision', 'release_reason', 'blocker_count',
+    'release_reason', 'blocker_count',
+    'build_result', 'self_test_report', 'linked_ac_ids',
+    'risk_classification', 'risk_assessment',
+    'security_notes', 'security_gate',
   ],
 };
+
+// Strict subset of REQUIRED_OUTPUT_KEYS that assertOutputConforms must
+// enforce. For most roles this is the same as REQUIRED_OUTPUT_KEYS; for
+// the architecture-agent it is the A2A Contract only — the legacy fields
+// are documentation and tolerate being absent/empty.
+const STRICT_OUTPUT_KEYS = {
+  'architecture-agent': ['project_definition'],
+};
+
+// Per spec §6.1: clarification_questions is NOT a post-mortem JSON field.
+// The platform uses mid-run AskUserQuestion for human clarification. We expose
+// this here so workflow code can reference the canonical invariant without
+// hard-coding string literals scattered across the codebase.
+const FORBIDDEN_OUTPUT_KEYS = ['clarification_questions'];
 
 function hasContent(value) {
   if (typeof value === 'string') return value.trim().length > 0;
@@ -39,32 +71,127 @@ function hasContent(value) {
 
 /**
  * Check an agent output against the role contract.
- * Required fields must exist and contain meaningful content. Numeric zero and
- * boolean false remain valid values; empty strings/arrays/objects do not.
+ *
+ * For most roles, all entries in REQUIRED_OUTPUT_KEYS are required. For
+ * roles that have a STRICT_OUTPUT_KEYS override (currently only
+ * `architecture-agent`), only the strict subset is enforced — the rest of
+ * the entries are documentation and tolerate being absent or empty.
+ *
+ * Numeric zero and boolean false remain valid values; empty
+ * strings/arrays/objects do not.
+ *
  * @returns {{ ok: boolean, missing: string[], empty: string[] }}
  */
 function assertOutputConforms(role, output) {
-  const required = REQUIRED_OUTPUT_KEYS[role] || [];
+  const required = STRICT_OUTPUT_KEYS[role] || REQUIRED_OUTPUT_KEYS[role] || [];
   const out = output || {};
   const missing = required.filter((key) => out[key] === undefined || out[key] === null);
   const empty = required.filter((key) => !missing.includes(key) && !hasContent(out[key]));
   return { ok: missing.length === 0 && empty.length === 0, missing, empty };
 }
 
+// Mandatory fields the Architecture Agent must fill in `project_definition`
+// before ARCH can Complete. Each entry is `{value, source, status}`:
+//   - value:   <string|object|array>
+//   - source:  'user' | 'agent' | 'inferred'
+//   - status:  'confirmed' | 'missing' | 'assumed'
+// For mandatory fields status='missing' blocks; status='assumed' is forbidden
+// (the deterministic rule that blocks hallucinated tech-stack decisions).
+const PROJECT_DEFINITION_MANDATORY_KEYS = [
+  'project_type',
+  'language',
+  'framework',
+  'runtime',
+  'package_manager',
+  'build_system',
+  'deployment_target',
+  'repository',
+  'constraints',
+  'out_of_scope',
+];
+
+// Optional fields that may carry status='assumed'. These never block ARCH.
+const PROJECT_DEFINITION_OPTIONAL_KEYS = ['assumptions'];
+
+function getProjectDefinitionEntry(pd, key) {
+  if (!pd || typeof pd !== 'object') return null;
+  const e = pd[key];
+  return e && typeof e === 'object' && 'status' in e ? e : null;
+}
+
 /**
- * T2 (B1) — normalize `clarification_questions` from agent output to the
- * object shape consumed by the frontend ClarificationPanel.
+ * Validate the project_definition object produced by the Architecture Agent.
  *
- * The frontend (and spec §6.1) expect `[{question, header?, options?}, ...]`,
- * but agents may still return the older `string[]` form, partial objects, or
- * even `null` while they migrate. This helper is defensive: it always returns
- * a non-empty array of objects, never throws, and never silently drops content.
+ * Returns:
+ *   {
+ *     ok: boolean,                           // true when no mandatory field
+ *                                           // is missing or assumed
+ *     missing: [{key, reason}],              // mandatory fields whose value
+ *                                           // is missing/empty or status='missing'
+ *     empty: [{key}],                        // mandatory fields with no value
+ *     assumedOnMandatory: [{key}],           // mandatory fields with status='assumed'
+ *   }
  *
- * - `string[]` entries become `{question: str}` objects (header/options left
- *   undefined so ClarificationPanel's suggested-answer fallback uses the
- *   question text itself).
+ * The validator is purely deterministic — it does not consult scopeHints
+ * or confidence, only the {value, source, status} metadata.
+ */
+function assertProjectDefinitionConforms(pd) {
+  const missing = [];
+  const empty = [];
+  const assumedOnMandatory = [];
+  if (!pd || typeof pd !== 'object') {
+    return {
+      ok: false,
+      missing: PROJECT_DEFINITION_MANDATORY_KEYS.map((key) => ({ key, reason: 'project_definition is missing' })),
+      empty: [],
+      assumedOnMandatory: [],
+    };
+  }
+  for (const key of PROJECT_DEFINITION_MANDATORY_KEYS) {
+    const e = getProjectDefinitionEntry(pd, key);
+    if (!e) {
+      missing.push({ key, reason: 'field is missing or has no {value, source, status} metadata' });
+      continue;
+    }
+    if (e.status === 'missing') {
+      missing.push({ key, reason: 'status=missing (AskUserQuestion required)' });
+      continue;
+    }
+    if (e.status === 'assumed') {
+      assumedOnMandatory.push({ key });
+      continue;
+    }
+    if (!hasContent(e.value)) {
+      empty.push({ key });
+    }
+  }
+  return {
+    ok: missing.length === 0 && empty.length === 0 && assumedOnMandatory.length === 0,
+    missing,
+    empty,
+    assumedOnMandatory,
+  };
+}
+
+/**
+ * T2 (B1) — defensive normalizer for `clarification_questions`.
+ *
+ * Frontend ClarificationPanel and spec §6.1 expect object form:
+ *   [{question, header?, options?}, ...]
+ *
+ * Agents may still return `string[]` or partial objects during migration.
+ * This helper always returns a non-empty array of objects, never throws,
+ * and never silently drops content (drops only with a warn log when the
+ * question text is missing entirely).
+ *
+ * - `string[]` entries become `{question: str}` objects.
  * - Bare strings / numbers / null / undefined are coerced where possible.
- * - Items without a recognizable question text are dropped with a warning log.
+ * - Items without a recognizable question text are dropped with a warning.
+ *
+ * Kept here despite FORBIDDEN_OUTPUT_KEYS: the wire-contract rejection runs
+ * in claudeCodeRunner.normalizeOutput (forces the field to []), but the
+ * normalizer is still used by tests and any adapter that opts to surface
+ * pre-rejection input defensively.
  */
 function normalizeClarificationQuestions(raw, { logger = console } = {}) {
   if (!Array.isArray(raw) || raw.length === 0) return [];
@@ -104,4 +231,16 @@ function normalizeClarificationQuestions(raw, { logger = console } = {}) {
   return out;
 }
 
-module.exports = { AGENT_CONTRACT_VERSION, REQUIRED_OUTPUT_KEYS, assertOutputConforms, hasContent, normalizeClarificationQuestions };
+module.exports = {
+  AGENT_CONTRACT_VERSION,
+  REQUIRED_OUTPUT_KEYS,
+  STRICT_OUTPUT_KEYS,
+  FORBIDDEN_OUTPUT_KEYS,
+  PROJECT_DEFINITION_MANDATORY_KEYS,
+  PROJECT_DEFINITION_OPTIONAL_KEYS,
+  getProjectDefinitionEntry,
+  assertProjectDefinitionConforms,
+  assertOutputConforms,
+  hasContent,
+  normalizeClarificationQuestions,
+};

@@ -7,79 +7,27 @@
 // - after restart the Promise is gone; server boot marks old gates interrupted
 //   and SdlcWorkflowService re-dispatches the affected stage.
 //
-// In-memory registry of pending HITL gates. The claude-code runner calls
-// requestGate() and AWAITS the returned promise; the HTTP approvals endpoint
-// calls resolveGate() to wake it up. Resolution is idempotent (a double POST
-// never triggers a double action) and a watchdog auto-rejects an unanswered
-// gate after a timeout so a workflow can never hang forever.
+// Lifecycle ownership (this file):
+//   - requestGate() creates PendingGate row, sets up awaiter promise, calls
+//     publishEvent('gate_pending', ...) so SSE consumers see the gate.
+//   - resolveGate() calls PendingGate.resolve, runs taskLifecycle transition,
+//     calls publishEvent('gate_resolved', ...), resolves the awaiter.
 //
-// SSE in this app is poll-based, so we also expose listPending()/getPending()
-// for the status stream + a new /approvals listing to render, and accept an
-// optional emitSse callback for push-style consumers.
+// Transport ownership lives in services/eventBus.js and services/eventPublisher.js.
+// This file never constructs envelopes directly — only the publisher does.
 
 const { v4: uuidv4 } = require('uuid');
 const logger = require('../config/logger');
 const PendingGate = require('../models/PendingGate');
 const taskLifecycle = require('./taskLifecycleService');
+const { Task } = require('../models');
+const { publishEvent } = require('./eventPublisher');
+const { toGateType } = require('./toGateType');
 
 /** approvalId -> pending record */
 const pending = new Map();
-/** taskId -> Set<(event, data) => void> */
-const subscribers = new Map();
-/** projectId -> Set<(taskId, event, data) => void> */
-const projectSubscribers = new Map();
 /** taskId -> projectId (reverse lookup, set when requestGate is called) */
 const taskToProject = new Map();
-
-function emit(taskId, event, data) {
-  for (const listener of subscribers.get(taskId) || []) {
-    try {
-      listener(event, data);
-    } catch (err) {
-      logger.warn('gate subscriber failed', { taskId, event, error: err.message });
-    }
-  }
-  // T5 (B6) — fan out to project-level subscribers too. The session-level SSE
-  // stream uses this so a single subscribeProject() call covers every task
-  // belonging to the project (instead of polling getPipelineResponse every 2s).
-  const projectId = taskToProject.get(taskId);
-  if (projectId) {
-    for (const listener of projectSubscribers.get(projectId) || []) {
-      try {
-        listener(taskId, event, data);
-      } catch (err) {
-        logger.warn('gate project subscriber failed', { projectId, taskId, event, error: err.message });
-      }
-    }
-  }
-}
-
-/**
- * Subscribe to every gate event emitted by ANY task belonging to `projectId`.
- * Returns an unsubscribe function. Used by `streamPipelineStatus` to push
- * session-wide state changes (gate_pending / gate_resolved / runtime_log /
- * etc.) without polling.
- */
-function subscribeProject(projectId, listener) {
-  if (!projectId) return () => {};
-  const set = projectSubscribers.get(projectId) || new Set();
-  set.add(listener);
-  projectSubscribers.set(projectId, set);
-  return () => {
-    set.delete(listener);
-    if (set.size === 0) projectSubscribers.delete(projectId);
-  };
-}
-
-function subscribe(taskId, listener) {
-  const listeners = subscribers.get(taskId) || new Set();
-  listeners.add(listener);
-  subscribers.set(taskId, listeners);
-  return () => {
-    listeners.delete(listener);
-    if (listeners.size === 0) subscribers.delete(taskId);
-  };
-}
 
 function defaultTimeout() {
   return Math.max(1000, Number(process.env.GATE_TIMEOUT_MS) || 600000);
@@ -93,14 +41,14 @@ function defaultTimeout() {
  *
  * @param {object} p
  * @param {string} p.taskId
+ * @param {string} p.sessionId
  * @param {string} [p.projectId]
  * @param {string} p.role     owning role, e.g. 'dev-agent'
- * @param {'tool'|'question'} p.kind
+ * @param {'tool'|'question'|'output_review'|'release'} p.kind
  * @param {object} p.payload  rendered context (file_path, diff, questions, risk…)
- * @param {Function} [p.emitSse]  optional (event, data) => void push callback
  * @param {number} [p.timeoutMs]
  */
-function requestGate({ taskId, projectId = null, role, kind, payload = {}, emitSse = null, timeoutMs }) {
+function requestGate({ taskId, sessionId, projectId = null, role, kind, payload = {}, timeoutMs }) {
   const approvalId = uuidv4();
   const ttl = Number.isFinite(timeoutMs) ? timeoutMs : defaultTimeout();
 
@@ -121,6 +69,7 @@ function requestGate({ taskId, projectId = null, role, kind, payload = {}, emitS
     pending.set(approvalId, {
       approvalId,
       taskId,
+      sessionId: sessionId || null,
       projectId,
       role,
       kind,
@@ -133,24 +82,61 @@ function requestGate({ taskId, projectId = null, role, kind, payload = {}, emitS
     if (projectId) taskToProject.set(taskId, projectId);
   });
 
-  const eventData = { approvalId, taskId, projectId, role, kind, payload, status: 'pending', createdAt: new Date().toISOString() };
+  const eventData = { approvalId, taskId, projectId, sessionId, role, kind, payload, status: 'pending', createdAt: new Date().toISOString() };
   // Persistence is completed before SSE/subscriber notification. Callers that
   // drive an agent await `ready`, so a visible gate always has durable state.
   const ready = (async () => {
     await PendingGate.create(eventData);
-    // 'output_review' gates are created AFTER the owning agent's task has
-    // already reached the terminal `completed` executionStatus — there is no
-    // live in-process thread to suspend (unlike 'question'/'tool' gates, which
-    // pause a still-running agent). `completed` has no outgoing transitions,
-    // so attempting awaiting_gate/running here would throw; skip it.
-    if (kind !== 'output_review') {
+    // The lifecycle transition `… -> awaiting_gate` is only meaningful when
+    // the owning task still has a live in-process thread (or could plausibly
+    // resume). Skip it for:
+    //   1. Gate kinds that never pause a live thread — 'output_review' is
+    //      always created post-completion; 'release' is a pure
+    //      packaging+publishing stage.
+    //   2. Tasks that have already reached a terminal executionStatus while
+    //      the SDK was mid-flight (e.g. QA budget timeout fired before the
+    //      in-flight `tool` decision returned). Without this guard,
+    //      `taskLifecycle.transition` throws "Invalid task transition:
+    //      timeout -> awaiting_gate" and the persisted PendingGate is left
+    //      without an SSE `gate_pending` event.
+    const skipByKind = kind === 'output_review' || kind === 'release';
+    let skipByStatus = false;
+    if (!skipByKind) {
+      try {
+        const current = await Task.findById(taskId);
+        if (current && ['completed', 'failed', 'cancelled', 'timeout'].includes(current.executionStatus)) {
+          skipByStatus = true;
+        }
+      } catch (_) {
+        // If we can't read the task, fall through and let transitionIfPresent
+        // surface the canonical error rather than silently masking it.
+      }
+    }
+    if (!skipByKind && !skipByStatus) {
       await taskLifecycle.transitionIfPresent(taskId, 'awaiting_gate', {
         actor: role,
         payload: { approvalId, kind },
       });
     }
-    if (typeof emitSse === 'function') emitSse('gate_pending', eventData);
-    emit(taskId, 'gate_pending', eventData);
+    if (sessionId && projectId) {
+      const gateType = toGateType(role, kind);
+      await publishEvent('gate_pending',
+        { projectId, sessionId, taskId, role },
+        {
+          gate: {
+            id: approvalId,
+            type: gateType,
+            kind,
+            taskId,
+            projectId,
+            role,
+            status: 'pending',
+            payload,
+            createdAt: eventData.createdAt,
+          },
+        },
+      );
+    }
     logger.info('gate_pending', { approvalId, taskId, role, kind });
   })();
   ready.catch((err) => logger.error('failed to persist pending gate', { approvalId, error: err.message }));
@@ -187,7 +173,21 @@ async function resolveGate(approvalId, result = {}) {
       eventType: 'gate_resolved',
     });
   }
-  emit(rec.taskId, 'gate_resolved', { approvalId, taskId: rec.taskId, result });
+  if (rec.sessionId && rec.projectId) {
+    const decision = result?.action === 'reject'
+      ? 'reject'
+      : (result?.answers ? 'answer' : (result?.timedOut ? 'timeout' : 'approve'));
+    await publishEvent('gate_resolved',
+      { projectId: rec.projectId, sessionId: rec.sessionId, taskId: rec.taskId, role: rec.role },
+      {
+        gateId: approvalId,
+        taskId: rec.taskId,
+        decision,
+        comment: result?.comment || undefined,
+        resolvedAt: new Date().toISOString(),
+      },
+    );
+  }
   logger.info('gate_resolved', { approvalId, taskId: rec.taskId, action: result.action || 'allow' });
   rec.resolve(result);
   return true;
@@ -221,7 +221,6 @@ function listPending({ taskId = null, projectId = null } = {}) {
 function _clearAll() {
   for (const rec of pending.values()) clearTimeout(rec.timer);
   pending.clear();
-  subscribers.clear();
 }
 
 async function markOrphanedPendingInterrupted() {
@@ -255,7 +254,5 @@ module.exports = {
   listInterrupted,
   findPersisted,
   markOrphanedPendingInterrupted,
-  subscribe,
-  subscribeProject,
   _clearAll,
 };

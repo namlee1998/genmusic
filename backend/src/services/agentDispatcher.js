@@ -54,43 +54,67 @@ async function buildMockOutput(task, context, deps = {}) {
   }
 
   const roleDefaults = {
-    'architecture-agent': {
-      repository_summary: { overview: 'Mock repository summary generated for contract validation.', entrypoints: [], notes: '' },
-      technology_stack: { language: 'unknown', framework: 'unknown', package_manager: 'unknown', runtime: 'unknown' },
-      technical_decisions: ['Mock decision generated for contract validation.'],
-      constraints: ['Mock constraint generated for contract validation.'],
-      repository_routing: (() => {
-        const scopeHints = context.scopeHints || null;
-        const targetFolders = Array.isArray(scopeHints?.targetFolders) && scopeHints.targetFolders.length
-          ? scopeHints.targetFolders
-          : ['src/'];
-        const primary = targetFolders[0];
-        return {
+    'architecture-agent': (() => {
+      const scopeHints = context.scopeHints || null;
+      const targetFolders = Array.isArray(scopeHints?.targetFolders) && scopeHints.targetFolders.length
+        ? scopeHints.targetFolders
+        : ['src/'];
+      const primary = targetFolders[0];
+      const languageHint = scopeHints?.languageHint || 'unknown';
+      const ignoreGlobs = Array.isArray(scopeHints?.ignoreGlobs) && scopeHints.ignoreGlobs.length
+        ? scopeHints.ignoreGlobs.slice(0, 8)
+        : ['node_modules/', 'dist/', 'build/'];
+
+      // Project Definition (A2A Contract) — every mandatory field carries
+      // {value, source, status} metadata so the BLOCKER validators can
+      // accept it deterministically. assumptions is allowed status='assumed'
+      // because it is optional.
+      const project_definition = {
+        project_type:      { value: 'web_app',                                          source: 'agent',    status: 'confirmed' },
+        language:          { value: languageHint,                                       source: 'inferred', status: 'confirmed' },
+        framework:         { value: 'unknown',                                          source: 'agent',    status: 'confirmed' },
+        runtime:           { value: 'unknown',                                          source: 'agent',    status: 'confirmed' },
+        package_manager:   { value: 'npm',                                              source: 'inferred', status: 'confirmed' },
+        build_system:      { value: 'npm scripts',                                      source: 'inferred', status: 'confirmed' },
+        deployment_target: { value: 'node-server',                                      source: 'agent',    status: 'confirmed' },
+        repository:        { value: { target_module: primary, search_scope: targetFolders.join(','), ignore: ignoreGlobs }, source: 'agent', status: 'confirmed' },
+        constraints:       { value: ['Mock constraint generated for contract validation.'], source: 'agent', status: 'confirmed' },
+        out_of_scope:      { value: ['Explicitly excluded by user (mock default).'],        source: 'agent', status: 'confirmed' },
+        assumptions:       { value: ['Mock assumption generated for contract validation.'], source: 'agent', status: 'assumed' },
+      };
+
+      return {
+        // The A2A Contract — sole required structured output for ARCH.
+        project_definition,
+        // Derived fields kept for FE / human-review backward compat.
+        repository_summary: { overview: 'Mock repository summary generated for contract validation.', entrypoints: [], notes: '' },
+        technology_stack: { language: languageHint, framework: 'unknown', package_manager: 'npm', runtime: 'unknown' },
+        technical_decisions: ['Mock decision generated for contract validation.'],
+        constraints: ['Mock constraint generated for contract validation.'],
+        repository_routing: {
           target_module: primary,
           framework: 'unknown',
-          language: scopeHints?.languageHint || 'unknown',
+          language: languageHint,
           search_scope: targetFolders.join(','),
-          ignore: Array.isArray(scopeHints?.ignoreGlobs) && scopeHints.ignoreGlobs.length
-            ? scopeHints.ignoreGlobs.slice(0, 8)
-            : ['node_modules/', 'dist/', 'build/'],
+          ignore: ignoreGlobs,
           confidence: typeof scopeHints?.confidence === 'number' ? scopeHints.confidence : 0.5,
-        };
-      })(),
-      architecture_brief: [
-        '# Mock Architecture Brief',
-        '',
-        'Generated for contract validation. Routing is provisional; downstream agents should re-validate against the live repository tree before planning.',
-        '',
-        '## Module routing',
-        '- Target module: `src/`',
-        '- Framework: unknown (fallback)',
-        '- Language: unknown (fallback)',
-        '',
-        '## Constraints',
-        '- Preserve existing behavior outside the requested scope.',
-        '- Validate routing decisions at the architecture review gate.',
-      ].join('\n'),
-    },
+        },
+        architecture_brief: [
+          '# Mock Architecture Brief',
+          '',
+          'Generated for contract validation. Routing is provisional; downstream agents should re-validate against the live repository tree before planning.',
+          '',
+          '## Module routing',
+          `- Target module: \`${primary}\``,
+          '- Framework: unknown (fallback)',
+          `- Language: ${languageHint} (fallback)`,
+          '',
+          '## Constraints',
+          '- Preserve existing behavior outside the requested scope.',
+          '- Validate routing decisions at the architecture review gate.',
+        ].join('\n'),
+      };
+    })(),
     'po-agent': {
       prd: `# ${context.featureRequest?.title || 'Feature'}\n\nMock PRD generated for contract validation.`,
       user_stories: [
@@ -103,11 +127,6 @@ async function buildMockOutput(task, context, deps = {}) {
       acceptance_criteria: ['AC-1: Happy path is supported', 'AC-2: Validation is testable'],
       scope: '- Include the requested user flow.',
       out_of_scope: '- Exclude unrelated product changes.',
-      risk_classification: {
-        level: 'MEDIUM',
-        required_gates: ['schema', 'validation', 'evidence', 'qa'],
-        rationale: 'Mock risk classification generated for contract validation.',
-      },
     },
     'ux-agent': {
       ux_spec: '# UX Spec\n\nMock UX spec generated for contract validation.',
@@ -115,30 +134,32 @@ async function buildMockOutput(task, context, deps = {}) {
       wireframe_spec: '- Screen 1: entry\n- Screen 2: success',
       component_inventory: '- Button\n- Form\n- Confirmation panel',
       screens: [{ name: 'Entry Screen', purpose: 'Capture the initial action', elements: ['Primary CTA', 'Input field'], states: ['loading', 'error', 'success'] }],
+      html_mockup: '<!DOCTYPE html>\n<html lang="en">\n<head><meta charset="UTF-8"><title>Mock UX</title></head>\n<body><main id="root"><h1>Mock mockup</h1><button type="button">Primary CTA</button></main></body>\n</html>',
     },
     'dev-agent': {
       implementation_plan: '# Implementation plan\n\n1. Update the relevant files.\n2. Run the contract checks.',
       mock_code_diff: 'diff --git a/src/app.js b/src/app.js\n--- a/src/app.js\n+++ b/src/app.js\n@@ -1 +1 @@\n-console.log("old")\n+console.log("new")\n',
       patch_diff: 'diff --git a/src/app.js b/src/app.js\n--- a/src/app.js\n+++ b/src/app.js\n@@ -1 +1 @@\n-console.log("old")\n+console.log("new")\n',
       changed_files: [{ path: 'src/app.js', reason: 'Contract validation placeholder', change_type: 'modify' }],
-      build_result: { build_ok: true, tests_ran: true, tests_passed: 1, tests_failed: 0, logs: 'Mock build passed.' },
-      self_test_report: 'Mock DEV self-test passed.',
-      linked_ac_ids: ['AC-1'],
-      risk_assessment: 'LOW risk for contract validation.',
-      risk_classification: { level: 'LOW', required_gates: ['schema', 'validation', 'evidence', 'qa'] },
     },
     'qa-agent': {
       test_cases: [{ id: 'TC-001', source_ac: 'AC-1', title: 'Happy path', type: 'functional', priority: 'High', precondition: 'Feature is available', steps: ['Open the flow', 'Complete the flow'], expected_result: 'The feature succeeds', status: 'Passed' }],
       qa_report: '# QA report\n\nMock QA report generated for contract validation.',
       ac_coverage_matrix: [{ ac: 'AC-1: Happy path is supported', ac_id: 'AC-1', test_case_ids: ['TC-001'], covered: true }],
       test_run_report: { executed: true, total: 1, passed: 1, failed: 0, duration_ms: 25, logs: 'Mock test runner passed.' },
-      release_decision: 'approve',
       release_reason: 'All mock validation checks passed.',
       blocker_count: 0,
+      // Phase 3.6: QA is the canonical owner of the validation-evidence
+      // cluster. DEV no longer emits any of these fields.
+      build_result: { build_ok: true, tests_ran: true, tests_passed: 1, tests_failed: 0, logs: 'Mock build passed.' },
+      self_test_report: { executed: true, passed: 1, failed: 0, evidence: 'Mock QA self-test run.' },
+      linked_ac_ids: ['AC-1'],
+      risk_classification: { level: 'LOW', required_gates: ['schema', 'validation', 'evidence', 'qa'], classifier: 'mock-rule-based.v1' },
+      risk_assessment: 'LOW risk for contract validation.',
     },
   };
 
-  Object.entries(roleDefaults[task.type] || {}).forEach(([key, value]) => {
+  Object.entries(typeof roleDefaults[task.type] === 'function' ? roleDefaults[task.type]() : (roleDefaults[task.type] || {})).forEach(([key, value]) => {
     if (completedData[key] === undefined || completedData[key] === null || completedData[key] === '') {
       completedData[key] = value;
     }
@@ -185,7 +206,6 @@ async function buildMockOutput(task, context, deps = {}) {
     : (inheritedRisk || { level: 'LOW', tags: [], required_gates: ['schema', 'validation', 'evidence', 'qa'], classifier: 'mock-rule-based.v1' });
 
   if (task.type !== 'architecture-agent') {
-    completedData.risk_classification = riskClassification;
     completedData.workflow_policy = {
       auto_approve_threshold: 0.8,
       required_gates: riskClassification.required_gates,
@@ -193,15 +213,23 @@ async function buildMockOutput(task, context, deps = {}) {
     };
   }
 
+  // Phase 3.6: risk_classification is QA-only canonical. PO and DEV MUST NOT
+  // emit it. UX does not carry it either — only QA.
+  if (task.type === 'qa-agent') {
+    completedData.risk_classification = riskClassification;
+  }
+
   if (task.type === 'dev-agent') {
     completedData.patch_diff = completedData.mock_code_diff;
-    completedData.self_test_report = {
-      executed: true,
-      passed: completedData.build_result?.tests_passed || 0,
-      failed: completedData.build_result?.tests_failed || 0,
-      evidence: 'Mock build run: npm test and npm run lint',
-    };
-    const securityRequired = riskClassification.required_gates.includes('security');
+    // Phase 3.6: self_test_report moved to QA. DEV no longer emits it.
+  }
+
+  if (task.type === 'qa-agent') {
+    completedData.blocker_count = completedData.blocker_count ?? 0;
+    // Phase 3.6: security_notes / security_gate moved to QA (was DEV).
+    // Condition on QA's own risk_classification now.
+    const qaRisk = completedData.risk_classification || riskClassification;
+    const securityRequired = Array.isArray(qaRisk?.required_gates) && qaRisk.required_gates.includes('security');
     const securityPassed = !securityRequired || !!feedbackPrompt;
     completedData.security_notes = securityPassed ? {
       oauth_state_csrf: 'PASS', pkce: 'PASS', client_secret_frontend: 'PASS',
@@ -211,10 +239,6 @@ async function buildMockOutput(task, context, deps = {}) {
     completedData.security_gate = securityPassed
       ? { recommendation: 'PASS', checklist_version: 'oauth-security.mock.v1', issues: [] }
       : { recommendation: 'HOLD', checklist_version: 'oauth-security.mock.v1', issues: [{ code: 'oauth_state_csrf_missing', severity: 'HIGH', detail: 'Google OAuth callback evidence does not show state validation against the login session.', expected_fix: 'Add state generation and callback validation, rerun build tests, and attach the updated security notes.' }] };
-  }
-
-  if (task.type === 'qa-agent') {
-    completedData.blocker_count = completedData.blocker_count ?? 0;
     completedData.ac_coverage_matrix = (completedData.ac_coverage_matrix || []).map((row) => ({
       requirement_id: row.requirement_id || row.ac_id,
       requirement: row.requirement || row.ac,
@@ -250,16 +274,28 @@ async function buildMockOutput(task, context, deps = {}) {
 async function runClaudeCodePath(task, context, deps = {}) {
   const { getRepoContext, makeOnGate } = deps;
   const claudeCodeRunner = require('../agents/claudeCodeRunner');
-  const repoContext = getRepoContext ? await getRepoContext(task.projectId) : null;
+  const repoContext = getRepoContext ? await getRepoContext(task.projectId, task.sessionId) : null;
   const repoPath = repoContext?.repoPath || null;
   const onGate = makeOnGate ? makeOnGate(task.id, task.type, {
     projectId: task.projectId,
+    sessionId: task.sessionId,
     scope: { featurePaths: ['src/', 'tests/', 'docs/'] },
   }) : undefined;
 
-  const { output } = await claudeCodeRunner.runAgent({
-    role: task.type, repoPath, taskId: task.id, context, onGate,
+  const runOnce = ({ context: ctx }) => claudeCodeRunner.runAgent({
+    role: task.type, repoPath, taskId: task.id, context: ctx, onGate,
   });
+
+  // Every role whose output is validated by OUTPUT_CONTRACTS (architecture,
+  // po, ux, dev, qa) goes through the AskUserQuestion enforcement loop. The
+  // loop is bypassed for non-validated roles internally — see
+  // archAskEnforcer.ENFORCED_ROLES.
+  const { enforceAskUserQuestion } = require('./archAskEnforcer');
+  const { output, attempts } = await enforceAskUserQuestion({ task, context, runOnce });
+  if (attempts > 1 && process.env.NODE_ENV !== 'test') {
+    // eslint-disable-next-line no-console
+    console.warn(`[agentDispatcher] ${task.type} retried ${attempts - 1} times before acceptance`);
+  }
   return output;
 }
 
@@ -294,10 +330,11 @@ async function runAgent(task, context, userId = null, deps = {}) {
   if (executionPath === 'codex') {
     try {
       const codexRunner = require('../agents/codexRunner');
-      const repoContext = getRepoContext ? await getRepoContext(task.projectId) : null;
+      const repoContext = getRepoContext ? await getRepoContext(task.projectId, task.sessionId) : null;
       const repoPath = repoContext?.repoPath || null;
       const onGate = makeOnGate ? makeOnGate(task.id, task.type, {
         projectId: task.projectId,
+        sessionId: task.sessionId,
         scope: { featurePaths: ['src/', 'tests/', 'docs/'] },
       }) : undefined;
       const onProgress = (event) => console.log('[codexRunner:progress]', event.data?.slice?.(0, 100));
@@ -321,7 +358,22 @@ async function runAgent(task, context, userId = null, deps = {}) {
       if (saveAgentData) await saveAgentData(task, completedData, userId);
       return;
     } catch (err) {
-      console.error(`[runAgent] claude-code path failed for task ${task.id}:`, err);
+      console.error(`[runAgent] claude-code path failed for task ${task.id}:`, err.message, {
+        code: err.code,
+        missing: err.missing,
+        empty: err.empty,
+        recoverable: err.recoverable,
+        subtype: err.subtype,
+        stopReason: err.stopReason,
+        numTurns: err.numTurns,
+      });
+      if (err.rawResult) {
+        console.error(`[runAgent] claude-code rawResult (first 2000 chars) for task ${task.id}:`, String(err.rawResult).slice(0, 2000));
+      }
+      if (err.repairResult) {
+        console.error(`[runAgent] claude-code repairResult (first 2000 chars) for task ${task.id}:`, String(err.repairResult).slice(0, 2000));
+      }
+      if (err.stack) console.error(`[runAgent] stack:`, err.stack.split('\n').slice(0, 5).join('\n'));
       if (markTaskFailed) await markTaskFailed(task, err);
       return;
     }
@@ -388,10 +440,6 @@ async function runAgent(task, context, userId = null, deps = {}) {
           await prisma.task.update({
             where: { id: task.id },
             data: { status: 'PENDING_TOOL_APPROVAL', error: null, agentOutput: JSON.stringify(requiresActionData) },
-          });
-          const socketService = require('./socketService');
-          socketService.getIo().to('global_approvals').emit('tool_approval_pending', {
-            taskId: task.id, data: requiresActionData,
           });
           return;
         }

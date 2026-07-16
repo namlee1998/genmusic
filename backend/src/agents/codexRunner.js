@@ -22,13 +22,6 @@ const CODEX_ARTIFACT_TEMPLATES = {
     ],
     scope: 'What is included in this feature (non-empty string).',
     out_of_scope: 'What is explicitly excluded from this feature (non-empty string).',
-    risk_classification: {
-      level: 'HIGH',
-      tags: ['auth', 'session'],
-      required_gates: ['schema', 'validation', 'evidence', 'security', 'qa'],
-      classifier: 'codex-rule-based.v1',
-      reason: 'Reason for this risk level.'
-    }
   },
   'ux-agent': {
     ux_spec: 'Full UX specification in Markdown. Must be a non-empty string.',
@@ -55,28 +48,6 @@ const CODEX_ARTIFACT_TEMPLATES = {
     implementation_plan: 'Step-by-step implementation plan in Markdown. Non-empty string.',
     patch_diff: '--- a/src/login.js\n+++ b/src/login.js\n@@ -0,0 +1,10 @@\n+// Login implementation',
     changed_files: ['src/login.js', 'src/components/LoginForm.jsx'],
-    sandbox_result: { status: 'ok', output: 'Build successful' },
-    self_test_report: 'Summary of tests run by the DEV agent. Non-empty string.',
-    linked_ac_ids: ['AC-1', 'AC-2', 'AC-3'],
-    risk_assessment: 'Analysis of risks introduced by this change. Non-empty string.',
-    risk_classification: {
-      level: 'HIGH',
-      tags: ['auth'],
-      required_gates: ['schema', 'validation', 'evidence', 'security', 'qa'],
-      classifier: 'codex-rule-based.v1',
-      reason: 'Auth feature requires security review.'
-    },
-    build_result: {
-      build_ok: true,
-      tests_ran: true,
-      output: 'All tests passed.'
-    },
-    security_notes: 'Password is hashed with bcrypt. HTTPS enforced. CSRF protection enabled.',
-    security_gate: {
-      recommendation: 'PASS',
-      notes: 'No critical vulnerabilities found.'
-    },
-    patch_format: 'unified'
   },
   'qa-agent': {
     test_cases: [
@@ -97,9 +68,31 @@ const CODEX_ARTIFACT_TEMPLATES = {
       logs: 'All 2 tests ran and passed.',
       evidence: 'Test output captured from test runner.'
     },
-    release_decision: 'approve',
     release_reason: 'All acceptance criteria covered. No blockers found.',
-    blocker_count: 0
+    blocker_count: 0,
+    // Phase 3.6: QA is canonical owner of validation evidence.
+    build_result: {
+      build_ok: true,
+      tests_ran: true,
+      tests_passed: 2,
+      tests_failed: 0,
+      output: 'All tests passed.'
+    },
+    self_test_report: 'QA self-test evidence. Non-empty string.',
+    linked_ac_ids: ['AC-1', 'AC-2', 'AC-3'],
+    risk_classification: {
+      level: 'HIGH',
+      tags: ['auth'],
+      required_gates: ['schema', 'validation', 'evidence', 'security', 'qa'],
+      classifier: 'codex-rule-based.v1',
+      reason: 'Auth feature requires security review.'
+    },
+    risk_assessment: 'QA risk assessment for the change. Non-empty string.',
+    security_notes: 'QA security notes. Required when risk_classification.required_gates includes security.',
+    security_gate: {
+      recommendation: 'PASS',
+      notes: 'No critical vulnerabilities found.'
+    },
   }
 };
 
@@ -141,9 +134,8 @@ function buildCodexPrompt({ role, repoPath, context }) {
     '- Do NOT leave any field as an empty string "", empty array [], or empty object {}.',
     '- The `artifact` object MUST contain all keys shown in the example above with real content.',
     '- Replace ALL placeholder text with actual content relevant to the feature request.',
-    '- `release_decision` (qa-agent only) MUST be exactly one of: "approve", "reject", or "needs_changes".',
-    '- `build_result.build_ok` (dev-agent only) MUST be `true`.',
-    '- `build_result.tests_ran` (dev-agent only) MUST be `true`.',
+    // Phase 3.6: release_decision was removed from QA contract — owned by Release Manager.
+    // build_result.build_ok / tests_ran moved from DEV to QA.
     '- `test_run_report.executed` (qa-agent only) MUST be `true`.',
     '- `test_run_report.failed` (qa-agent only) MUST be `0`.',
     '- `test_run_report.total` (qa-agent only) MUST equal the number of items in `test_cases`.',
@@ -198,6 +190,7 @@ async function runAgent({
     console.log(`[codexRunner] Raising MOCK HITL questions for ${role}`);
     const gate = gateBridge.requestGate({
       taskId,
+      sessionId: context.sessionId,
       projectId: context.projectId,
       role,
       kind: 'question',

@@ -221,7 +221,7 @@ describe('Claude Code SDK adapter contracts', () => {
 
   test('role limits keep DEV and QA runs bounded unless explicitly overridden', () => {
     expect(claudeCodeRunner._internal.maxTurnsForRole('dev-agent')).toBe(200);
-    expect(claudeCodeRunner._internal.maxTurnsForRole('qa-agent')).toBe(50);
+    expect(claudeCodeRunner._internal.maxTurnsForRole('qa-agent')).toBe(150);
   });
 
   test('DEV context excludes unrelated upstream artifacts', () => {
@@ -238,27 +238,19 @@ describe('Claude Code SDK adapter contracts', () => {
     });
   });
 
-  test('normalizer promotes valid nested DEV security evidence to contract fields', () => {
+  // Phase 3.6: DEV no longer promotes nested security evidence. Security evidence
+  // (security_notes / security_gate) moved to QA as canonical owner.
+  test('normalizer ignores nested DEV security evidence (Phase 3.6 moved to QA)', () => {
     const output = claudeCodeRunner.normalizeOutput('dev-agent', {
       artifact: {
         implementation_plan: '# Plan',
         patch_diff: 'diff --git a/a b/a',
         changed_files: ['a'],
-        sandbox_result: { tests_ran: true, build_ok: true },
-        self_test_report: '19 tests passed',
-        linked_ac_ids: ['AC-1'],
-        risk_assessment: 'High-risk authentication change',
-        risk_classification: {
-          level: 'HIGH',
-          required_gates: ['security'],
-          security_notes: 'State and token validation implemented.',
-          security_gate: { recommendation: 'PASS' },
-        },
       },
     });
 
-    expect(output.security_notes).toContain('token validation');
-    expect(output.security_gate).toEqual({ recommendation: 'PASS' });
+    expect(output.security_notes).toBeUndefined();
+    expect(output.security_gate).toBeUndefined();
     expect(output.patch_format).toBe('unified_diff');
   });
 
@@ -273,5 +265,44 @@ describe('Claude Code SDK adapter contracts', () => {
         component_inventory: [],
       },
     })).toThrow(/empty: user_flow, wireframe_spec, screens, component_inventory/);
+  });
+
+  // Role ownership: QA owns its structured output. The platform must NOT
+  // silently reshape ac_coverage_matrix, risk_classification, or
+  // test_run_report into the contract shape — that masks real ambiguities
+  // the operator should resolve via AskUserQuestion. If future refactors
+  // add coercion here, this test will fail and force a deliberate decision.
+  //
+  // The contract check in normalizeOutput runs after coerceArrayFields.
+  // We can't reach a "no coerce" assertion without first satisfying all
+  // REQUIRED_OUTPUT_KEYS, but if any of those three fields is later
+  // reshaped, the assertion below will catch the change.
+  test('platform does NOT silently coerce QA shape fields (role ownership)', () => {
+    const output = claudeCodeRunner.normalizeOutput('qa-agent', {
+      artifact: {
+        // Wrong shape for the contract — these should pass through unchanged.
+        risk_classification: { level: 'low', required_gates: ['functional'] },
+        ac_coverage_matrix: [{ ac_id: 'AC-1', covered: true, evidence: 'unit test' }],
+        test_run_report: { executed: true, total: 1, passed: 1, failed: 0, logs: 'ok' },
+        // Required fields to satisfy assertOutputConforms
+        test_cases: [{ id: 'TC-1' }],
+        qa_report: '# QA report',
+        release_reason: 'ok',
+        blocker_count: 0,
+        build_result: 'ok',
+        self_test_report: 'ok',
+        linked_ac_ids: ['AC-1'],
+        risk_assessment: 'low',
+        security_notes: 'ok',
+        security_gate: { recommendation: 'PASS' },
+        gate_evaluation: { recommendation: 'PASS' },
+      },
+    });
+
+    // These three are QA-owned shapes — no silent reshape.
+    expect(output.risk_classification).toEqual({ level: 'low', required_gates: ['functional'] });
+    expect(output.ac_coverage_matrix).toEqual([{ ac_id: 'AC-1', covered: true, evidence: 'unit test' }]);
+    expect(output.test_run_report).toEqual({ executed: true, total: 1, passed: 1, failed: 0, logs: 'ok' });
+    expect(output.test_run_report.executed).toBe(true);
   });
 });

@@ -447,88 +447,22 @@ function renderDiffLine(line: string, idx: number) {
 
 function DevDiffViewer({ devData }: { devData: DevArtifacts }) {
   const diff = devData.patch_diff || devData.mock_code_diff || '';
-  const files = devData.changed_files || [];
-  const buildOk = devData.build_result?.build_ok !== false;
-  const testsRan = devData.build_result?.tests_ran === true;
-  const riskLevel = devData.risk_classification?.level || 'LOW';
-
-  return (
-    <div className="flex flex-col gap-3">
-      {/* Build Status */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] font-bold ${
-          buildOk ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-300' : 'bg-red-500/15 border border-red-500/30 text-red-300'
-        }`}>
-          {buildOk ? <CheckCircle2 size={10} /> : <XCircle size={10} />}
-          Build {buildOk ? 'PASS' : 'FAIL'}
-        </div>
-        <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] font-bold ${
-          testsRan ? 'bg-blue-500/15 border border-blue-500/30 text-blue-300' : 'bg-white/5 border border-white/10 text-white/30'
-        }`}>
-          <CheckCircle2 size={10} />
-          Tests {testsRan ? 'Ran' : 'Skipped'}
-        </div>
-        <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] font-bold ${
-          riskLevel === 'HIGH' ? 'bg-orange-500/15 border border-orange-500/30 text-orange-300' : 'bg-white/5 border border-white/10 text-white/40'
-        }`}>
-          Risk: {riskLevel}
-        </div>
+  if (!diff) {
+    return (
+      <div className="rounded-xl border border-white/8 bg-[#0c0e14] p-4 text-center text-[11px] text-white/40">
+        No code diff available.
       </div>
-
-      {/* Changed Files */}
-      {files.length > 0 && (
-        <div className="bg-[#0f1117] rounded-xl border border-white/8 p-3">
-          <div className="flex items-center gap-1.5 mb-2">
-            <FileCode2 size={11} className="text-amber-400" />
-            <span className="text-[9px] font-bold uppercase tracking-wider text-white/50">Changed Files ({files.length})</span>
-          </div>
-          <div className="flex flex-col gap-1">
-            {files.map((f, i) => (
-              <div key={i} className="flex items-center gap-2 px-2 py-1 rounded-md bg-white/3 border border-white/6">
-                <span className="text-emerald-400 text-[9px] font-bold">M</span>
-                <span className="text-[9.5px] text-white/60 font-mono truncate">{f}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Code Diff */}
-      {diff && (
-        <div className="bg-[#0c0e14] rounded-xl border border-white/8 overflow-hidden">
-          <div className="flex items-center gap-1.5 px-3 py-2 border-b border-white/6 bg-[#0f1117]">
-            <FileDiff size={11} className="text-blue-400" />
-            <span className="text-[9px] font-bold uppercase tracking-wider text-white/50">Code Diff</span>
-          </div>
-          <div className="overflow-y-auto max-h-[300px] flex flex-col">
-            {diff.split('\n').map((line, idx) => renderDiffLine(line, idx))}
-          </div>
-        </div>
-      )}
-
-      {/* Linked ACs */}
-      {(devData.linked_ac_ids || []).length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {(devData.linked_ac_ids || []).map((ac, i) => (
-            <span key={i} className="px-2 py-0.5 rounded-md bg-purple-500/10 border border-purple-500/20 text-[9px] text-purple-300 font-mono">
-              {ac}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Implementation Plan (collapsed) */}
-      {devData.implementation_plan && (
-        <details className="bg-[#0f1117] rounded-xl border border-white/8 overflow-hidden">
-          <summary className="px-3 py-2 text-[9px] font-bold uppercase tracking-wider text-white/40 cursor-pointer hover:text-white/60 list-none flex items-center justify-between">
-            <span>Implementation Plan</span>
-            <span className="text-[8px]">▾</span>
-          </summary>
-          <pre className="px-3 pb-3 text-[10px] text-white/50 whitespace-pre-wrap leading-relaxed font-mono max-h-[200px] overflow-y-auto">
-            {devData.implementation_plan}
-          </pre>
-        </details>
-      )}
+    );
+  }
+  return (
+    <div className="rounded-xl border border-white/8 bg-[#0c0e14] overflow-hidden">
+      <div className="flex items-center gap-1.5 border-b border-white/6 bg-[#0f1117] px-3 py-2">
+        <FileDiff size={11} className="text-blue-400" />
+        <span className="text-[9px] font-bold uppercase tracking-wider text-white/50">Code Diff</span>
+      </div>
+      <div className="max-h-[300px] flex-col overflow-y-auto">
+        {diff.split('\n').map((line, idx) => renderDiffLine(line, idx))}
+      </div>
     </div>
   );
 }
@@ -712,9 +646,7 @@ export default function AgentOutputPanel({ agent, gate, taskId, sessionId, phase
   );
 
   const hasDevPreview = agent === 'DEV' && devData && (
-    !!devData.patch_diff || !!devData.mock_code_diff ||
-    (devData.changed_files && devData.changed_files.length > 0) ||
-    !!devData.implementation_plan
+    !!devData.patch_diff || !!devData.mock_code_diff
   );
 
   return (

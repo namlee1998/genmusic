@@ -1,4 +1,5 @@
 const prisma = require('../config/database');
+const { publishEvent } = require('../services/eventPublisher');
 
 function serializeJson(value, fallback = null) {
   if (value === undefined) return fallback;
@@ -18,6 +19,16 @@ function parseJson(value, fallback = null) {
 
 class TaskModel {
   static async create(data) {
+    // Allocate the canonical task_queued envelope BEFORE the transaction so
+    // it carries the per-session sequence; the envelope is then persisted to
+    // AgentEvent in the same transaction as the Task row.
+    const envelope = data.sessionId
+      ? await publishEvent(
+        'task_started',
+        { projectId: data.projectId, sessionId: data.sessionId, taskId: data.id, role: null },
+        { stage: data.type, lifecycleType: 'task_queued' },
+      )
+      : null;
     const record = await prisma.$transaction(async (tx) => {
       const task = await tx.task.create({
         data: {
@@ -40,16 +51,36 @@ class TaskModel {
           maxAttempts: data.maxAttempts || 1,
         },
       });
-      await tx.agentEvent.create({
-        data: {
-          taskId: task.id,
-          projectId: task.projectId,
-          sequence: 1,
-          type: 'task_queued',
-          actor: 'orchestrator',
-          payload: JSON.stringify({ stage: task.type }),
-        },
-      });
+      if (envelope) {
+        await tx.agentEvent.create({
+          data: {
+            taskId: task.id,
+            projectId: task.projectId,
+            sessionId: envelope.sessionId,
+            sequence: envelope.sequence,
+            type: 'task_queued',
+            actor: 'orchestrator',
+            payload: JSON.stringify({ stage: task.type }),
+            envelope: JSON.stringify(envelope),
+          },
+        });
+      } else {
+        // Pre-session-bound task (legacy tests only) — fall back to a
+        // legacy AgentEvent row carrying no envelope and an arbitrary
+        // sequence. The legacy replay fallback in SdlcController reads
+        // these rows through the controller's legacy replay helper.
+        await tx.agentEvent.create({
+          data: {
+            taskId: task.id,
+            projectId: task.projectId,
+            sessionId: null,
+            sequence: 1,
+            type: 'task_queued',
+            actor: 'orchestrator',
+            payload: JSON.stringify({ stage: task.type }),
+          },
+        });
+      }
       return task;
     });
     return this._map(record);

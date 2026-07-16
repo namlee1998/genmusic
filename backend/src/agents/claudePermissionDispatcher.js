@@ -156,10 +156,11 @@ async function waitForGate(taskId, gateRequest) {
 }
 
 async function handleQuestion(ctx) {
-  const { taskId, projectId, role, input, options, audit } = ctx;
+  const { taskId, projectId, sessionId, role, input, options, audit } = ctx;
   audit({ kind: 'GATE_QUESTION', role, detail: 'asked clarifying questions', toolName: 'AskUserQuestion' });
   const gate = gateBridge.requestGate({
     taskId,
+    sessionId,
     projectId,
     role,
     kind: 'question',
@@ -187,7 +188,7 @@ async function handleQuestion(ctx) {
 }
 
 async function handleTool(ctx, decision) {
-  const { taskId, projectId, role, toolName, input, options, audit } = ctx;
+  const { taskId, projectId, sessionId, role, toolName, input, options, audit } = ctx;
   if (decision.tier === 'auto') {
     audit({
       kind: 'GATE_AUTO',
@@ -222,6 +223,7 @@ async function handleTool(ctx, decision) {
   });
   const gate = gateBridge.requestGate({
     taskId,
+    sessionId,
     projectId,
     role,
     kind: 'tool',
@@ -249,6 +251,7 @@ async function dispatch({
   input = {},
   options = {},
   taskId,
+  sessionId = null,
   projectId = null,
   role,
   scope = {},
@@ -259,12 +262,12 @@ async function dispatch({
   }
 
   if (toolName === 'AskUserQuestion') {
-    return handleQuestion({ toolName, input, options, taskId, projectId, role, scope, audit });
+    return handleQuestion({ toolName, input, options, taskId, sessionId, projectId, role, scope, audit });
   }
 
   const readOnly = classifyReadOnly(toolName, input);
   const decision = readOnly || riskClassifier.classifyAction(toolName, input, scope);
-  return handleTool({ toolName, input, options, taskId, projectId, role, scope, audit }, decision);
+  return handleTool({ toolName, input, options, taskId, sessionId, projectId, role, scope, audit }, decision);
 }
 
 module.exports = {

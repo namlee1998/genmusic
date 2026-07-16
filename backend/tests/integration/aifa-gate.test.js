@@ -8,11 +8,12 @@ jest.mock('uuid', () => { let n = 0; return { v4: () => `uuid-${++n}` }; });
 
 const riskClassifier = require('../../src/services/riskClassifier');
 const gateBridge = require('../../src/services/gateBridge');
+const eventBus = require('../../src/services/eventBus');
 const repoService = require('../../src/services/repoService');
 
 beforeAll(() => { process.env.MOCK_SCENARIO = 'happy_path'; });
 afterAll(() => { delete process.env.MOCK_SCENARIO; });
-afterEach(() => gateBridge._clearAll());
+afterEach(() => { gateBridge._clearAll(); eventBus._clearAll(); });
 
 describe('T2.1 — riskClassifier tiers', () => {
   const cases = [
@@ -62,17 +63,21 @@ describe('T2.2 — gateBridge idempotency + watchdog', () => {
     expect(gateBridge.listPending({})).toHaveLength(2);
   });
 
-  test('gate_pending is pushed directly to task subscribers after persistence', async () => {
+  test('gate_pending is pushed directly to session subscribers after persistence', async () => {
     const events = [];
-    const unsubscribe = gateBridge.subscribe('task-live', (event, data) => events.push({ event, data }));
-    const { ready } = gateBridge.requestGate({ taskId: 'task-live', role: 'dev-agent', kind: 'tool', payload: { file_path: 'src/a.js' } });
+    const unsubscribe = eventBus.subscribe('sess-live', (envelope) => events.push({ envelope }));
+    const { ready } = gateBridge.requestGate({ sessionId: 'sess-live', projectId: 'proj-live', taskId: 'task-live', role: 'dev-agent', kind: 'tool', payload: { file_path: 'src/a.js' } });
     await ready;
     unsubscribe();
 
     expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({
-      event: 'gate_pending',
-      data: { taskId: 'task-live', role: 'dev-agent', kind: 'tool', status: 'pending' },
+    const env = events[0].envelope;
+    expect(env.type).toBe('gate_pending');
+    expect(env.payload.gate).toMatchObject({
+      taskId: 'task-live',
+      role: 'dev-agent',
+      kind: 'tool',
+      status: 'pending',
     });
   });
 
@@ -158,5 +163,278 @@ describe('T4.1 / T5.1 — route classification + three-layer validation', () => 
     const out = await svc._buildMockOutput({ id: 't', type: 'po-agent' }, { featureRequest: { title: 'Add Google login', description: 'OAuth 2.0 sign-in' } });
     const summary = svc._threeLayerSummary({ type: 'po-agent' }, out);
     expect(summary.ok).toBe(true);
+  });
+});
+
+// §19.8 verification step 2 + step 5 — FINAL_RELEASE re-architecture:
+// pipeline_completed must NOT fire at QA approval; the FINAL_RELEASE gate
+// must be created; awaiting_release must be persisted; the release path
+// must NEVER invoke an agent runner.
+describe('§19.8 — FINAL_RELEASE re-architecture', () => {
+  let svc;
+  let eventPublisher;
+  let gateBridge;
+  let Task;
+  let PipelineSession;
+  let HitlDecision;
+  let AgentArtifact;
+  let agentRunnerSpies;
+
+  beforeEach(() => {
+    jest.resetModules();
+
+    // Spy on agent runners — they MUST NOT be called during FINAL_RELEASE.
+    // We stub the agentDispatcher + SdlcWorkflowService.run* methods; the
+    // fake dispatch is a no-op so any unintended invocation is detectable.
+    agentRunnerSpies = {
+      runArchitectureAgent: jest.fn(async () => null),
+      runPOAgent: jest.fn(async () => null),
+      runUXAgent: jest.fn(async () => null),
+      runDEVAgent: jest.fn(async () => null),
+      runQAAgent: jest.fn(async () => null),
+    };
+
+    jest.doMock('../../src/services/agentDispatcher', () => agentRunnerSpies);
+
+    // Stub eventPublisher.publishEvent so we can assert on what fires.
+    eventPublisher = require('../../src/services/eventPublisher');
+    jest.spyOn(eventPublisher, 'publishEvent').mockResolvedValue(undefined);
+
+    // Stub models the resolveOutputReviewGate path touches.
+    const qaTask = {
+      id: 'qa-1',
+      type: 'qa-agent',
+      projectId: 'proj-1',
+      sessionId: 'sess-1',
+      status: 'completed',
+      agentOutput: { qa_report: { coverage: 92 }, blocker_count: 0 },
+      approvedOutput: { qa_report: { coverage: 92 } },
+      result: { gateRecommendation: 'PASS' },
+      outputVersion: 1,
+      observability: {},
+    };
+
+    Task = {
+      findById: jest.fn(async (id) => (id === qaTask.id ? qaTask : null)),
+      update: jest.fn(async () => qaTask),
+      commitTask: jest.fn(async () => undefined),
+    };
+    jest.doMock('../../src/models/Task', () => Task);
+
+    PipelineSession = {
+      findById: jest.fn(async (id) => (id === 'sess-1'
+        ? { id: 'sess-1', projectId: 'proj-1', status: 'running', repoPath: '/tmp/repo' }
+        : null)),
+      update: jest.fn(async () => undefined),
+    };
+    jest.doMock('../../src/models/PipelineSession', () => PipelineSession);
+
+    HitlDecision = {
+      create: jest.fn(async (row) => ({ id: row.id || 'hitl-x', ...row })),
+    };
+    jest.doMock('../../src/models/HitlDecision', () => HitlDecision);
+
+    AgentArtifact = {
+      setStatusByTaskId: jest.fn(async () => undefined),
+    };
+    jest.doMock('../../src/models/AgentArtifact', () => AgentArtifact);
+
+    // Stub PendingGate so gateBridge.requestGate/resolveGate can persist
+    // without a real DB.
+    jest.doMock('../../src/models/PendingGate', () => ({
+      create: jest.fn(async () => undefined),
+      resolve: jest.fn(async () => undefined),
+      findById: jest.fn(async () => null),
+      markPendingInterrupted: jest.fn(async () => 0),
+      listInterrupted: jest.fn(async () => []),
+    }));
+
+    // Stub taskLifecycle to a no-op so resolveOutputReviewGate doesn't try
+    // to move tasks through real lifecycle states.
+    jest.doMock('../../src/services/taskLifecycleService', () => ({
+      transitionIfPresent: jest.fn(async () => undefined),
+    }));
+
+    // Stub the repo helpers the QA-approve path touches; none of them should
+    // do real work.
+    jest.doMock('../../src/services/repoService', () => ({
+      commitAndPushOnApprove: jest.fn(async () => ({ committed: true, pushed: false, pushError: null })),
+      repoPathFor: jest.fn(() => '/tmp/repo'),
+      git: jest.fn(async () => ''),
+    }));
+
+    // Stub workflowReport helpers — _buildReleaseEvidenceSummary needs to
+    // return a deterministic evidence object.
+    jest.doMock('../../src/services/workflowReport', () => ({
+      writeReleaseBundle: jest.fn(async () => ({ outputs: [], outputDir: '/tmp/bundle' })),
+      findPreviousBundle: jest.fn(async () => null),
+      removeGitTracked: jest.fn(async () => undefined),
+      buildFinalMarkdown: jest.fn(() => ''),
+    }));
+
+    // Internal helpers that should be called during the QA-approve path.
+    svc = require('../../src/services/SdlcWorkflowService');
+    jest.spyOn(svc, '_recordApprovedHandoff').mockResolvedValue(undefined);
+    jest.spyOn(svc, '_startNextAgentIfAvailable').mockResolvedValue(undefined);
+    jest.spyOn(svc, '_buildReleaseEvidenceSummary').mockResolvedValue({
+      feature: 'login',
+      risk: null,
+      versions: {},
+      build_result: null,
+      security_gate: null,
+      qa_gate: 'PASS',
+      coverage_percentage: 92,
+      open_blockers: [],
+    });
+    jest.spyOn(svc, '_getRepoContext').mockResolvedValue({
+      repoPath: '/tmp/repo',
+      repoUrl: 'https://github.com/team6/user-repo',
+      workingBranch: 'aifa/test',
+      baseBranch: 'main',
+    });
+
+    gateBridge = require('../../src/services/gateBridge');
+    // Reset gateBridge internal state for each test.
+    gateBridge._clearAll();
+
+    // Pre-register an output_review gate so resolveOutputReviewGate's
+    // `hasPending` check passes. Capture the real approvalId so each test
+    // resolves the same pending record. We also stub the underlying
+    // PendingGate model to avoid any DB writes.
+    const created = gateBridge.requestGate({
+      taskId: 'qa-1',
+      sessionId: 'sess-1',
+      projectId: 'proj-1',
+      role: 'qa-agent',
+      kind: 'output_review',
+      payload: {},
+    });
+    registeredApprovalId = created.approvalId;
+    userCounter = 0;
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.dontMock('../../src/services/agentDispatcher');
+    jest.dontMock('../../src/services/repoService');
+    jest.dontMock('../../src/services/workflowReport');
+    jest.dontMock('../../src/models/Task');
+    jest.dontMock('../../src/models/PipelineSession');
+    jest.dontMock('../../src/models/HitlDecision');
+    jest.dontMock('../../src/models/AgentArtifact');
+  });
+
+  let registeredApprovalId;
+  let userCounter;
+
+  function resolveApprovalAs(userNum, overrides = {}) {
+    return svc.resolveOutputReviewGate(
+      { approvalId: registeredApprovalId, action: 'approve', comment: 'ok', ...overrides },
+      { id: `user-${userNum}` },
+    );
+  }
+
+  test('QA approval does NOT emit pipeline_completed (moved to FINAL_RELEASE)', async () => {
+    await resolveApprovalAs(1);
+    const calls = eventPublisher.publishEvent.mock.calls.map((c) => c[0]);
+    expect(calls).not.toContain('pipeline_completed');
+  });
+
+  test('QA approval marks the session awaiting_release', async () => {
+    await resolveApprovalAs(2);
+    expect(PipelineSession.update).toHaveBeenCalledWith(
+      'sess-1',
+      expect.objectContaining({ status: 'awaiting_release' }),
+    );
+  });
+
+  test('QA approval creates a FINAL_RELEASE gate with role=release, kind=release', async () => {
+    await resolveApprovalAs(3);
+    const releaseGate = gateBridge.listPending({ projectId: 'proj-1' })
+      .find((g) => g.kind === 'release');
+    expect(releaseGate).toBeDefined();
+    expect(releaseGate.role).toBe('release');
+    expect(releaseGate.payload).toHaveProperty('evidence');
+    expect(releaseGate.payload.repoContext.repoUrl).not.toBe('https://github.com/octocat/Hello-World');
+    expect(releaseGate.payload.repoContext.repoUrl).toBe('https://github.com/team6/user-repo');
+  });
+
+  test('QA approval throws 500 if session has no cloned repository workspace', async () => {
+    svc._getRepoContext.mockResolvedValueOnce(null);
+    await expect(resolveApprovalAs(4)).rejects.toMatchObject({ statusCode: 500 });
+  });
+
+  test('FINAL_RELEASE path is non-executing — no agent runner is invoked', async () => {
+    await resolveApprovalAs(5);
+    for (const [, spy] of Object.entries(agentRunnerSpies)) {
+      expect(spy).not.toHaveBeenCalled();
+    }
+  });
+
+  // Bug 3 — the gate-creation branch must also fire when QA's
+  // gate_evaluation was not populated but the agent's test_run_report shows
+  // a clean run. This mirrors releaseManager.qaGatePassed's fallback path.
+  test('QA approval with no gateRecommendation but passing test_run_report creates FINAL_RELEASE gate', async () => {
+    const TaskMod = require('../../src/models/Task');
+    TaskMod.findById.mockImplementation(async (id) => (id === 'qa-1' ? {
+      id: 'qa-1',
+      type: 'qa-agent',
+      projectId: 'proj-1',
+      sessionId: 'sess-1',
+      status: 'completed',
+      agentOutput: {
+        qa_report: { coverage: 92 },
+        blocker_count: 0,
+        test_run_report: { executed: true, total: 5, passed: 5, failed: 0, logs: 'ok' },
+      },
+      approvedOutput: { qa_report: { coverage: 92 } },
+      // No gateRecommendation populated — the regression case from the live run.
+      result: {},
+      outputVersion: 1,
+      observability: {},
+    } : null));
+
+    await resolveApprovalAs(6);
+
+    expect(PipelineSession.update).toHaveBeenCalledWith(
+      'sess-1',
+      expect.objectContaining({ status: 'awaiting_release' }),
+    );
+    const releaseGate = gateBridge.listPending({ projectId: 'proj-1' })
+      .find((g) => g.kind === 'release');
+    expect(releaseGate).toBeDefined();
+    expect(releaseGate.role).toBe('release');
+  });
+
+  test('QA approval with FAIL gateRecommendation and failing test_run_report does NOT create FINAL_RELEASE', async () => {
+    const TaskMod = require('../../src/models/Task');
+    TaskMod.findById.mockImplementation(async (id) => (id === 'qa-1' ? {
+      id: 'qa-1',
+      type: 'qa-agent',
+      projectId: 'proj-1',
+      sessionId: 'sess-1',
+      status: 'completed',
+      agentOutput: {
+        qa_report: { coverage: 50 },
+        blocker_count: 2,
+        test_run_report: { executed: true, total: 5, passed: 3, failed: 2, logs: 'ok' },
+      },
+      approvedOutput: { qa_report: { coverage: 50 } },
+      result: { gateRecommendation: 'FAIL' },
+      outputVersion: 1,
+      observability: {},
+    } : null));
+
+    await resolveApprovalAs(7);
+
+    // session should not flip to awaiting_release
+    const updateCalls = PipelineSession.update.mock.calls;
+    const awaiting = updateCalls.find(([, payload]) => payload?.status === 'awaiting_release');
+    expect(awaiting).toBeUndefined();
+
+    // no release gate should be created
+    const releaseGate = gateBridge.listPending({ projectId: 'proj-1' })
+      .find((g) => g.kind === 'release');
+    expect(releaseGate).toBeUndefined();
   });
 });
